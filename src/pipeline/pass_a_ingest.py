@@ -44,16 +44,18 @@ def build_search_queries() -> list[str]:
     return queries
 
 
-def fetch_rss_feed(query: str) -> list[dict]:
-    """Fetch and parse a Google News RSS feed for a query."""
+def fetch_rss_feed(query_or_url: str, is_direct_url: bool = False) -> list[dict]:
+    """Fetch and parse an RSS feed."""
     import xml.etree.ElementTree as ET
 
-    url = GOOGLE_NEWS_RSS.format(query=query)
+    url = query_or_url if is_direct_url else GOOGLE_NEWS_RSS.format(query=query_or_url)
     try:
-        resp = httpx.get(url, timeout=15.0, follow_redirects=True)
+        # Some custom RSS endpoints might block default httpx User-Agent
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
         resp.raise_for_status()
     except Exception:
-        logger.warning("RSS fetch failed for query: %s", query[:50])
+        logger.warning("RSS fetch failed for: %s", url[:50])
         return []
 
     items = []
@@ -149,14 +151,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     queries = build_search_queries()
     all_items = []
 
-    # Fetch from RSS feeds
+    # Fetch from dynamic Google News feeds
     for query in queries[:20]:  # Limit queries per run to avoid rate limiting
-        items = fetch_rss_feed(query)
+        items = fetch_rss_feed(query, is_direct_url=False)
+        all_items.extend(items)
+        stats["queries_executed"] += 1
+
+    # Fetch from static hardcoded feeds (Reddit, Twitter/Xcancel)
+    static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
+    for feed_url in static_feeds:
+        items = fetch_rss_feed(feed_url, is_direct_url=True)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
     stats["items_fetched"] = len(all_items)
-    logger.info("Pass A: Fetched %d items from %d queries", len(all_items), stats["queries_executed"])
+    logger.info("Pass A: Fetched %d items from %d sources/queries", len(all_items), stats["queries_executed"])
 
     inserted = 0
     for item in all_items:

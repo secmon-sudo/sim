@@ -6,7 +6,18 @@
       "suspicious package", "hostage", "weapon", "terrorism",
       "crash landing", "mayday", "pan-pan", "fire on board",
       "bird strike", "engine failure", "depressurization",
-      "unruly passenger", "laser attack", "drone incursion"
+      "unruly passenger", "laser attack", "drone incursion",
+      "airport attack", "airport shooting", "airport bombing",
+      "airport stabbing", "airport security breach", "airport threat",
+      "airport explosion", "airport terror", "airline crew attack",
+      "airline staff assault", "flight attendant attack",
+      "flight attendant assault", "pilot assault", "pilot attacked",
+      "airline personnel attack", "ground crew attack", "hotel attack",
+      "hotel bombing", "hotel shooting", "hotel siege", "hotel explosion",
+      "hotel terror", "resort attack", "tourist hotel attack",
+      "hostage hotel", "aviation security incident", "passenger attack crew",
+      "unruly passenger assault", "airline worker attacked",
+      "airport gunfire", "airport knife", "hotel gunfire", "hotel armed"
     ],
     "ar": [
       "تهديد بقنبلة", "إطلاق نار", "اختطاف", "اقتحام مدرج",
@@ -16,7 +27,13 @@
     "tr": [
       "bomba ihbarı", "silahlı saldırı", "uçak kaçırma", "pist ihlali",
       "acil iniş", "güvenlik ihlali", "tahliye", "patlama",
-      "şüpheli paket", "rehine", "silah", "terör"
+      "şüpheli paket", "rehine", "silah", "terör",
+      "havalimanı saldırı", "havalimanı bomba", "havalimanı bıçak",
+      "havalimanı patlama", "havayolu personel saldırı", "kabin ekibi saldırı",
+      "pilot saldırı", "hostes saldırı", "otel saldırı", "otel bomba",
+      "otel patlama", "otel silahlı", "otel baskın", "otel rehine",
+      "yer hizmetleri saldırı", "havalimanı silahlı", "havalimanı terör",
+      "otel terör"
     ],
     "fr": [
       "alerte à la bombe", "tireur actif", "détournement",
@@ -26,6 +43,15 @@
   "noise_filters": [
     "flight simulator", "video game", "movie", "tv show", "book review",
     "historical", "documentary", "training exercise", "drill",
-    "anniversary of", "years ago", "fictional"
+    "anniversary of", "years ago", "fictional", "stock market", "shares",
+    "investment", "film", "novel", "game release", "years ago today",
+    "remembering the", "memorial", "commemoration", "drill exercise",
+    "simulation", "new security system", "security upgrade",
+    "security technology", "strike action", "labor dispute", "walkout",
+    "pay dispute", "delayed flight", "cancelled flight", "weather delay",
+    "hotel review", "hotel rating", "star hotel", "tourism record",
+    "travel tips", "booking", "reservation", "renovation", "grand opening",
+    "exercise", "training", "anniversary", "retrospective", "look back",
+    "on this day", "years since", "court case", "trial", "sentencing"
   ]
 }
