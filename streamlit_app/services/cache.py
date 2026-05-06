@@ -106,7 +106,7 @@ def get_pipeline_stats(_db_conn) -> dict:
         "tokens_used_24h": llm[1] if llm else 0,
         "stale_locks_1h": stale[0] if stale else 0,
         "event_counts": {row[0]: row[1] for row in event_counts} if event_counts else {},
-        "last_run": json.loads(last_run[0]) if last_run and last_run[0] else None,
+        "last_run": last_run[0] if last_run and last_run[0] else None,
         "last_run_at": last_run[1].isoformat() if last_run and last_run[1] else None,
     }
 
