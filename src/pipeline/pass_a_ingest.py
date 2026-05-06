@@ -38,9 +38,16 @@ GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid
 def build_search_queries() -> list[str]:
     """Build search queries from keywords config."""
     queries = []
+    # Aviation specific keywords
     for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
         for kw in keywords:
             queries.append(f'"{kw}" airport OR aviation')
+            
+    # Geopolitical and global conflict keywords
+    for lang, keywords in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).items():
+        for kw in keywords:
+            queries.append(f'"{kw}"')
+            
     return queries
 
 

@@ -17,12 +17,13 @@ from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classificatio
 
 logger = logging.getLogger(__name__)
 
-CLASSIFICATION_SYSTEM_PROMPT = """You are an aviation security incident classifier.
+CLASSIFICATION_SYSTEM_PROMPT = """You are a global security incident classifier.
 Analyze the following news text and extract:
 1. event_type: One of: bomb_threat, active_shooter, hijacking, runway_incursion,
    emergency_landing, bird_strike, engine_failure, fire_on_board, depressurization,
    unruly_passenger, drone_incursion, laser_attack, suspicious_package, evacuation,
-   security_incident, other_aviation_related
+   security_incident, geopolitical_conflict, military_action, missile_strike,
+   political_event, civil_unrest, terrorism, other_aviation_related
 2. sub_type: More specific classification if applicable (same codes), or null
 3. anchor_name: Airport or location name mentioned (raw text)
 4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB")

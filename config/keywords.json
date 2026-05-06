@@ -40,6 +40,19 @@
       "incursion sur piste", "atterrissage d'urgence", "évacuation"
     ]
   },
+  "geopolitical_keywords": {
+    "en": [
+      "missile strike", "military action", "airstrike", "invasion",
+      "war declared", "troops deployed", "iran israel", "ukraine russia",
+      "sudan conflict", "nuclear threat", "trump tweet iran", "assassination",
+      "military coup"
+    ],
+    "tr": [
+      "füze saldırısı", "askeri harekat", "hava saldırısı", "işgal",
+      "savaş ilanı", "asker sevkiyatı", "iran israil", "ukrayna rusya",
+      "sudan savaşı", "nükleer tehdit", "suikast", "askeri darbe"
+    ]
+  },
   "noise_filters": [
     "flight simulator", "video game", "movie", "tv show", "book review",
     "historical", "documentary", "training exercise", "drill",
