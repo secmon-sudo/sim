@@ -17,20 +17,38 @@ from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classificatio
 
 logger = logging.getLogger(__name__)
 
-CLASSIFICATION_SYSTEM_PROMPT = """You are a global security incident classifier.
+CLASSIFICATION_SYSTEM_PROMPT = """You are a global security incident classifier for aviation and critical infrastructure.
 Analyze the following news text and extract:
-1. event_type: One of: bomb_threat, active_shooter, hijacking, runway_incursion,
+
+1. event_type: One of:
+   bomb_threat, active_shooter, hijacking, runway_incursion,
    emergency_landing, bird_strike, engine_failure, fire_on_board, depressurization,
-   unruly_passenger, drone_incursion, laser_attack, suspicious_package, evacuation,
-   security_incident, geopolitical_conflict, military_action, missile_strike,
-   political_event, civil_unrest, terrorism, other_aviation_related
+   unruly_passenger, drone_incursion, drone_attack_critical_infra, drone_airport_attack,
+   laser_attack, suspicious_package, evacuation,
+   security_incident, aviation_personnel_attack, pilot_attacked, cabin_crew_attacked, ground_staff_attacked,
+   geopolitical_conflict, military_action, missile_strike, war_escalation, ceasefire_violation, civilian_casualties,
+   political_event, civil_unrest, terrorism, african_terrorism, insurgency_attack, extremist_violence, jihadist_attack,
+   mass_casualty_event, mass_shooting, mass_stabbing, suicide_bombing, vehicle_ramming,
+   resort_attack, beach_attack, tourist_bus_attack, cruise_ship_attack,
+   other_aviation_related
+
 2. sub_type: More specific classification if applicable (same codes), or null
-3. anchor_name: Airport or location name mentioned (raw text)
-4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB")
+3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text)
+4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO")
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
 6. time_certainty: One of: same_day, previous_day, this_week, approximate, unknown
 7. storyline_hint: A short phrase describing the core event for grouping related articles
 8. confidence: Your confidence in the classification (0.0 to 1.0)
+9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
+
+PRIORITY RULES — Apply these strictly:
+- Aviation personnel attacked (pilot, cabin crew, ground staff, baggage handler, TSA, security, check-in agent, air traffic controller) → HIGH priority, event_type: aviation_personnel_attack or sub_type
+- Drone attack on airport, military base, power plant, port, refinery → event_type: drone_attack_critical_infra or sub_type
+- Mass casualty: 3+ deaths OR 10+ injuries → event_type: mass_casualty_event or sub_type, severity is higher
+- African terrorism (Mali, Burkina Faso, Niger, Somalia, Nigeria, Sahel) → event_type: african_terrorism or sub_type
+- War escalation, ceasefire violation, civilian casualties in conflict zones → event_type: war_escalation, ceasefire_violation, civilian_casualties
+- Generic street crime (man stabbed, woman attacked, bar fight) with NO aviation/critical infrastructure link → LOW priority, use other_aviation_related
+- Resort, hotel, beach, cruise ship, tourist bus attacks → event_type: resort_attack or sub_type
 
 Respond ONLY with valid JSON. No markdown, no explanation."""
 

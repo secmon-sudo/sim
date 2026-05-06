@@ -17,12 +17,29 @@
       "hotel terror", "resort attack", "tourist hotel attack",
       "hostage hotel", "aviation security incident", "passenger attack crew",
       "unruly passenger assault", "airline worker attacked",
-      "airport gunfire", "airport knife", "hotel gunfire", "hotel armed"
+      "airport gunfire", "airport knife", "hotel gunfire", "hotel armed",
+      "drone strike airport", "UAV attack", "drone bombing",
+      "drone swarm", "counter-drone", "drone sighting runway",
+      "drone attack military base", "drone attack power plant",
+      "drone attack port", "drone attack refinery",
+      "mass shooting", "mass stabbing", "mass casualty",
+      "multiple fatalities", "massacre", "suicide bombing",
+      "vehicle ramming", "IED explosion", "multiple injured",
+      "dozens killed", "many killed", "several killed",
+      "ground staff stabbed", "cabin crew assaulted",
+      "airport worker killed", "baggage handler attacked",
+      "TSA officer assaulted", "security guard airport",
+      "check-in agent attacked", "ramp agent injured",
+      "air traffic controller threat", "ground handling attacked",
+      "resort bombing", "beach attack", "tourist bus attack",
+      "cruise ship attack", "tourist area attack"
     ],
     "ar": [
       "تهديد بقنبلة", "إطلاق نار", "اختطاف", "اقتحام مدرج",
       "هبوط اضطراري", "اختراق أمني", "إخلاء", "انفجار",
-      "طرد مشبوه", "رهينة", "سلاح", "إرهاب"
+      "طرد مشبوه", "رهينة", "سلاح", "إرهاب",
+      "هجوم طائرة بدون طيار", "هجوم جماعي", "هجوم مطار",
+      "هجوم فندق", "هجوم منتجع"
     ],
     "tr": [
       "bomba ihbarı", "silahlı saldırı", "uçak kaçırma", "pist ihlali",
@@ -33,11 +50,17 @@
       "pilot saldırı", "hostes saldırı", "otel saldırı", "otel bomba",
       "otel patlama", "otel silahlı", "otel baskın", "otel rehine",
       "yer hizmetleri saldırı", "havalimanı silahlı", "havalimanı terör",
-      "otel terör"
+      "otel terör", "drone saldırısı", "insansız hava aracı saldırısı",
+      "toplu saldırı", "çok sayıda ölü", "intihar saldırısı",
+      "personel bıçaklandı", "personel öldürüldü",
+      "yer hizmetleri personeli saldırı", "kabin görevlisi saldırı",
+      "bagaj görevlisi saldırı", "pilot bıçaklandı"
     ],
     "fr": [
       "alerte à la bombe", "tireur actif", "détournement",
-      "incursion sur piste", "atterrissage d'urgence", "évacuation"
+      "incursion sur piste", "atterrissage d'urgence", "évacuation",
+      "attaque de drone", "attaque de masse", "attaque aéroport",
+      "personnel aéroportuaire agressé", "attaque d'hôtel"
     ]
   },
   "geopolitical_keywords": {
@@ -45,12 +68,56 @@
       "missile strike", "military action", "airstrike", "invasion",
       "war declared", "troops deployed", "iran israel", "ukraine russia",
       "sudan conflict", "nuclear threat", "trump tweet iran", "assassination",
-      "military coup"
+      "military coup", "war escalation", "ceasefire broken",
+      "humanitarian crisis", "refugee crisis", "airstrike civilian",
+      "artillery shelling", "frontline", "troop buildup",
+      "border clash", "armed conflict", "jihadist attack",
+      "Boko Haram", "Al-Shabaab", "Sahel crisis", "Mali attack",
+      "Burkina Faso attack", "Niger coup", "Somalia bombing",
+      "Nigeria abduction", "ISIS Africa", "Ansar al-Islam",
+      "JNIM", "Wagner Africa", "African terrorism",
+      "extremist violence", "insurgency attack", "terror cell",
+      "suicide bomber", "improvised explosive device",
+      "IED attack", "car bomb", "truck bomb", "VBIED"
     ],
     "tr": [
       "füze saldırısı", "askeri harekat", "hava saldırısı", "işgal",
       "savaş ilanı", "asker sevkiyatı", "iran israil", "ukrayna rusya",
-      "sudan savaşı", "nükleer tehdit", "suikast", "askeri darbe"
+      "sudan savaşı", "nükleer tehdit", "suikast", "askeri darbe",
+      "savaş tırmanışı", "ateşkes ihlali", "insani kriz",
+      "mülteci krizi", "sivil hava saldırısı", "topçu bombardımanı",
+      "cephe hattı", "asker yığınağı", "sınır çatışması",
+      "silahlı çatışma", "cihatçı saldırı", "Boko Haram",
+      "El-Şebab", "Sahel krizi", "Mali saldırı",
+      "Burkina Faso saldırı", "Nijer darbesi", "Somali bombalama",
+      "Nijerya kaçırma", "IŞİD Afrika", "Ansarül İslam",
+      "JNIM", "Wagner Afrika", "Afrika terörizmi"
+    ],
+    "ar": [
+      "ضربة صاروخية", "عمل عسكري", "غارة جوية", "غزو",
+      "إعلان حرب", "نشر قوات", "إيران إسرائيل", "أوكرانيا روسيا",
+      "صراع السودان", "تهديد نووي", "اغتيال", "انقلاب عسكري",
+      "تصعيد حرب", "انتهاك وقف إطلاق النار", "أزمة إنسانية",
+      "أزمة لاجئين", "غارة على مدنيين", "قصف مدفعي",
+      "خط الجبهة", "تجمع قوات", "اشتباك حدودي",
+      "صراع مسلح", "هجوم جهادي", "بوكو حرام",
+      "الشباب", "أزمة الساحل", "هجوم مالي",
+      "هجوم بوركينا فاسو", "انقلاب النيجر", "تفجير الصومال",
+      "اختطاف نيجيريا", "داعش أفريقيا", "أنصار الإسلام",
+      "جماعة نصرة الإسلام والمسلمين", "فاغنر أفريقيا", "الإرهاب الأفريقي"
+    ],
+    "fr": [
+      "frappe de missile", "action militaire", "frappe aérienne", "invasion",
+      "guerre déclarée", "troupes déployées", "iran israël", "ukraine russie",
+      "conflit soudan", "menace nucléaire", "assassinat", "coup d'état militaire",
+      "escalade de guerre", "cessez-le-feu rompu", "crise humanitaire",
+      "crise des réfugiés", "frappe aérienne civile", "bombardement d'artillerie",
+      "ligne de front", "accumulation de troupes", "affrontement frontalier",
+      "conflit armé", "attaque djihadiste", "Boko Haram",
+      "Al-Shabaab", "crise du Sahel", "attaque au Mali",
+      "attaque au Burkina Faso", "coup d'état au Niger", "attentat en Somalie",
+      "enlèvement au Nigeria", "EI Afrique", "Ansar al-Islam",
+      "JNIM", "Wagner Afrique", "terrorisme africain"
     ]
   },
   "noise_filters": [
@@ -65,6 +132,11 @@
     "hotel review", "hotel rating", "star hotel", "tourism record",
     "travel tips", "booking", "reservation", "renovation", "grand opening",
     "exercise", "training", "anniversary", "retrospective", "look back",
-    "on this day", "years since", "court case", "trial", "sentencing"
+    "on this day", "years since", "court case", "trial", "sentencing",
+    "drone delivery", "drone photography", "racing drone", "drone racing",
+    "drone hobby", "recreational drone", "drone show", "drone light show",
+    "man stabbed", "woman attacked", "woman stabbed", "man attacked",
+    "person stabbed", "individual attacked", "street fight",
+    "bar fight", "domestic dispute", "robbery victim", "mugging"
   ]
 }

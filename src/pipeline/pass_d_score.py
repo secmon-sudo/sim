@@ -9,6 +9,7 @@ Optimized to fetch recent events once (batch) instead of N+1 per event.
 import json
 import logging
 import uuid
+from pathlib import Path
 
 from src.core.alerts import build_suppression_key, evaluate_alert_tier, is_suppressed, record_suppression
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
@@ -17,18 +18,52 @@ from src.services.telegram_notifier import send_telegram_alert
 
 logger = logging.getLogger(__name__)
 
-# Scoring constants from blueprint
-PROXIMITY_BONUS = 30
-CZIB_BONUS = 20
-MAX_SEVERITY = 100
-LLM_CONF_WEIGHT = 0.4
-ANCHOR_CONF_WEIGHT = 0.3
-DIVERSITY_WEIGHT = 0.3
+# Load settings
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
+with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
+    _SETTINGS = json.load(f)
+
+_SCORING = _SETTINGS.get("scoring", {})
+PROXIMITY_BONUS = _SCORING.get("proximity_bonus", 30)
+CZIB_BONUS = _SCORING.get("czib_bonus", 20)
+MAX_SEVERITY = _SCORING.get("max_severity", 100)
+LLM_CONF_WEIGHT = _SCORING.get("llm_confidence_weight", 0.4)
+ANCHOR_CONF_WEIGHT = _SCORING.get("anchor_confidence_weight", 0.3)
+DIVERSITY_WEIGHT = _SCORING.get("diversity_weight", 0.3)
+
+# Casualty bonus config
+_CASUALTY = _SCORING.get("casualty_bonus", {})
+CASUALTY_DEATHS_THRESHOLD = _CASUALTY.get("deaths_threshold", 3)
+CASUALTY_INJURIES_THRESHOLD = _CASUALTY.get("injuries_threshold", 10)
+CASUALTY_BONUS_POINTS = _CASUALTY.get("bonus_points", 20)
 
 
-def compute_severity(event_type: str, anchor_data: dict | None, db_conn) -> int:
+def _extract_casualties(llm_parsed: dict) -> dict:
+    """Extract casualty counts from LLM parsed output."""
+    casualties = llm_parsed.get("casualties") if isinstance(llm_parsed.get("casualties"), dict) else {}
+    if casualties is None:
+        casualties = {}
+    return {
+        "deaths": int(casualties.get("deaths") or 0),
+        "injuries": int(casualties.get("injuries") or 0),
+        "missing": int(casualties.get("missing") or 0),
+    }
+
+
+def compute_casualty_bonus(llm_parsed: dict) -> int:
+    """Compute severity bonus based on casualty counts."""
+    counts = _extract_casualties(llm_parsed)
+    deaths = counts.get("deaths", 0)
+    injuries = counts.get("injuries", 0)
+
+    if deaths >= CASUALTY_DEATHS_THRESHOLD or injuries >= CASUALTY_INJURIES_THRESHOLD:
+        return CASUALTY_BONUS_POINTS
+    return 0
+
+
+def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_parsed: dict | None = None) -> int:
     """
-    Severity = Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20). Max 100.
+    Severity = Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20) + Casualty_Bonus (+20). Max 100.
     """
     base = 20  # default
     try:
@@ -48,6 +83,10 @@ def compute_severity(event_type: str, anchor_data: dict | None, db_conn) -> int:
             score += PROXIMITY_BONUS
         if anchor_data.get("czib_flag"):
             score += CZIB_BONUS
+
+    # Mass casualty bonus
+    if llm_parsed:
+        score += compute_casualty_bonus(llm_parsed)
 
     return min(score, MAX_SEVERITY)
 
@@ -175,8 +214,8 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         # 1. Resolve anchor
         anchor = resolve_anchor_for_event(db_conn, event)
 
-        # 2. Compute severity
-        severity = compute_severity(event["event_type"], anchor, db_conn)
+        # 2. Compute severity (with casualty bonus)
+        severity = compute_severity(event["event_type"], anchor, db_conn, llm_parsed)
 
         # 3. Compute confidence
         llm_conf = event["llm_parsed"].get("confidence", 0.5)

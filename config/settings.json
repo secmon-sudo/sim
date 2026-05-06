@@ -19,7 +19,11 @@
       {"gl": "AE", "hl": "en", "ceid": "AE:en", "label": "mena_en"},
       {"gl": "IN", "hl": "en", "ceid": "IN:en", "label": "india"},
       {"gl": "AU", "hl": "en", "ceid": "AU:en", "label": "apac"},
-      {"gl": "JP", "hl": "en", "ceid": "JP:en", "label": "japan"}
+      {"gl": "JP", "hl": "en", "ceid": "JP:en", "label": "japan"},
+      {"gl": "NG", "hl": "en", "ceid": "NG:en", "label": "nigeria"},
+      {"gl": "ZA", "hl": "en", "ceid": "ZA:en", "label": "south_africa"},
+      {"gl": "KE", "hl": "en", "ceid": "KE:en", "label": "kenya"},
+      {"gl": "SA", "hl": "ar", "ceid": "SA:ar", "label": "saudi"}
     ]
   },
   "dedup": {
@@ -34,7 +38,12 @@
     "max_severity": 100,
     "llm_confidence_weight": 0.4,
     "anchor_confidence_weight": 0.3,
-    "diversity_weight": 0.3
+    "diversity_weight": 0.3,
+    "casualty_bonus": {
+      "deaths_threshold": 3,
+      "injuries_threshold": 10,
+      "bonus_points": 20
+    }
   },
   "storyline": {
     "jaccard_threshold": 0.4,
