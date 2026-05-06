@@ -1,0 +1,31 @@
+{
+  "emergency_keywords": {
+    "en": [
+      "bomb threat", "active shooter", "hijack", "runway incursion",
+      "emergency landing", "security breach", "evacuation", "explosion",
+      "suspicious package", "hostage", "weapon", "terrorism",
+      "crash landing", "mayday", "pan-pan", "fire on board",
+      "bird strike", "engine failure", "depressurization",
+      "unruly passenger", "laser attack", "drone incursion"
+    ],
+    "ar": [
+      "تهديد بقنبلة", "إطلاق نار", "اختطاف", "اقتحام مدرج",
+      "هبوط اضطراري", "اختراق أمني", "إخلاء", "انفجار",
+      "طرد مشبوه", "رهينة", "سلاح", "إرهاب"
+    ],
+    "tr": [
+      "bomba ihbarı", "silahlı saldırı", "uçak kaçırma", "pist ihlali",
+      "acil iniş", "güvenlik ihlali", "tahliye", "patlama",
+      "şüpheli paket", "rehine", "silah", "terör"
+    ],
+    "fr": [
+      "alerte à la bombe", "tireur actif", "détournement",
+      "incursion sur piste", "atterrissage d'urgence", "évacuation"
+    ]
+  },
+  "noise_filters": [
+    "flight simulator", "video game", "movie", "tv show", "book review",
+    "historical", "documentary", "training exercise", "drill",
+    "anniversary of", "years ago", "fictional"
+  ]
+}

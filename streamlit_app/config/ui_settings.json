@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "SIM — Security Incident Monitor",
+    "subtitle": "Aviation OSINT Intelligence Dashboard",
+    "page_icon": "🛡️",
+    "layout": "wide",
+    "auto_refresh_seconds": 60
+  },
+  "theme": {
+    "primary": "#6366F1",
+    "secondary": "#8B5CF6",
+    "background": "#0F172A",
+    "surface": "#1E293B",
+    "surface_light": "#334155",
+    "text_primary": "#F1F5F9",
+    "text_secondary": "#94A3B8",
+    "border": "#475569",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "error": "#EF4444",
+    "info": "#3B82F6"
+  },
+  "tiers": {
+    "CRITICAL": {
+      "color": "#DC2626",
+      "bg": "rgba(220,38,38,0.15)",
+      "icon": "🔴",
+      "label": "CRITICAL"
+    },
+    "ALERT": {
+      "color": "#EA580C",
+      "bg": "rgba(234,88,12,0.15)",
+      "icon": "🟠",
+      "label": "ALERT"
+    },
+    "WATCH": {
+      "color": "#CA8A04",
+      "bg": "rgba(202,138,4,0.15)",
+      "icon": "🟡",
+      "label": "WATCH"
+    }
+  },
+  "map": {
+    "initial_latitude": 30.0,
+    "initial_longitude": 31.0,
+    "initial_zoom": 2,
+    "style": "mapbox://styles/mapbox/dark-v11"
+  }
+}

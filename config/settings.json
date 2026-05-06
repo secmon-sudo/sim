@@ -1,0 +1,63 @@
+{
+  "pipeline": {
+    "run_interval_minutes": 30,
+    "max_events_per_run": 100,
+    "stale_lock_threshold_minutes": 15,
+    "heartbeat_interval_seconds": 60,
+    "heartbeat_max_consecutive_errors": 5
+  },
+  "dedup": {
+    "url_hash_algorithm": "sha256",
+    "maturation_window_hours": 2
+  },
+  "scoring": {
+    "proximity_bonus": 30,
+    "czib_bonus": 20,
+    "max_severity": 100,
+    "llm_confidence_weight": 0.4,
+    "anchor_confidence_weight": 0.3,
+    "diversity_weight": 0.3
+  },
+  "storyline": {
+    "jaccard_threshold": 0.4,
+    "country_match_required": true,
+    "time_window_days": 14
+  },
+  "alert": {
+    "suppression_ttl_hours": 4,
+    "tiers": {
+      "CRITICAL": {
+        "severity_min": 80,
+        "confidence_min": 0.8,
+        "anchor_confidence": ["HIGH"],
+        "time_certainty_exclude": ["unknown"],
+        "channels": ["telegram", "email", "sms"]
+      },
+      "ALERT": {
+        "severity_min": 65,
+        "confidence_min": 0.65,
+        "anchor_confidence": ["HIGH", "MEDIUM"],
+        "time_certainty_exclude": ["unknown"],
+        "channels": ["telegram", "email"]
+      },
+      "WATCH": {
+        "severity_min": 45,
+        "confidence_min": 0.5,
+        "anchor_confidence": ["HIGH", "MEDIUM", "LOW"],
+        "time_certainty_include": ["same_day", "previous_day"],
+        "channels": ["telegram"]
+      }
+    }
+  },
+  "cold_storage": {
+    "archive_endpoint": "",
+    "retry_attempts": 3,
+    "batch_size": 500
+  },
+  "radius_mapping": {
+    "airport": 5.0,
+    "hotel_chain": 2.0,
+    "port": 10.0,
+    "military_base": 15.0
+  }
+}

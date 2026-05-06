@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — ASLA commit edilmemeli
+.env
+.streamlit/secrets.toml
+
+# Test / Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases & Archives (Kesinlikle Push Edilmemeli)
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+sim_archive_*.jsonl
+
+# Logs
+logs/
+*.log
