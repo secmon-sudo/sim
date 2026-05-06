@@ -8,7 +8,7 @@
   },
   "ingestion": {
     "max_article_age_days": 4,
-    "fetch_full_text": true,
+    "fetch_full_text": false,
     "geo_regions": [
       {"gl": "US", "hl": "en", "ceid": "US:en", "label": "us"},
       {"gl": "GB", "hl": "en", "ceid": "GB:en", "label": "uk"},

@@ -67,25 +67,47 @@ NOISE_PATTERNS = _compile_noise_patterns()
 
 
 def build_search_queries() -> list[dict]:
-    """Build search queries from keywords config with geo regions."""
+    """Build search queries from keywords config with geo regions.
+
+    Strategy:
+    - Broad security keywords: search globally without aviation qualifier
+    - Specific aviation keywords: search with 'airport OR aviation' qualifier
+    - Geopolitical keywords: always broad
+    """
     queries = []
+
+    # Keywords that should be searched broadly (security incidents anywhere)
+    broad_keywords = {
+        "bomb threat", "active shooter", "hijack", "explosion",
+        "security breach", "evacuation", "terrorism", "suspicious package",
+        "hostage", "weapon", "airport attack", "airport shooting",
+        "airport bombing", "hotel attack", "hotel bombing", "hotel shooting",
+        "hotel siege", "resort attack", "airline crew attack",
+    }
+
+    # Build base queries
     base_queries = []
 
-    # Aviation specific keywords
     for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
         for kw in keywords:
-            base_queries.append(f'"{kw}" airport OR aviation')
+            kw_lower = kw.lower()
+            if any(bk in kw_lower for bk in broad_keywords):
+                # Broad search — no aviation qualifier
+                base_queries.append({"query": f'"{kw}"', "broad": True})
+            else:
+                # Narrow search — aviation context
+                base_queries.append({"query": f'"{kw}" airport OR aviation', "broad": False})
 
-    # Geopolitical and global conflict keywords
+    # Geopolitical keywords are always broad
     for lang, keywords in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).items():
         for kw in keywords:
-            base_queries.append(f'"{kw}"')
+            base_queries.append({"query": f'"{kw}"', "broad": True})
 
-    # Distribute across regions to reduce US bias
+    # Distribute across regions — broad queries go to all regions, narrow to subset
     for region in _GEO_REGIONS:
         for bq in base_queries:
             queries.append({
-                "query": bq,
+                "query": bq["query"],
                 "hl": region.get("hl", "en"),
                 "gl": region.get("gl", "US"),
                 "ceid": region.get("ceid", "US:en"),

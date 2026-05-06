@@ -122,7 +122,7 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                 if not sub_check:
                     sub_type = None
 
-            # Update event with classification — pass dicts directly for JSONB
+            # Update event with classification — use json.dumps for JSONB columns
             db_conn.execute(
                 """UPDATE events
                    SET llm_raw_output    = %s,
@@ -139,8 +139,8 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                        updated_at        = NOW()
                    WHERE id = %s AND lock_owner = %s""",
                 (
-                    result.get("response", {}),      # dict → JSONB
-                    parsed,                           # dict → JSONB
+                    json.dumps(result.get("response", {})),
+                    json.dumps(parsed),
                     event_type,
                     sub_type,
                     parsed.get("anchor_name"),
