@@ -101,6 +101,15 @@ def get_pipeline_stats(_db_conn) -> dict:
            ORDER BY timestamp DESC LIMIT 1""",
     ).fetchone()
 
+    # Extract quota info from most recent llm_call telemetry
+    quota = _db_conn.execute(
+        """SELECT value_json->>'daily_quota' AS dq,
+                  value_json->>'daily_used' AS du
+           FROM system_telemetry
+           WHERE event_type = 'llm_call'
+           ORDER BY timestamp DESC LIMIT 1""",
+    ).fetchone()
+
     return {
         "llm_calls_24h": llm[0] if llm else 0,
         "tokens_used_24h": llm[1] if llm else 0,
@@ -108,6 +117,8 @@ def get_pipeline_stats(_db_conn) -> dict:
         "event_counts": {row[0]: row[1] for row in event_counts} if event_counts else {},
         "last_run": last_run[0] if last_run and last_run[0] else None,
         "last_run_at": last_run[1].isoformat() if last_run and last_run[1] else None,
+        "daily_quota": int(quota[0]) if quota and quota[0] else 1000,
+        "daily_used": int(quota[1]) if quota and quota[1] else 0,
     }
 
 

@@ -5,10 +5,13 @@ Blueprint V20.1 §PASS C
 Context-manager that runs a background heartbeat update thread.
 Keeps the event lock alive during long-running LLM calls.
 Stops gracefully on exit, lock loss, or consecutive DB errors.
+Uses a dedicated DB connection from the pool for thread safety.
 """
 
 import logging
 import threading
+
+from src.services.supabase_client import get_connection, put_connection
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +23,12 @@ class HeartbeatWorker:
     Context-manager that runs a background heartbeat update thread.
 
     Usage:
-        with HeartbeatWorker(db, event_id, lock_owner, interval=60) as hb:
+        with HeartbeatWorker(event_id, lock_owner, interval=60) as hb:
             result = call_llm(router, text)
         # On 'with' block exit, worker stops automatically — success OR exception.
     """
 
-    def __init__(self, db_conn, event_id: str, lock_owner: str, interval: int = 60):
-        self._db = db_conn
+    def __init__(self, event_id: str, lock_owner: str, interval: int = 60):
         self._event_id = event_id
         self._lock_owner = lock_owner
         self._interval = interval
@@ -54,47 +56,57 @@ class HeartbeatWorker:
 
     def _run(self):
         """
-        Writes a heartbeat every `interval` seconds.
+        Writes a heartbeat every `interval` seconds using a dedicated DB connection.
         Exits immediately when _stop_event is set OR lock ownership is lost.
         Stops after MAX_CONSECUTIVE_ERRORS consecutive DB failures.
         """
         consecutive_errors = 0
+        db_conn = None
 
-        while not self._stop_event.wait(timeout=self._interval):
-            try:
-                cursor = self._db.execute(
-                    """UPDATE events
-                       SET    last_heartbeat_at = NOW()
-                       WHERE  id = %s AND lock_owner = %s""",
-                    (self._event_id, self._lock_owner),
-                )
-                rowcount = cursor.rowcount if hasattr(cursor, "rowcount") else 0
+        try:
+            db_conn = get_connection()
 
-                if rowcount == 0:
-                    # Lock was stolen or released externally — stop silently
-                    logger.warning(
-                        "Heartbeat: lock lost for event %s (owner %s). Stopping.",
-                        self._event_id,
-                        self._lock_owner,
+            while not self._stop_event.wait(timeout=self._interval):
+                try:
+                    cursor = db_conn.execute(
+                        """UPDATE events
+                           SET    last_heartbeat_at = NOW()
+                           WHERE  id = %s AND lock_owner = %s""",
+                        (self._event_id, self._lock_owner),
                     )
-                    return
+                    rowcount = cursor.rowcount if hasattr(cursor, "rowcount") else 0
 
-                self._db.commit()
-                consecutive_errors = 0  # Reset on success
+                    if rowcount == 0:
+                        # Lock was stolen or released externally — stop silently
+                        logger.warning(
+                            "Heartbeat: lock lost for event %s (owner %s). Stopping.",
+                            self._event_id,
+                            self._lock_owner,
+                        )
+                        return
 
-            except Exception as exc:
-                consecutive_errors += 1
-                logger.error(
-                    "Heartbeat DB error #%d for event %s: %s",
-                    consecutive_errors,
-                    self._event_id,
-                    exc,
-                )
-                # Stop after too many consecutive DB failures
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                    logger.critical(
-                        "Heartbeat: %d consecutive DB failures — stopping for event %s",
+                    db_conn.commit()
+                    consecutive_errors = 0  # Reset on success
+
+                except Exception as exc:
+                    consecutive_errors += 1
+                    logger.error(
+                        "Heartbeat DB error #%d for event %s: %s",
                         consecutive_errors,
                         self._event_id,
+                        exc,
                     )
-                    return
+                    # Stop after too many consecutive DB failures
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.critical(
+                            "Heartbeat: %d consecutive DB failures — stopping for event %s",
+                            consecutive_errors,
+                            self._event_id,
+                        )
+                        return
+        finally:
+            if db_conn is not None:
+                try:
+                    put_connection(db_conn)
+                except Exception:
+                    pass

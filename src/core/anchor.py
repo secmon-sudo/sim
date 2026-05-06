@@ -30,11 +30,12 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
         return None, 0.0
 
     try:
-        # 1. Direct IATA / ICAO exact match
-        if re.match(r"^[A-Z]{3,4}$", raw_text):
+        # 1. Direct IATA / ICAO exact match (case insensitive)
+        if re.match(r"^[A-Za-z]{3,4}$", raw_text):
+            upper_text = raw_text.upper()
             row = db_conn.execute(
                 "SELECT iata_code FROM anchor_master WHERE iata_code=%s OR icao_code=%s",
-                (raw_text, raw_text),
+                (upper_text, upper_text),
             ).fetchone()
             if row:
                 return row[0], 1.0

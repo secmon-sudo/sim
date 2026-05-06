@@ -14,9 +14,9 @@ def render_telemetry(stats: dict, llm_router=None):
     """Render pipeline telemetry dashboard with dynamic quota from LLMRouter."""
     col1, col2, col3, col4 = st.columns(4)
 
-    # Dynamic quota from LLMRouter
-    total_quota = llm_router.total_daily_quota if llm_router else 1000
-    total_used = llm_router.total_daily_used if llm_router else stats.get("llm_calls_24h", 0)
+    # Dynamic quota from telemetry (or fallback)
+    total_quota = stats.get("daily_quota", 1000)
+    total_used = stats.get("daily_used", stats.get("llm_calls_24h", 0))
 
     col1.metric("🤖 LLM Calls (24h)", stats.get("llm_calls_24h", 0))
     col2.metric("📊 Tokens Used (24h)", f"{stats.get('tokens_used_24h', 0):,}")

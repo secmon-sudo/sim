@@ -5,6 +5,7 @@ Blueprint V20.1 §5.1
 Real-time alert stream showing CRITICAL/ALERT/WATCH events.
 """
 
+import html
 import json
 from pathlib import Path
 
@@ -42,6 +43,14 @@ def render_alert_feed(alerts: list[dict]):
         tier = alert.get("alert_tier", "WATCH")
         tier_info = _UI_CONFIG["tiers"].get(tier, _UI_CONFIG["tiers"]["WATCH"])
 
+        # Escape all user-provided / LLM-generated text for HTML safety
+        safe_title = html.escape(str(alert.get("source_title") or "Untitled"))[:100]
+        safe_type = html.escape(str(alert.get("event_type") or "unknown"))
+        safe_anchor = html.escape(str(alert.get("anchor_name_norm") or "—"))
+        safe_country = html.escape(str(alert.get("country_iso") or "—"))
+        severity = alert.get("severity_score", 0)
+        confidence = alert.get("system_confidence", 0)
+
         with st.container():
             st.markdown(
                 f"""
@@ -57,17 +66,17 @@ def render_alert_feed(alerts: list[dict]):
                             {tier_info['icon']} {tier}
                         </span>
                         <span style="font-size: 0.75em; color: #94A3B8;">
-                            Severity: {alert.get('severity_score', 0)} &nbsp;|&nbsp;
-                            Conf: {alert.get('system_confidence', 0):.2f}
+                            Severity: {severity} &nbsp;|&nbsp;
+                            Conf: {confidence:.2f}
                         </span>
                     </div>
                     <div style="margin-top: 6px; font-weight: 600; color: #F1F5F9;">
-                        {(alert.get('source_title') or 'Untitled')[:100]}
+                        {safe_title}
                     </div>
                     <div style="margin-top: 4px; font-size: 0.8em; color: #94A3B8;">
-                        {alert.get('event_type', 'unknown')} &nbsp;•&nbsp;
-                        {alert.get('anchor_name_norm') or '—'} &nbsp;•&nbsp;
-                        {alert.get('country_iso') or '—'}
+                        {safe_type} &nbsp;•&nbsp;
+                        {safe_anchor} &nbsp;•&nbsp;
+                        {safe_country}
                     </div>
                 </div>
                 """,

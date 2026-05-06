@@ -2,7 +2,8 @@
 SIM — Pass F: Cold Storage & Archive
 Blueprint V20.1 §7
 
-Archives events older than 90 days with no active storyline.
+Archives events older than 90 days with no active storyline,
+OR events with NULL occurred_at_est older than archive_null_occurred_after_days.
 Saves as JSONL, uploads to Telegram, and deletes from DB on success.
 """
 
@@ -10,9 +11,9 @@ import hashlib
 import json
 import logging
 import os
-import uuid
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 
 import httpx
 
@@ -21,10 +22,18 @@ logger = logging.getLogger(__name__)
 ARCHIVE_DAYS_THRESHOLD = 90
 BATCH_SIZE = 500
 
+# Load settings
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
+with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
+    _SETTINGS = json.load(f)
+
+_ARCHIVE_NULL_AFTER_DAYS = _SETTINGS.get("cold_storage", {}).get("archive_null_occurred_after_days", 14)
+
 
 def get_archivable_events(db_conn) -> list[dict]:
     """
-    Selects events > 90 days old WHERE their storyline has NO recent events.
+    Selects events > 90 days old WHERE their storyline has NO recent events,
+    OR events with NULL occurred_at_est older than archive_null_occurred_after_days.
     """
     query = """
         SELECT id, source_url, source_title, canonical_text, event_type,
@@ -32,21 +41,32 @@ def get_archivable_events(db_conn) -> list[dict]:
                occurred_at_est, ingested_at, llm_parsed_output, storyline_id
         FROM events e
         WHERE e.status = 'reconciled'
-          AND e.occurred_at_est < NOW() - INTERVAL '%s days'
-          AND NOT EXISTS (
-              -- Ensure no recent siblings in the same storyline
-              SELECT 1 FROM events sibling
-              WHERE sibling.storyline_id = e.storyline_id
-                AND sibling.storyline_id IS NOT NULL
-                AND sibling.occurred_at_est >= NOW() - INTERVAL '%s days'
+          AND (
+              -- Case 1: Normal aging — occurred_at_est exists and is old
+              (
+                  e.occurred_at_est IS NOT NULL
+                  AND e.occurred_at_est < NOW() - INTERVAL '%s days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM events sibling
+                      WHERE sibling.storyline_id = e.storyline_id
+                        AND sibling.storyline_id IS NOT NULL
+                        AND sibling.occurred_at_est >= NOW() - INTERVAL '%s days'
+                  )
+              )
+              OR
+              -- Case 2: NULL occurred_at_est — archive after fallback days
+              (
+                  e.occurred_at_est IS NULL
+                  AND e.ingested_at < NOW() - INTERVAL '%s days'
+              )
           )
-        ORDER BY e.occurred_at_est ASC
+        ORDER BY e.occurred_at_est ASC NULLS LAST
         LIMIT %s
     """
     try:
         rows = db_conn.execute(
             query,
-            (ARCHIVE_DAYS_THRESHOLD, ARCHIVE_DAYS_THRESHOLD, BATCH_SIZE),
+            (ARCHIVE_DAYS_THRESHOLD, ARCHIVE_DAYS_THRESHOLD, _ARCHIVE_NULL_AFTER_DAYS, BATCH_SIZE),
         ).fetchall()
 
         columns = [
@@ -54,7 +74,7 @@ def get_archivable_events(db_conn) -> list[dict]:
             "alert_tier", "severity_score", "anchor_name_norm", "country_iso",
             "occurred_at_est", "ingested_at", "llm_parsed_output", "storyline_id"
         ]
-        
+
         events = []
         for row in rows:
             event = dict(zip(columns, row))
@@ -64,13 +84,16 @@ def get_archivable_events(db_conn) -> list[dict]:
             event["id"] = str(event["id"])
             if event["storyline_id"]:
                 event["storyline_id"] = str(event["storyline_id"])
-            if not isinstance(event["llm_parsed_output"], dict):
+            # Ensure llm_parsed_output is a dict for JSON serialization
+            if isinstance(event["llm_parsed_output"], str):
                 try:
                     event["llm_parsed_output"] = json.loads(event["llm_parsed_output"] or "{}")
-                except:
+                except Exception:
                     event["llm_parsed_output"] = {}
+            elif event["llm_parsed_output"] is None:
+                event["llm_parsed_output"] = {}
             events.append(event)
-            
+
         return events
     except Exception:
         logger.exception("Failed to fetch archivable events")
@@ -89,13 +112,13 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     """Uploads file to Telegram via Bot API."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ARCHIVE_CHAT_ID")
-    
+
     if not bot_token or not chat_id:
         logger.warning("Telegram credentials missing, skipping upload")
         return None
 
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-    
+
     files = {
         'document': (filename, BytesIO(content), 'application/jsonl')
     }
@@ -105,7 +128,6 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     }
 
     try:
-        # httpx post with 60s timeout for large uploads
         response = httpx.post(url, data=data, files=files, timeout=60.0)
         response.raise_for_status()
         return response.json()
@@ -117,7 +139,7 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
 def run_pass_f(db_conn) -> dict:
     """
     Execute Pass F: Cold Storage & Archive
-    
+
     1. Select archivable events
     2. Convert to JSONL & Hash
     3. Upload to Telegram
@@ -135,7 +157,7 @@ def run_pass_f(db_conn) -> dict:
     if not events:
         logger.info("Pass F: No events to archive.")
         return stats
-        
+
     logger.info("Pass F: Found %d events to archive.", len(events))
 
     # 2. JSONL & Hash
@@ -145,18 +167,18 @@ def run_pass_f(db_conn) -> dict:
 
     # 3. Upload to Telegram
     tg_response = upload_to_telegram(content, filename)
-    
+
     if not tg_response or not tg_response.get("ok"):
         stats["error"] = "Telegram upload failed"
         logger.error("Pass F failed: %s", tg_response)
         return stats
-        
+
     stats["telegram_message_id"] = tg_response.get("result", {}).get("message_id")
     logger.info("Pass F: Uploaded to Telegram message_id=%s", stats["telegram_message_id"])
 
     # 4. DELETE from DB & Save Manifest
     event_ids = [e["id"] for e in events]
-    
+
     try:
         # Save manifest telemetry first
         db_conn.execute(
@@ -169,22 +191,22 @@ def run_pass_f(db_conn) -> dict:
                 "archived_event_ids": event_ids
             }),),
         )
-        
+
         # Then delete events
         db_conn.execute(
             "DELETE FROM events WHERE id = ANY(%s)",
             (event_ids,)
         )
-        
+
         # 5. DB Maintenance: Delete old telemetry
         db_conn.execute(
             "DELETE FROM system_telemetry WHERE timestamp < NOW() - INTERVAL '90 days'"
         )
-        
+
         db_conn.commit()
         stats["events_archived"] = len(events)
         logger.info("Pass F: Successfully archived and deleted %d events.", len(events))
-        
+
     except Exception as e:
         db_conn.rollback()
         stats["error"] = f"DB Delete/Manifest error: {e}"

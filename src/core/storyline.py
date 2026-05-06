@@ -44,8 +44,16 @@ def should_link_storyline(event_a: dict, event_b: dict, threshold: float = 0.4, 
         event_b.get("storyline_hint") or "",
     )
     same_country = event_a.get("country_iso") == event_b.get("country_iso")
-    within_window = (
-        abs((event_a["occurred_at_est"] - event_b["occurred_at_est"]).days)
-        <= max_days
-    )
+
+    # Guard against None datetimes
+    dt_a = event_a.get("occurred_at_est")
+    dt_b = event_b.get("occurred_at_est")
+    if dt_a is None or dt_b is None:
+        within_window = False
+    else:
+        try:
+            within_window = abs((dt_a - dt_b).days) <= max_days
+        except Exception:
+            within_window = False
+
     return similarity > threshold and same_country and within_window

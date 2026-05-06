@@ -2,10 +2,13 @@
 SIM — Pass A: Ingest & Canonicalization
 Blueprint V20.1 §4 PASS A
 
-Collects aviation incident articles from Google News RSS,
-normalizes text, filters noise, and inserts raw events.
+Collects aviation incident articles from multi-region Google News RSS,
+normalizes text, filters noise, applies age filter, content dedup,
+optionally fetches full text, and inserts raw events.
 """
 
+import difflib
+import email.utils
 import hashlib
 import json
 import logging
@@ -25,6 +28,17 @@ with open(_CONFIG_DIR / "keywords.json", encoding="utf-8") as f:
 with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
     SETTINGS = json.load(f)
 
+# Settings lookups
+_INGESTION = SETTINGS.get("ingestion", {})
+_DEDUP = SETTINGS.get("dedup", {})
+_MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
+_FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
+_GEO_REGIONS = _INGESTION.get("geo_regions", [
+    {"gl": "US", "hl": "en", "ceid": "US:en"}
+])
+_CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.82)
+_TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.85)
+
 # Prompt injection patterns to strip before LLM classification
 PROMPT_INJECTION_PATTERNS = re.compile(
     r"\[INST\]|<\|system\|>|<\|user\|>|<\|assistant\|>|IGNORE PREVIOUS INSTRUCTIONS|"
@@ -32,57 +46,129 @@ PROMPT_INJECTION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl={hl}&gl={gl}&ceid={ceid}"
 
 
-def build_search_queries() -> list[str]:
-    """Build search queries from keywords config."""
+def _compile_noise_patterns() -> list[re.Pattern]:
+    """Compile noise filters with word boundaries to reduce false positives."""
+    patterns = []
+    for pattern in KEYWORDS_CONFIG.get("noise_filters", []):
+        # Escape regex special chars and wrap with word boundaries
+        escaped = re.escape(pattern)
+        try:
+            patterns.append(re.compile(rf"\b{escaped}\b", re.IGNORECASE))
+        except re.error:
+            # Fallback to plain substring if word-boundary fails
+            patterns.append(re.compile(re.escape(pattern), re.IGNORECASE))
+    return patterns
+
+
+NOISE_PATTERNS = _compile_noise_patterns()
+
+
+def build_search_queries() -> list[dict]:
+    """Build search queries from keywords config with geo regions."""
     queries = []
+    base_queries = []
+
     # Aviation specific keywords
     for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
         for kw in keywords:
-            queries.append(f'"{kw}" airport OR aviation')
-            
+            base_queries.append(f'"{kw}" airport OR aviation')
+
     # Geopolitical and global conflict keywords
     for lang, keywords in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).items():
         for kw in keywords:
-            queries.append(f'"{kw}"')
-            
+            base_queries.append(f'"{kw}"')
+
+    # Distribute across regions to reduce US bias
+    for region in _GEO_REGIONS:
+        for bq in base_queries:
+            queries.append({
+                "query": bq,
+                "hl": region.get("hl", "en"),
+                "gl": region.get("gl", "US"),
+                "ceid": region.get("ceid", "US:en"),
+                "label": region.get("label", "us"),
+            })
+
     return queries
 
 
-def fetch_rss_feed(query_or_url: str, is_direct_url: bool = False) -> list[dict]:
-    """Fetch and parse an RSS feed."""
+def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
+    """Fetch and parse an RSS feed. Returns items with parsed pub_date."""
     import xml.etree.ElementTree as ET
 
-    url = query_or_url if is_direct_url else GOOGLE_NEWS_RSS.format(query=query_or_url)
+    if is_direct_url:
+        url = query_info if isinstance(query_info, str) else query_info.get("url", "")
+    else:
+        url = GOOGLE_NEWS_RSS.format(
+            query=query_info["query"],
+            hl=query_info["hl"],
+            gl=query_info["gl"],
+            ceid=query_info["ceid"],
+        )
+
     try:
-        # Some custom RSS endpoints might block default httpx User-Agent
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         resp = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
         resp.raise_for_status()
     except Exception:
-        logger.warning("RSS fetch failed for: %s", url[:50])
+        logger.warning("RSS fetch failed for: %s", url[:80])
         return []
 
     items = []
+    now_utc = datetime.now(timezone.utc)
+    max_age = _MAX_ARTICLE_AGE_DAYS
+
     try:
         root = ET.fromstring(resp.text)
         for item in root.findall(".//item"):
             title = item.findtext("title", "")
             link = item.findtext("link", "")
-            pub_date = item.findtext("pubDate", "")
+            pub_date_str = item.findtext("pubDate", "")
             description = item.findtext("description", "")
+
+            # Parse pubDate and apply age filter
+            pub_dt = None
+            if pub_date_str:
+                try:
+                    pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
+                except Exception:
+                    pass
+
+            if pub_dt is not None:
+                age_days = (now_utc - pub_dt).total_seconds() / 86400
+                if age_days > max_age:
+                    continue  # Skip old articles
+
             items.append({
                 "title": title,
                 "link": link,
-                "pub_date": pub_date,
+                "pub_date": pub_date_str,
+                "pub_dt": pub_dt,
                 "description": description,
             })
     except Exception:
-        logger.exception("RSS parse error for query: %s", query_or_url[:50])
+        logger.exception("RSS parse error for: %s", url[:80])
 
     return items
+
+
+def fetch_full_text(url: str) -> str:
+    """Attempt to fetch full article text from URL using trafilatura."""
+    try:
+        import trafilatura
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        downloaded = trafilatura.fetch_url(url, headers=headers)
+        if downloaded:
+            text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
+            return text or ""
+    except ImportError:
+        logger.debug("trafilatura not installed, skipping full-text fetch")
+    except Exception:
+        logger.warning("Full-text fetch failed for %s", url[:80])
+    return ""
 
 
 def extract_domain(url: str) -> str:
@@ -98,10 +184,10 @@ def compute_url_hash(url: str) -> str:
 
 
 def is_noise(text: str) -> bool:
-    """Check if text matches known noise patterns."""
+    """Check if text matches known noise patterns using word boundaries."""
     text_lower = text.lower()
-    for pattern in KEYWORDS_CONFIG.get("noise_filters", []):
-        if pattern.lower() in text_lower:
+    for pattern in NOISE_PATTERNS:
+        if pattern.search(text_lower):
             return True
     return False
 
@@ -113,13 +199,64 @@ def canonicalize_text(raw_text: str) -> str:
     - Normalizes whitespace
     - Removes HTML tags
     """
-    # Strip HTML tags
+    # Strip HTML tags (simple regex, acceptable for RSS snippets)
     text = re.sub(r"<[^>]+>", " ", raw_text)
     # Strip prompt injection patterns
     text = PROMPT_INJECTION_PATTERNS.sub("", text)
     # Normalize whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def normalize_title(title: str) -> str:
+    """Normalize title for deduplication comparison."""
+    text = title.lower()
+    text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
+    text = re.sub(r"\s+", " ", text).strip()
+    # Remove common suffixes/prefixes from news outlets
+    text = re.sub(r"\s*-\s*(bbc news|cnn|reuters|ap news|the guardian|al jazeera).*", "", text)
+    return text
+
+
+def title_similarity(title_a: str, title_b: str) -> float:
+    """Compute similarity between two normalized titles."""
+    norm_a = normalize_title(title_a)
+    norm_b = normalize_title(title_b)
+    if not norm_a or not norm_b:
+        return 0.0
+    return difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+
+
+def check_content_duplicate(db_conn, title: str, canonical_text: str) -> bool:
+    """
+    Check if a similar article already exists in the DB.
+    Compares against recent events using title similarity.
+    """
+    try:
+        rows = db_conn.execute(
+            """SELECT source_title, canonical_text
+               FROM events
+               WHERE ingested_at > NOW() - INTERVAL '%s days'
+               ORDER BY ingested_at DESC
+               LIMIT 200""",
+            (_MAX_ARTICLE_AGE_DAYS,),
+        ).fetchall()
+
+        for row in rows:
+            existing_title = row[0] or ""
+            existing_text = row[1] or ""
+            sim = title_similarity(title, existing_title)
+            if sim >= _TITLE_SIM_THRESHOLD:
+                return True
+            # Also check canonical text similarity for short texts
+            if len(canonical_text) < 500 and len(existing_text) < 500:
+                text_sim = difflib.SequenceMatcher(None, canonical_text, existing_text).ratio()
+                if text_sim >= _CONTENT_SIM_THRESHOLD:
+                    return True
+        return False
+    except Exception:
+        logger.exception("Content duplicate check failed")
+        return False
 
 
 def check_domain_penalty(db_conn, domain: str) -> float:
@@ -138,9 +275,12 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     """
     Execute Pass A: Ingest & Canonicalization.
 
-    1. Fetch RSS feeds for all keyword queries
-    2. Canonicalize text, filter noise
-    3. Insert new events with NOT EXISTS guard (idempotent)
+    1. Fetch RSS feeds for all keyword queries across geo regions
+    2. Filter by age (max_article_age_days)
+    3. Canonicalize text, filter noise
+    4. Content dedup (title similarity against recent DB events)
+    5. Optionally fetch full article text
+    6. Insert new events with NOT EXISTS guard (idempotent)
 
     Returns: stats dict with counts
     """
@@ -149,18 +289,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     stats = {
         "queries_executed": 0,
         "items_fetched": 0,
+        "age_filtered": 0,
         "noise_filtered": 0,
         "duplicates_skipped": 0,
+        "content_duplicates_skipped": 0,
         "domain_penalized": 0,
         "events_inserted": 0,
+        "full_text_fetched": 0,
     }
 
     queries = build_search_queries()
     all_items = []
 
-    # Fetch from dynamic Google News feeds
-    for query in queries[:20]:  # Limit queries per run to avoid rate limiting
-        items = fetch_rss_feed(query, is_direct_url=False)
+    # Fetch from dynamic Google News feeds across regions
+    for query_info in queries[:50]:  # Limit queries per run
+        items = fetch_rss_feed(query_info, is_direct_url=False)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
@@ -200,6 +343,20 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         penalty = check_domain_penalty(db_conn, domain)
         if penalty > 0.8:
             stats["domain_penalized"] += 1
+            continue
+
+        # Optional: fetch full text
+        full_text = ""
+        if _FETCH_FULL_TEXT:
+            full_text = fetch_full_text(url)
+            if full_text:
+                stats["full_text_fetched"] += 1
+                # Merge full text into canonical
+                canonical = canonicalize_text(f"{canonical} {full_text}")
+
+        # Content dedup: check if similar title/text already exists
+        if check_content_duplicate(db_conn, item.get("title", ""), canonical):
+            stats["content_duplicates_skipped"] += 1
             continue
 
         # Idempotent insert — NOT EXISTS guard

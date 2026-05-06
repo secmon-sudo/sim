@@ -3,18 +3,24 @@ SIM — Pass B: Dedup, Maturation & Distributed Locks
 Blueprint V20.1 §4 PASS B
 
 Handles stale lock detection, maturation window enforcement,
-and lock acquisition for LLM classification.
+URL-hash deduplication, and lock acquisition for LLM classification.
 """
 
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-STALE_LOCK_THRESHOLD_MINUTES = 15
-MATURATION_WINDOW_HOURS = 2
+# Load settings from config
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
+with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
+    _SETTINGS = json.load(f)
+
+STALE_LOCK_THRESHOLD_MINUTES = _SETTINGS["pipeline"].get("stale_lock_threshold_minutes", 15)
+MATURATION_WINDOW_HOURS = _SETTINGS["dedup"].get("maturation_window_hours", 2)
 
 
 def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
@@ -157,13 +163,46 @@ def get_events_for_classification(db_conn, limit: int = 50) -> list[dict]:
         return []
 
 
-def mark_as_deduped(db_conn) -> int:
+def _dedup_by_url_hash(db_conn) -> int:
     """
-    Move raw events to 'deduped' status.
-    In a full implementation, this would include URL-hash dedup checks,
-    content similarity, and maturation window enforcement.
+    Remove duplicate events by source_url_hash, keeping the earliest ingested.
+    Returns number of duplicates removed.
     """
     try:
+        # Find duplicate url hashes and keep only the earliest
+        result = db_conn.execute(
+            """WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY source_url_hash
+                           ORDER BY ingested_at ASC, id ASC
+                       ) AS rn
+                FROM events
+                WHERE status = 'raw'
+            )
+            DELETE FROM events
+            WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+            RETURNING id"""
+        )
+        removed = len(result.fetchall()) if result else 0
+        if removed > 0:
+            logger.info("URL dedup removed %d duplicate raw events", removed)
+        return removed
+    except Exception:
+        db_conn.rollback()
+        logger.exception("Error in URL hash deduplication")
+        return 0
+
+
+def mark_as_deduped(db_conn) -> int:
+    """
+    Move raw events to 'deduped' status after URL dedup and maturation.
+    """
+    try:
+        # First dedup by URL hash
+        _dedup_by_url_hash(db_conn)
+
+        # Then mark remaining as deduped
         result = db_conn.execute(
             """UPDATE events
                SET status = 'deduped', updated_at = NOW()
@@ -184,9 +223,10 @@ def run_pass_b(db_conn) -> dict:
     """
     Execute Pass B: Dedup, Maturation & Distributed Locks.
 
-    1. Mark raw events as deduped
-    2. Clear stale locks
-    3. Return stats
+    1. Dedup raw events by URL hash
+    2. Mark raw events as deduped
+    3. Clear stale locks
+    4. Return stats
 
     Returns: stats dict
     """
@@ -195,10 +235,12 @@ def run_pass_b(db_conn) -> dict:
     stats = {
         "worker_id": str(worker_id),
         "events_deduped": 0,
+        "url_duplicates_removed": 0,
         "stale_locks_cleared": 0,
     }
 
-    # Step 1: Move raw → deduped
+    # Step 1: URL hash dedup + move raw → deduped
+    stats["url_duplicates_removed"] = _dedup_by_url_hash(db_conn)
     stats["events_deduped"] = mark_as_deduped(db_conn)
 
     # Step 2: Clear stale locks

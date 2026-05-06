@@ -10,11 +10,12 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.services.supabase_client import get_connection
+from src.services.supabase_client import get_connection, put_connection
 from streamlit_app.components.alert_feed import render_alert_feed
 from streamlit_app.components.anchor_lookup import render_anchor_lookup
 from streamlit_app.components.event_table import render_event_table
@@ -135,6 +136,7 @@ st.markdown(
 st.divider()
 
 # --- Database Connection ---
+db_conn = None
 try:
     db_conn = get_connection()
 except Exception as e:
@@ -142,15 +144,12 @@ except Exception as e:
     st.info("Configure DATABASE_URL or SUPABASE_* environment variables")
     st.stop()
 
-# --- Sidebar ---
+# --- Auto Refresh (state-preserving) ---
 with st.sidebar:
     st.markdown("### ⚙️ Controls")
     auto_refresh = st.toggle("Auto Refresh (60s)", value=True)
     if auto_refresh:
-        st.markdown(
-            f'<meta http-equiv="refresh" content="{_UI_CONFIG["app"]["auto_refresh_seconds"]}">',
-            unsafe_allow_html=True,
-        )
+        st_autorefresh(interval=_UI_CONFIG["app"]["auto_refresh_seconds"] * 1000, limit=None, key="auto_refresh")
 
     st.divider()
     st.markdown("### 📊 Quick Stats")
@@ -228,3 +227,10 @@ with tab_anchors:
         render_anchor_lookup(db_conn)
     except Exception as e:
         st.error(f"Anchor lookup error: {e}")
+
+# --- Cleanup ---
+if db_conn is not None:
+    try:
+        put_connection(db_conn)
+    except Exception:
+        pass

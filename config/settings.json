@@ -6,9 +6,27 @@
     "heartbeat_interval_seconds": 60,
     "heartbeat_max_consecutive_errors": 5
   },
+  "ingestion": {
+    "max_article_age_days": 4,
+    "fetch_full_text": true,
+    "geo_regions": [
+      {"gl": "US", "hl": "en", "ceid": "US:en", "label": "us"},
+      {"gl": "GB", "hl": "en", "ceid": "GB:en", "label": "uk"},
+      {"gl": "DE", "hl": "de", "ceid": "DE:de", "label": "de"},
+      {"gl": "FR", "hl": "fr", "ceid": "FR:fr", "label": "fr"},
+      {"gl": "TR", "hl": "tr", "ceid": "TR:tr", "label": "tr"},
+      {"gl": "EG", "hl": "ar", "ceid": "EG:ar", "label": "mena"},
+      {"gl": "AE", "hl": "en", "ceid": "AE:en", "label": "mena_en"},
+      {"gl": "IN", "hl": "en", "ceid": "IN:en", "label": "india"},
+      {"gl": "AU", "hl": "en", "ceid": "AU:en", "label": "apac"},
+      {"gl": "JP", "hl": "en", "ceid": "JP:en", "label": "japan"}
+    ]
+  },
   "dedup": {
     "url_hash_algorithm": "sha256",
-    "maturation_window_hours": 2
+    "maturation_window_hours": 2,
+    "content_similarity_threshold": 0.82,
+    "title_similarity_threshold": 0.85
   },
   "scoring": {
     "proximity_bonus": 30,
@@ -52,7 +70,8 @@
   "cold_storage": {
     "archive_endpoint": "",
     "retry_attempts": 3,
-    "batch_size": 500
+    "batch_size": 500,
+    "archive_null_occurred_after_days": 14
   },
   "radius_mapping": {
     "airport": 5.0,

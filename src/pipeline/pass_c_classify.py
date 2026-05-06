@@ -85,7 +85,7 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
         return None
 
     try:
-        with HeartbeatWorker(db_conn, event_id, str(worker_id), interval=60):
+        with HeartbeatWorker(event_id, str(worker_id), interval=60):
             # Build prompt
             prompt = f"""Classify this aviation security report:
 
@@ -122,7 +122,7 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                 if not sub_check:
                     sub_type = None
 
-            # Update event with classification
+            # Update event with classification — pass dicts directly for JSONB
             db_conn.execute(
                 """UPDATE events
                    SET llm_raw_output    = %s,
@@ -139,8 +139,8 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                        updated_at        = NOW()
                    WHERE id = %s AND lock_owner = %s""",
                 (
-                    json.dumps(result.get("response", {})),
-                    json.dumps(parsed),
+                    result.get("response", {}),      # dict → JSONB
+                    parsed,                           # dict → JSONB
                     event_type,
                     sub_type,
                     parsed.get("anchor_name"),

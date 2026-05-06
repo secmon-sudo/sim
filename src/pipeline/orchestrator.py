@@ -24,7 +24,7 @@ from src.pipeline.pass_c_classify import run_pass_c
 from src.pipeline.pass_d_score import run_pass_d
 from src.pipeline.pass_e_reconcile import run_pass_e
 from src.pipeline.pass_f_archive import run_pass_f
-from src.services.supabase_client import close_connection, get_connection
+from src.services.supabase_client import close_pool, get_connection, put_connection
 
 # Configure logging
 logging.basicConfig(
@@ -113,7 +113,11 @@ def run_pipeline():
             except Exception:
                 logger.exception("Failed to log pipeline run telemetry")
 
-            close_connection()
+            try:
+                put_connection(db_conn)
+            except Exception:
+                pass
+            close_pool()
 
     logger.info("=" * 60)
     logger.info(
