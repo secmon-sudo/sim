@@ -63,10 +63,7 @@
   "sources": {
     "static_feeds": [
       "https://www.reddit.com/r/worldnews/new/.rss",
-      "https://www.reddit.com/r/aviation/new/.rss",
-      "https://xcancel.com/ww3mediaa/rss",
-      "https://xcancel.com/sentdefender/rss",
-      "https://xcancel.com/airlivenet/rss"
+      "https://www.reddit.com/r/aviation/new/.rss"
     ]
   }
 }
