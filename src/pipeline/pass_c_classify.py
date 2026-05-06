@@ -111,6 +111,16 @@ Text: {event.get('canonical_text', '')[:3000]}"""
             if not active_check:
                 event_type = "other_aviation_related"
 
+            # Validate sub_type against active catalog
+            sub_type = parsed.get("sub_type")
+            if sub_type:
+                sub_check = db_conn.execute(
+                    "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
+                    (sub_type,),
+                ).fetchone()
+                if not sub_check:
+                    sub_type = None
+
             # Update event with classification
             db_conn.execute(
                 """UPDATE events
@@ -131,7 +141,7 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                     json.dumps(result.get("response", {})),
                     json.dumps(parsed),
                     event_type,
-                    parsed.get("sub_type"),
+                    sub_type,
                     parsed.get("anchor_name"),
                     parsed.get("country_iso"),
                     parsed.get("storyline_hint"),
@@ -180,6 +190,7 @@ Text: {event.get('canonical_text', '')[:3000]}"""
         return None
 
     except Exception:
+        db_conn.rollback()
         logger.exception("Unexpected error classifying event %s", event_id[:8])
         return None
 
