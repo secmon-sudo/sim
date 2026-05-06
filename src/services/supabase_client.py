@@ -28,6 +28,17 @@ def get_connection():
 
     database_url = os.environ.get("DATABASE_URL")
 
+    # Fallback to Streamlit secrets if running in Streamlit Cloud
+    if not database_url:
+        try:
+            import streamlit as st
+            if "DATABASE_URL" in st.secrets:
+                database_url = st.secrets["DATABASE_URL"]
+            elif "database" in st.secrets and "url" in st.secrets["database"]:
+                database_url = st.secrets["database"]["url"]
+        except Exception:
+            pass
+
     if not database_url:
         # Build from Supabase components
         host = os.environ.get("SUPABASE_DB_HOST", "localhost")
