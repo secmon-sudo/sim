@@ -73,7 +73,7 @@ def fetch_rss_feed(query_or_url: str, is_direct_url: bool = False) -> list[dict]
                 "description": description,
             })
     except Exception:
-        logger.exception("RSS parse error for query: %s", query[:50])
+        logger.exception("RSS parse error for query: %s", query_or_url[:50])
 
     return items
 
