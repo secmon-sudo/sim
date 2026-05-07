@@ -136,12 +136,11 @@ def render_event_table(events: list[dict]):
     
     if sel_tier != "All":
         if sel_tier == "None":
-            filtered = filtered[filtered["alert_tier"].isna()]
+            tier_mask = filtered["alert_tier"].isna() | (filtered["alert_tier"].fillna("").astype(str).str.strip() == "")
+            filtered = filtered[tier_mask]
         else:
-            # Case-insensitive, robust matching
-            filtered = filtered[
-                filtered["alert_tier"].fillna("").str.strip().str.upper() == sel_tier.upper()
-            ]
+            tier_mask = filtered["alert_tier"].fillna("").astype(str).str.strip().str.upper() == sel_tier.upper()
+            filtered = filtered[tier_mask]
             
     if sel_country != "All":
         filtered = filtered[filtered["country_iso"] == sel_country]
@@ -161,10 +160,10 @@ def render_event_table(events: list[dict]):
         summary_text = f"Filtered: **{total_filt}** of **{total_all}** events"
 
     # Count using the same robust logic
-    tier_series = filtered["alert_tier"].fillna("").str.strip().str.upper()
-    crit_n = len(filtered[tier_series == "CRITICAL"])
-    alert_n = len(filtered[tier_series == "ALERT"])
-    watch_n = len(filtered[tier_series == "WATCH"])
+    tier_series = filtered["alert_tier"].fillna("").astype(str).str.strip().str.upper()
+    crit_n = (tier_series == "CRITICAL").sum()
+    alert_n = (tier_series == "ALERT").sum()
+    watch_n = (tier_series == "WATCH").sum()
 
     st.markdown(
         f"{summary_text} &nbsp;|&nbsp; "
@@ -174,8 +173,19 @@ def render_event_table(events: list[dict]):
         unsafe_allow_html=True,
     )
 
+    # ── Pagination ──
+    PAGE_SIZE = 20
+    total_pages = max(1, (total_filt + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    pg_cols = st.columns([2, 1, 2])
+    with pg_cols[1]:
+        page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="evt_page")
+    start = (page - 1) * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_df = filtered.iloc[start:end]
+
     # ── Event Cards (Native Streamlit) ──
-    for _, row in filtered.iterrows():
+    for _, row in page_df.iterrows():
         _render_event_card_native(row)
 
     if total_filt == 0:
