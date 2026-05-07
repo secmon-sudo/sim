@@ -19,10 +19,18 @@ _APP_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _APP_DIR.parent
 sys.path.insert(0, str(_APP_DIR))
 sys.path.insert(0, str(_PROJECT_ROOT))
-importlib.invalidate_caches()  # Clear stale module caches on reload
+importlib.invalidate_caches()
+
+# ── Close stale pool from previous module instance ──
+# Streamlit keeps old modules in sys.modules; their pools may have
+# stale configure callbacks. Close them before creating fresh ones.
+try:
+    import src.services.supabase_client as _sc
+    _sc.close_pool()
+except Exception:
+    pass
 
 # ── Lazy Imports ──
-# Import after path setup to avoid caching issues.
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
