@@ -24,6 +24,7 @@ from src.pipeline.pass_c_classify import run_pass_c
 from src.pipeline.pass_d_score import run_pass_d
 from src.pipeline.pass_e_reconcile import run_pass_e
 from src.pipeline.pass_f_archive import run_pass_f
+from src.services.czib_client import sync_czib_to_db
 from src.services.supabase_client import close_pool, get_connection, put_connection
 
 # Configure logging
@@ -68,6 +69,15 @@ def run_pipeline():
 
         logger.info("LLM Router: %d accounts, %d RPD total quota",
                      len(router.accounts), router.total_daily_quota)
+
+        # CZIB Sync: Refresh EASA conflict zones before ingestion
+        logger.info("--- CZIB Sync: EASA Conflict Zones ---")
+        try:
+            czib_result = sync_czib_to_db(db_conn)
+            logger.info("CZIB sync: %d fetched, %d inserted, %d updated",
+                        czib_result["fetched"], czib_result["inserted"], czib_result["updated"])
+        except Exception:
+            logger.warning("CZIB sync failed, continuing without updated conflict zones")
 
         # Pass A: Ingest & Canonicalization
         logger.info("--- PASS A: Ingest & Canonicalization ---")

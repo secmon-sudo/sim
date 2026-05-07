@@ -39,40 +39,36 @@ def _quota_gauge(used: int, total: int) -> str:
     """
 
 
-def _pipeline_flow_card(status_counts: dict) -> str:
-    """Visual pipeline flow: raw → deduped → locked → classified → scored → reconciled → archived."""
+def _render_pipeline_flow(status_counts: dict):
+    """Render pipeline flow using Streamlit columns (reliable cross-browser)."""
     stages = ["raw", "deduped", "locked", "classified", "scored", "reconciled", "archived"]
     icons = {
         "raw": "📥", "deduped": "🔍", "locked": "🔒",
         "classified": "🧠", "scored": "📊", "reconciled": "✅", "archived": "🗄️",
     }
-    nodes = []
-    for i, stage in enumerate(stages):
-        count = status_counts.get(stage, 0)
-        cfg = _STATUS_CFG.get(stage, _STATUS_CFG["raw"])
-        active = count > 0
-        opacity = "1" if active else "0.35"
-        nodes.append(f"""
-        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;opacity:{opacity};flex:1;min-width:60px;">
-          <div style="width:36px;height:36px;border-radius:50%;background:{cfg['bg']};border:2px solid {cfg['color']}30;display:flex;align-items:center;justify-content:center;font-size:1.1em;">
-            {icons[stage]}
-          </div>
-          <span style="font-size:0.65em;color:{cfg['color']};font-weight:600;text-align:center;line-height:1.2;">{cfg['label']}</span>
-          <span style="font-size:0.75em;color:#F8FAFC;font-weight:700;">{count:,}</span>
-        </div>
-        """)
-        if i < len(stages) - 1:
-            nodes.append(f"""
-            <div style="display:flex;align-items:center;opacity:0.5;padding-bottom:18px;">
-              <span style="color:#475569;font-size:0.9em;">→</span>
-            </div>
-            """)
 
-    return f"""
-    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:center;padding:12px;background:#0B1120;border:1px solid #1E293B;border-radius:10px;">
-      {''.join(nodes)}
-    </div>
-    """
+    st.markdown("##### Pipeline Stages")
+    # Render stages in groups of 4 to avoid column overflow
+    for group_start in range(0, len(stages), 4):
+        group = stages[group_start:group_start + 4]
+        cols = st.columns(len(group))
+        for i, stage in enumerate(group):
+            count = status_counts.get(stage, 0)
+            cfg = _STATUS_CFG.get(stage, _STATUS_CFG["raw"])
+            active = count > 0
+            with cols[i]:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;opacity:{1 if active else 0.4};">
+                      <div style="width:40px;height:40px;border-radius:50%;background:{cfg['bg']};border:2px solid {cfg['color']}40;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:1.2em;">
+                        {icons[stage]}
+                      </div>
+                      <div style="font-size:0.7em;color:{cfg['color']};font-weight:600;margin-top:4px;">{cfg['label']}</div>
+                      <div style="font-size:0.9em;color:#F8FAFC;font-weight:700;">{count:,}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 def render_telemetry(stats: dict, llm_router=None):
@@ -104,7 +100,7 @@ def render_telemetry(stats: dict, llm_router=None):
     # ── Pipeline Flow ──
     st.markdown("#### 🔄 Pipeline Flow")
     event_counts = stats.get("event_counts", {})
-    st.markdown(_pipeline_flow_card(event_counts), unsafe_allow_html=True)
+    _render_pipeline_flow(event_counts)
 
     # ── Last Run ──
     last_run = stats.get("last_run")

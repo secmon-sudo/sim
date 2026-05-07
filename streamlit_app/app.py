@@ -22,12 +22,15 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
+from components.czib_dashboard import render_czib_dashboard
+from components.czib_overlay import render_czib_layer, get_czib_map_data
 from components.event_table import render_event_table
 from components.map_view import render_map
 from components.storyline_graph import render_storyline_graph
 from components.telemetry_dashboard import render_telemetry
 from services.cache import (
     get_alert_events,
+    get_czib_stats,
     get_geo_summary,
     get_pipeline_stats,
     get_recent_events,
@@ -303,6 +306,31 @@ with st.sidebar:
     except Exception:
         st.warning("Could not load stats")
 
+    # CZIB mini stats
+    st.divider()
+    st.markdown("### 🛡️ EASA CZIB")
+    try:
+        czib_stats = get_czib_stats(db_conn)
+        st.markdown(
+            f"""
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;margin-bottom:6px;">
+              <span style="font-size:0.8em;color:#10B981;font-weight:600;">🟢 Active Zones</span>
+              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('active', 0)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:6px;">
+              <span style="font-size:0.8em;color:#F59E0B;font-weight:600;">🟡 Suspended</span>
+              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('suspended', 0)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;">
+              <span style="font-size:0.8em;color:#6366F1;font-weight:600;">🌍 Affected Countries</span>
+              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('countries', 0)}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
+
     # Geo summary mini table
     st.divider()
     st.markdown("### 🌍 Top Countries")
@@ -343,10 +371,11 @@ with st.sidebar:
     )
 
 # ── Main Tabs ──
-tab_events, tab_alerts, tab_map, tab_storylines, tab_telemetry, tab_anchors = st.tabs([
+tab_events, tab_alerts, tab_map, tab_czib, tab_storylines, tab_telemetry, tab_anchors = st.tabs([
     "📋 Events",
     "🚨 Alerts",
     "🗺️ Map",
+    "🛡️ CZIB",
     "🔗 Storylines",
     "📈 Telemetry",
     "✈️ Anchors",
@@ -373,10 +402,20 @@ with tab_map:
     try:
         events = get_recent_events(db_conn)
         render_map(events)
+        st.divider()
+        czib_map_data = get_czib_map_data(db_conn)
+        render_czib_layer(czib_map_data)
     except Exception as e:
         st.error(f"Map error: {e}")
 
-# Tab 4: Storylines
+# Tab 4: CZIB Dashboard
+with tab_czib:
+    try:
+        render_czib_dashboard(db_conn)
+    except Exception as e:
+        st.error(f"CZIB error: {e}")
+
+# Tab 5: Storylines
 with tab_storylines:
     try:
         graph_data = get_storyline_graph_data(db_conn)
@@ -384,7 +423,7 @@ with tab_storylines:
     except Exception as e:
         st.error(f"Storyline error: {e}")
 
-# Tab 5: Telemetry
+# Tab 6: Telemetry
 with tab_telemetry:
     try:
         stats = get_pipeline_stats(db_conn)
@@ -392,7 +431,7 @@ with tab_telemetry:
     except Exception as e:
         st.error(f"Telemetry error: {e}")
 
-# Tab 6: Anchors
+# Tab 7: Anchors
 with tab_anchors:
     try:
         render_anchor_lookup(db_conn)

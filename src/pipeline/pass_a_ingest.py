@@ -12,6 +12,7 @@ import email.utils
 import hashlib
 import json
 import logging
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -59,12 +60,13 @@ GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
 # ---------------------------------------------------------------------------
 
 def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float = 15.0,
-                         max_retries: int = 3, backoff_base: float = 2.0) -> httpx.Response | None:
+                         max_retries: int = 3, backoff_base: float = 2.0,
+                         params: dict | None = None) -> httpx.Response | None:
     """Perform GET with exponential backoff on 429 / 5xx / network errors."""
     headers = headers or {}
     for attempt in range(max_retries):
         try:
-            resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+            resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True, params=params)
             if resp.status_code == 429:
                 wait = backoff_base ** attempt
                 logger.warning("Rate limit (429) on %s, retry in %.1fs (attempt %d/%d)",
@@ -94,17 +96,45 @@ def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float =
 # GDELT fetch
 # ---------------------------------------------------------------------------
 
-def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
-    """
-    Fetch article URLs from GDELT 2.0 API for a given keyword query.
-    Includes retry/backoff for rate-limiting.
-    """
+# Try to use gdeltdoc for structured queries; fall back to raw HTTP if unavailable.
+_GDELTDOC_AVAILABLE = False
+try:
+    from gdeltdoc import Filters, GdeltDoc
+    _GDELTDOC_AVAILABLE = True
+except ImportError:
+    pass
+
+
+def _parse_gdelt_date(seendate_str: str) -> datetime | None:
+    """Parse GDELT seendate (YYYYMMDDHHMMSS) to datetime."""
+    if seendate_str and len(seendate_str) >= 14:
+        try:
+            return datetime.strptime(seendate_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+
+def _gdelt_articles_from_raw(
+    query: str,
+    max_age_days: int = 3,
+    tone: str | None = None,
+    source_countries: list[str] | None = None,
+) -> list[dict]:
+    """Raw HTTP fallback for GDELT (used when gdeltdoc is not installed)."""
     now = datetime.now(timezone.utc)
     end_dt = now.strftime("%Y%m%d%H%M%S")
     start_dt = (now - timedelta(days=max_age_days)).strftime("%Y%m%d%H%M%S")
 
+    full_query = query
+    if tone:
+        full_query = f"{full_query} tone{tone}"
+    if source_countries:
+        country_filter = " OR ".join(f"sourcecountry:{c}" for c in source_countries)
+        full_query = f"({full_query}) AND ({country_filter})"
+
     params = {
-        "query": query,
+        "query": full_query,
         "mode": "ArtList",
         "format": "json",
         "maxrecords": GDELT_MAX_RECORDS,
@@ -116,17 +146,16 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
     try:
         resp = _http_get_with_retry(
             GDELT_DOC_API,
-            headers={},
+            headers={"User-Agent": "SIM-OSINT-Bot/1.0"},
             timeout=30.0,
             max_retries=3,
-            backoff_base=3.0,
+            backoff_base=5.0,
+            params=params,
         )
         if resp is None:
-            logger.warning("GDELT fetch failed after retries for query: %s", query[:60])
             return []
         data = resp.json()
     except Exception:
-        logger.warning("GDELT fetch failed for query: %s", query[:60])
         return []
 
     items = []
@@ -135,36 +164,87 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
         title = article.get("title", "")
         url = article.get("url", "")
         domain = article.get("domain", "")
-
         if not url or not title:
             continue
-
-        pub_dt = None
-        if seendate_str and len(seendate_str) >= 8:
-            try:
-                pub_dt = datetime.strptime(seendate_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-            except Exception:
-                pass
-
+        pub_dt = _parse_gdelt_date(seendate_str)
         if pub_dt is None:
             continue
-        age_days = (now - pub_dt).total_seconds() / 86400
-        if age_days > max_age_days:
+        if (now - pub_dt).total_seconds() / 86400 > max_age_days:
             continue
-
         items.append({
-            "title": title,
-            "link": url,
-            "pub_date": seendate_str,
-            "pub_dt": pub_dt,
-            "description": "",
-            "source": "gdelt",
-            "domain": domain,
+            "title": title, "link": url, "pub_date": seendate_str,
+            "pub_dt": pub_dt, "description": "",
+            "source": "gdelt", "domain": domain,
+            "source_country": article.get("sourcecountry", ""),
         })
+    return items
+
+
+def _gdelt_articles_with_client(
+    query: str,
+    max_age_days: int = 3,
+    tone: str | None = None,
+    source_countries: list[str] | None = None,
+) -> list[dict]:
+    """Use gdeltdoc client for structured GDELT queries."""
+    now = datetime.now(timezone.utc)
+    start_date = (now - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
+    end_date = now.strftime("%Y-%m-%d")
+
+    try:
+        f = Filters(
+            keyword=query,
+            start_date=start_date,
+            end_date=end_date,
+            num_records=GDELT_MAX_RECORDS,
+            tone=tone,
+            country=source_countries if source_countries else None,
+        )
+        gd = GdeltDoc()
+        df = gd.article_search(f)
+    except Exception:
+        return []
+
+    items = []
+    for _, row in df.iterrows():
+        url = row.get("url", "")
+        title = row.get("title", "")
+        if not url or not title:
+            continue
+        seendate_str = str(row.get("seendate", ""))
+        pub_dt = _parse_gdelt_date(seendate_str)
+        if pub_dt is None:
+            continue
+        if (now - pub_dt).total_seconds() / 86400 > max_age_days:
+            continue
+        items.append({
+            "title": title, "link": url, "pub_date": seendate_str,
+            "pub_dt": pub_dt, "description": "",
+            "source": "gdelt", "domain": row.get("domain", ""),
+            "source_country": row.get("sourcecountry", ""),
+        })
+    return items
+
+
+def fetch_gdelt_articles(
+    query: str,
+    max_age_days: int = 3,
+    tone: str | None = None,
+    source_countries: list[str] | None = None,
+) -> list[dict]:
+    """
+    Fetch article URLs from GDELT 2.0 API.
+
+    Uses gdeltdoc client if available (structured Filters with tone/country
+    support); falls back to raw HTTP GET with retry/backoff otherwise.
+    """
+    if _GDELTDOC_AVAILABLE:
+        items = _gdelt_articles_with_client(query, max_age_days, tone, source_countries)
+    else:
+        items = _gdelt_articles_from_raw(query, max_age_days, tone, source_countries)
 
     if items:
         logger.info("GDELT: %d articles for '%s...' (last %dh)", len(items), query[:40], max_age_days * 24)
-
     return items
 
 
@@ -340,19 +420,76 @@ def build_search_queries() -> list[dict]:
     return queries
 
 
-def build_gdelt_queries() -> list[str]:
-    """Build optimized GDELT query strings."""
+def build_gdelt_queries() -> list[dict]:
+    """
+    Build focused GDELT queries with tone and source-country filters.
+
+    Covers ALL active conflict regions globally per EASA CZIB + known high-risk areas:
+      • Middle East & Persian Gulf
+      • Sahel & Horn of Africa
+      • North & Central Africa
+      • South & Southeast Asia
+      • Latin America
+      • Eurasia / Eastern Europe
+
+    Each query dict has:
+      - query: GDELT search string
+      - tone: optional tone filter ("<-5" = negative news)
+      - countries: FIPS source-country list
+    """
     return [
-        '"drone attack" OR "UAV attack" OR "drone bombing" OR "drone strike"',
-        '"mass shooting" OR "mass stabbing" OR "mass casualty" OR "massacre" OR "suicide bombing"',
-        '"airport attack" OR "airport bombing" OR "airport shooting" OR "airport terror"',
-        '"hotel attack" OR "hotel bombing" OR "resort attack" OR "beach attack" OR "cruise ship attack"',
-        '"pilot attacked" OR "cabin crew attacked" OR "ground staff attacked" OR "airline personnel attack"',
-        '"Boko Haram" OR "Al-Shabaab" OR "jihadist attack" OR "ISIS Africa" OR "Sahel crisis"',
-        '"missile strike" OR "airstrike" OR "war escalation" OR "ceasefire broken" OR "civilian casualties"',
-        '"bomb threat" OR "explosion" OR "terrorism" OR "hostage" OR "active shooter"',
-        '"hijack" OR "runway incursion" OR "emergency landing" OR "security breach"',
-        '"military action" OR "invasion" OR "border clash" OR "troop buildup" OR "artillery shelling"',
+        # ── Middle East & Persian Gulf (CZIB Active) ──
+        {
+            "query": '"airport attack" OR "airport bombing" OR "airport shooting" OR "airport terror"',
+            "tone": "<-5",
+            "countries": ["SY", "IQ", "IR", "IL", "JO", "LB", "YE", "SA", "AE", "QA", "KW", "BH", "OM", "TR", "PS"],
+        },
+        {
+            "query": '"missile strike" OR "airstrike" OR "drone strike" OR "civilian casualties"',
+            "tone": "<-5",
+            "countries": ["SY", "IQ", "IR", "IL", "LB", "YE", "SA", "AE", "TR", "PS", "JO", "KW"],
+        },
+        # ── Sahel & West Africa (CZIB Active: Mali, Libya, Sudan, Somalia) ──
+        {
+            "query": '"Boko Haram" OR "Al-Shabaab" OR "jihadist attack" OR "ISIS Africa" OR "Sahel crisis" OR "Wagner Africa"',
+            "tone": None,
+            "countries": ["NG", "NE", "ML", "BF", "TD", "CF", "SN", "MR", "GN", "SL", "LR", "CI", "GH", "TG", "BJ", "CM", "GA", "GQ", "ST", "SO", "ET", "ER", "DJ", "KE", "SS", "SD", "UG", "RW", "BI", "CD", "CG", "AO", "LY", "DZ", "TN", "EG", "MA", "EH"],
+        },
+        {
+            "query": '"mass shooting" OR "mass casualty" OR "massacre" OR "suicide bombing" OR "vehicle ramming"',
+            "tone": "<-5",
+            "countries": ["NG", "ML", "BF", "TD", "CF", "SO", "ET", "SS", "SD", "CD", "CG", "AO", "LY", "DZ", "TN", "EG"],
+        },
+        # ─— Ukraine / Russia / Eurasia (CZIB Active) ──
+        {
+            "query": '"Ukraine" OR "Russia" OR "missile" OR "airstrike" OR "war" OR "invasion"',
+            "tone": "<-5",
+            "countries": ["UA", "RU", "BY", "MD", "GE", "AM", "AZ", "PL", "RO", "HU", "SK", "LT", "LV", "EE", "FI"],
+        },
+        # ── South & Central Asia ──
+        {
+            "query": '"Taliban" OR "Afghanistan" OR "Pakistan" OR "terror attack" OR "suicide bomber"',
+            "tone": "<-5",
+            "countries": ["AF", "PK", "IN", "BD", "LK", "NP", "BT", "MV", "IR", "IQ", "SY", "YE"],
+        },
+        # ── Southeast Asia ──
+        {
+            "query": '"Myanmar" OR "Rohingya" OR "civil war" OR "armed conflict" OR "insurgency"',
+            "tone": "<-5",
+            "countries": ["MM", "TH", "PH", "ID", "MY", "VN", "LA", "KH", "SG", "BN", "TL", "PG"],
+        },
+        # ── Latin America ──
+        {
+            "query": '"drug cartel" OR "gang violence" OR "massacre" OR "armed conflict" OR "homicide"',
+            "tone": "<-5",
+            "countries": ["CO", "VE", "MX", "HT", "EC", "PE", "BR", "HN", "GT", "SV", "NI", "CR", "PA", "BO", "PY", "CL", "AR", "UY", "CU", "JM", "DO"],
+        },
+        # ── East Asia / Pacific ──
+        {
+            "query": '"North Korea" OR "DPRK" OR "nuclear" OR "missile test" OR "provocation"',
+            "tone": "<-5",
+            "countries": ["KP", "KR", "JP", "CN", "TW", "MN", "PH", "VN", "ID", "MY", "SG", "TH", "AU", "NZ", "PG"],
+        },
     ]
 
 
@@ -651,14 +788,32 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         all_items.extend(items)
         stats["queries_executed"] += 1
 
-    # Fetch from GDELT — with inter-request sleep to respect rate limits
-    gdelt_queries = build_gdelt_queries()
-    for idx, gdelt_query in enumerate(gdelt_queries[:10]):  # Reduced to 10 to avoid rate limits
-        if idx > 0:
-            time.sleep(2.0)  # 2-second gap between GDELT requests
-        items = fetch_gdelt_articles(gdelt_query, max_age_days=_MAX_ARTICLE_AGE_DAYS)
-        all_items.extend(items)
-        stats["queries_executed"] += 1
+    # Fetch from GDELT — optional, with strict rate-limit handling.
+    # GDELT has aggressive shared-IP rate limits on cloud runners.
+    # We rotate queries per-run and skip silently on repeated 429s.
+    try:
+        gdelt_queries = build_gdelt_queries()
+        # Rotate: pick 2 queries based on minute-of-hour for distribution
+        random.seed(datetime.now().minute)
+        selected = random.sample(gdelt_queries, min(2, len(gdelt_queries)))
+
+        # Initial delay — GDELT often rejects the very first request on a fresh IP
+        time.sleep(8.0)
+
+        for idx, gdelt_spec in enumerate(selected):
+            if idx > 0:
+                time.sleep(6.0)
+            items = fetch_gdelt_articles(
+                query=gdelt_spec["query"],
+                max_age_days=_MAX_ARTICLE_AGE_DAYS,
+                tone=gdelt_spec.get("tone"),
+                source_countries=gdelt_spec.get("countries"),
+            )
+            all_items.extend(items)
+            stats["queries_executed"] += 1
+    except Exception:
+        logger.warning("GDELT fetch skipped due to rate-limit or network issues")
+        pass
 
     stats["items_fetched"] = len(all_items)
     logger.info("Pass A: Fetched %d items from %d sources/queries", len(all_items), stats["queries_executed"])
