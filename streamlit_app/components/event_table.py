@@ -8,6 +8,7 @@ for robust cross-browser rendering.
 """
 
 import html
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,8 @@ import json
 _UI_CONFIG = json.loads((Path(__file__).parent.parent / "config" / "ui_settings.json").read_text())
 _TIERS = _UI_CONFIG["tiers"]
 _STATUS_CFG = _UI_CONFIG["status"]
+
+PAGE_SIZE = 20
 
 
 def _relative_time(dt: datetime | None) -> str:
@@ -66,8 +69,6 @@ def _badge_html(text: str, color: str, bg: str) -> str:
 def _tier_badge(tier: str | None) -> str:
     if not tier or str(tier).strip().lower() == "none":
         return _badge_html("none", "#64748B", "rgba(100,116,139,0.12)")
-    
-    # Normalize for robust lookup
     norm_tier = str(tier).strip().upper()
     cfg = _TIERS.get(norm_tier, _TIERS["WATCH"])
     return _badge_html(cfg["label"], cfg["color"], cfg["bg"])
@@ -90,6 +91,11 @@ def _country_flag(iso: str | None) -> str:
     if not isinstance(iso, str) or len(iso) != 2:
         return "🌐"
     return chr(0x1F1E6 + ord(iso[0].upper()) - 65) + chr(0x1F1E6 + ord(iso[1].upper()) - 65)
+
+
+def _normalize_tier(series: pd.Series) -> pd.Series:
+    """Robustly normalize alert_tier to uppercase string, treating NaN/None as empty."""
+    return series.fillna("").astype(str).str.strip().str.upper()
 
 
 def render_event_table(events: list[dict]):
@@ -122,48 +128,48 @@ def render_event_table(events: list[dict]):
             key="evt_sev",
         )
 
-    # Apply filters
+    # ── Apply filters ──
     filtered = df.copy()
+
     if search_text.strip():
         q = search_text.lower()
-        mask = filtered["source_title"].fillna("").str.lower().str.contains(q)
+        mask = filtered["source_title"].fillna("").str.lower().str.contains(q, na=False)
         if "canonical_text" in filtered.columns:
-            mask = mask | filtered["canonical_text"].fillna("").str.lower().str.contains(q)
-        filtered = filtered[mask]
-    
-    if sel_type != "All":
-        filtered = filtered[filtered["event_type"] == sel_type]
-    
-    if sel_tier != "All":
-        if sel_tier == "None":
-            tier_mask = filtered["alert_tier"].isna() | (filtered["alert_tier"].fillna("").astype(str).str.strip() == "")
-            filtered = filtered[tier_mask]
-        else:
-            tier_mask = filtered["alert_tier"].fillna("").astype(str).str.strip().str.upper() == sel_tier.upper()
-            filtered = filtered[tier_mask]
-            
-    if sel_country != "All":
-        filtered = filtered[filtered["country_iso"] == sel_country]
-        
-    filtered = filtered[
-        (filtered["severity_score"].fillna(0) >= sev_range[0]) &
-        (filtered["severity_score"].fillna(0) <= sev_range[1])
-    ]
+            mask = mask | filtered["canonical_text"].fillna("").str.lower().str.contains(q, na=False)
+        filtered = filtered.loc[mask]
 
-    # Summary bar
+    if sel_type != "All":
+        mask = filtered["event_type"].fillna("").astype(str).str.strip() == sel_type
+        filtered = filtered.loc[mask]
+
+    if sel_tier != "All":
+        norm = _normalize_tier(filtered["alert_tier"])
+        if sel_tier == "None":
+            mask = norm == ""
+        else:
+            mask = norm == sel_tier.upper()
+        filtered = filtered.loc[mask]
+
+    if sel_country != "All":
+        mask = filtered["country_iso"].fillna("").astype(str).str.strip() == sel_country
+        filtered = filtered.loc[mask]
+
+    sev = pd.to_numeric(filtered["severity_score"], errors="coerce").fillna(0)
+    filtered = filtered.loc[(sev >= sev_range[0]) & (sev <= sev_range[1])]
+
+    # ── Summary bar ──
     total_all = len(df)
     total_filt = len(filtered)
-    
+
     if total_filt == total_all:
         summary_text = f"Showing all **{total_all}** recent events"
     else:
         summary_text = f"Filtered: **{total_filt}** of **{total_all}** events"
 
-    # Count using the same robust logic
-    tier_series = filtered["alert_tier"].fillna("").astype(str).str.strip().str.upper()
-    crit_n = (tier_series == "CRITICAL").sum()
-    alert_n = (tier_series == "ALERT").sum()
-    watch_n = (tier_series == "WATCH").sum()
+    norm_tiers = _normalize_tier(filtered["alert_tier"])
+    crit_n = int((norm_tiers == "CRITICAL").sum())
+    alert_n = int((norm_tiers == "ALERT").sum())
+    watch_n = int((norm_tiers == "WATCH").sum())
 
     st.markdown(
         f"{summary_text} &nbsp;|&nbsp; "
@@ -174,17 +180,44 @@ def render_event_table(events: list[dict]):
     )
 
     # ── Pagination ──
-    PAGE_SIZE = 20
-    total_pages = max(1, (total_filt + PAGE_SIZE - 1) // PAGE_SIZE)
+    total_pages = max(1, math.ceil(total_filt / PAGE_SIZE)) if total_filt else 1
 
-    pg_cols = st.columns([2, 1, 2])
-    with pg_cols[1]:
-        page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="evt_page")
+    # Reset page to 1 when filters change (Streamlit reruns on any widget change,
+    # so we just clamp the session_state value safely here)
+    page_key = "evt_page"
+    if page_key in st.session_state and st.session_state[page_key] > total_pages:
+        st.session_state[page_key] = 1
+
+    col_prev, col_info, col_next = st.columns([1, 2, 1])
+    with col_prev:
+        st.write("")  # vertical spacer
+        prev_disabled = st.session_state.get(page_key, 1) <= 1
+        if st.button("← Prev", disabled=prev_disabled, use_container_width=True, key="evt_prev"):
+            st.session_state[page_key] = max(1, st.session_state.get(page_key, 1) - 1)
+            st.rerun()
+    with col_info:
+        page = st.number_input(
+            "Page",
+            min_value=1,
+            max_value=total_pages,
+            value=1,
+            step=1,
+            key=page_key,
+            label_visibility="collapsed",
+        )
+        st.caption(f"Page {page} of {total_pages}  ·  {total_filt} events")
+    with col_next:
+        st.write("")  # vertical spacer
+        next_disabled = st.session_state.get(page_key, 1) >= total_pages
+        if st.button("Next →", disabled=next_disabled, use_container_width=True, key="evt_next"):
+            st.session_state[page_key] = min(total_pages, st.session_state.get(page_key, 1) + 1)
+            st.rerun()
+
+    # ── Event Cards (Native Streamlit) ──
     start = (page - 1) * PAGE_SIZE
     end = start + PAGE_SIZE
     page_df = filtered.iloc[start:end]
 
-    # ── Event Cards (Native Streamlit) ──
     for _, row in page_df.iterrows():
         _render_event_card_native(row)
 
@@ -196,7 +229,6 @@ def _safe_str(val, default="—") -> str:
     """Safely convert a value to string, handling NaN/float."""
     if val is None:
         return default
-    import math
     if isinstance(val, float) and math.isnan(val):
         return default
     s = str(val).strip()
