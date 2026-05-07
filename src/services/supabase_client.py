@@ -48,19 +48,18 @@ def get_pool() -> ConnectionPool:
         database_url = _build_database_url()
         _pool = ConnectionPool(
             database_url,
-            min_size=2,
-            max_size=20,
+            min_size=1,
+            max_size=10,
             open=True,
-            configure=lambda conn: conn.execute("SET application_name = 'sim_dashboard'"),
         )
-        logger.info("Database connection pool created (max_size=20)")
+        logger.info("Database connection pool created (max_size=10)")
     return _pool
 
 
-def get_connection(timeout: float = 60.0):
+def get_connection():
     """Get a connection from the pool (legacy single-use compatibility)."""
     pool = get_pool()
-    return pool.getconn(timeout=timeout)
+    return pool.getconn()
 
 
 def put_connection(conn):

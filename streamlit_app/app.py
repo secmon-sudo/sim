@@ -255,19 +255,12 @@ with col_h2:
 
 st.divider()
 
-# ── Database Connection (with retry) ──
+# ── Database Connection ──
 db_conn = None
-_conn_err = None
-for _attempt in range(3):
-    try:
-        db_conn = get_connection()
-        break
-    except Exception as e:
-        _conn_err = e
-        import time
-        time.sleep(1.0)
-if db_conn is None:
-    st.error(f"❌ Database connection failed: {_conn_err}")
+try:
+    db_conn = get_connection()
+except Exception as e:
+    st.error(f"❌ Database connection failed: {e}")
     st.info("Configure DATABASE_URL or SUPABASE_* environment variables")
     st.stop()
 
