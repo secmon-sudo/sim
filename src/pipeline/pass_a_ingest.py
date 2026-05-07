@@ -217,59 +217,125 @@ def is_noise(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def build_search_queries() -> list[dict]:
-    """Build search queries from keywords config — GLOBAL (no region restriction).
+    """Build focused search queries.  ONLY aviation / hotel / tourism / mass-casualty security.
 
     Strategy:
-    - Broad security keywords: search globally WITHOUT aviation qualifier
-      BUT require at least one aviation/hotel/tourism keyword in the phrase.
-    - Specific aviation keywords: search with 'airport OR aviation' qualifier.
-    - Geopolitical keywords: always broad.
+    1.  Keep the query list SHORT (≈40 queries).  300+ low-quality queries drown the signal.
+    2.  Every query MUST contain aviation / hotel / tourism context, OR be an
+        unambiguous mass-casualty security phrase.
+    3.  Google News RSS handles simple `phrase airport` syntax reliably.
+        Complex boolean with many negative keywords breaks or returns 0 results.
+    4.  Remaining noise is caught by `is_noise()` post-filter.
     """
     queries = []
-    seen_queries = set()
+    seen = set()
 
-    # Broad keywords that are security-related anywhere (aviation, hotel, tourism, mass-casualty).
-    # We keep this intentionally narrow to avoid sports/entertainment noise.
-    broad_keywords = {
-        "bomb threat", "active shooter", "explosion",
-        "security breach", "evacuation", "terrorism", "suspicious package",
-        "hostage", "weapon", "airport attack", "airport shooting",
-        "airport bombing", "hotel attack", "hotel bombing", "hotel shooting",
-        "hotel siege", "resort attack", "airline crew attack",
-        "mass shooting", "mass stabbing", "mass casualty", "massacre",
-        "suicide bombing", "drone attack", "UAV attack", "drone bombing",
-        "drone strike", "vehicle ramming", "IED explosion",
-    }
+    def _add(q: str):
+        if q.lower() not in seen:
+            seen.add(q.lower())
+            queries.append({"query": q, "broad": False})
 
-    # Keywords that are TOO generic alone and MUST be qualified.
-    # "hijack" → "hijack" airport|plane|flight|aviation
-    must_qualify = {"hijack"}
+    # ── Tier 1: Unambiguous aviation / airport security phrases ──
+    tier1 = [
+        '"airport attack"',
+        '"airport shooting"',
+        '"airport bombing"',
+        '"airport stabbing"',
+        '"airport security breach"',
+        '"airport threat"',
+        '"airport explosion"',
+        '"airport terror"',
+        '"airport gunfire"',
+        '"airline crew attack"',
+        '"airline staff assault"',
+        '"flight attendant attack"',
+        '"pilot assault"',
+        '"pilot attacked"',
+        '"ground crew attack"',
+        '"ground staff stabbed"',
+        '"cabin crew assaulted"',
+        '"airport worker killed"',
+        '"check-in agent attacked"',
+        '"air traffic controller threat"',
+    ]
+    for q in tier1:
+        _add(q)
 
-    for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower in seen_queries:
-                continue
-            seen_queries.add(kw_lower)
+    # ── Tier 2: Hotel / resort / tourism security phrases ──
+    tier2 = [
+        '"hotel attack"',
+        '"hotel bombing"',
+        '"hotel shooting"',
+        '"hotel siege"',
+        '"hotel explosion"',
+        '"hotel terror"',
+        '"resort attack"',
+        '"resort bombing"',
+        '"beach attack"',
+        '"cruise ship attack"',
+        '"tourist hotel attack"',
+        '"hostage hotel"',
+    ]
+    for q in tier2:
+        _add(q)
 
-            # Skip pure-generic words that would pull in sports/entertainment noise.
-            if kw_lower in must_qualify:
-                queries.append({"query": f'"{kw}" (airport OR aviation OR plane OR flight)', "broad": False})
-                continue
+    # ── Tier 3: Generic words FORCED into aviation/hotel context ──
+    # Simple `phrase airport` format — Google News handles this reliably.
+    # Noise filters catch any remaining false positives post-fetch.
+    tier3 = [
+        '"bomb threat" airport',
+        '"active shooter" airport',
+        '"security breach" airport',
+        '"evacuation" airport',
+        '"explosion" airport',
+        '"suspicious package" airport',
+        '"hostage" airport',
+        '"hijack" airport',
+        '"mass shooting" airport',
+        '"mass casualty" airport',
+        '"suicide bombing" airport',
+        '"drone attack" airport',
+        '"unruly passenger" airport',
+        '"passenger attack crew" airport',
+        '"laser attack" airport',
+        '"runway incursion"',
+        '"emergency landing"',
+        '"engine failure" flight',
+        '"fire on board" flight',
+        '"bird strike" airport',
+        '"depressurization" flight',
+        '"drone incursion" airport',
+    ]
+    for q in tier3:
+        _add(q)
 
-            if any(bk in kw_lower for bk in broad_keywords):
-                queries.append({"query": f'"{kw}"', "broad": True})
-            else:
-                queries.append({"query": f'"{kw}" airport OR aviation', "broad": False})
-
-    # Geopolitical keywords are always broad
-    for lang, keywords in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).items():
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower in seen_queries:
-                continue
-            seen_queries.add(kw_lower)
-            queries.append({"query": f'"{kw}"', "broad": True})
+    # ── Tier 4: Geopolitical / African terrorism (broad, high-value only) ──
+    geo = [
+        '"missile strike"',
+        '"airstrike"',
+        '"war escalation"',
+        '"ceasefire broken"',
+        '"Iran Israel"',
+        '"Ukraine Russia"',
+        '"nuclear threat"',
+        '"military coup"',
+        '"Boko Haram"',
+        '"Al-Shabaab"',
+        '"jihadist attack"',
+        '"ISIS Africa"',
+        '"Sahel crisis"',
+        '"Mali attack"',
+        '"Burkina Faso attack"',
+        '"Niger coup"',
+        '"Somalia bombing"',
+        '"Wagner Africa"',
+        '"civilian casualties"',
+        '"artillery shelling"',
+        '"troop buildup"',
+        '"border clash"',
+    ]
+    for q in geo:
+        _add(q)
 
     return queries
 

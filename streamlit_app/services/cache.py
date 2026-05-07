@@ -22,7 +22,9 @@ def get_recent_events(_db_conn, limit: int = 200) -> list[dict]:
                   storyline_id, time_certainty,
                   occurred_at_est, ingested_at, status,
                   llm_provider, llm_model,
-                  source_domain, source_url
+                  source_domain, source_url,
+                  canonical_text, raw_text,
+                  pass_c_classification, pass_d_scores
            FROM events
            WHERE status IN ('classified', 'scored', 'reconciled')
            ORDER BY ingested_at DESC
@@ -39,6 +41,8 @@ def get_recent_events(_db_conn, limit: int = 200) -> list[dict]:
         "occurred_at_est", "ingested_at", "status",
         "llm_provider", "llm_model",
         "source_domain", "source_url",
+        "canonical_text", "raw_text",
+        "pass_c_classification", "pass_d_scores",
     ]
     return [dict(zip(columns, row)) for row in rows]
 
@@ -50,7 +54,8 @@ def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
         """SELECT id, source_title, event_type, alert_tier,
                   severity_score, system_confidence,
                   anchor_name_norm, country_iso,
-                  occurred_at_est, ingested_at
+                  occurred_at_est, ingested_at,
+                  source_url, source_domain, canonical_text
            FROM events
            WHERE alert_tier IS NOT NULL
              AND ingested_at > NOW() - INTERVAL '%s hours'
@@ -69,6 +74,7 @@ def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
         "severity_score", "system_confidence",
         "anchor_name_norm", "country_iso",
         "occurred_at_est", "ingested_at",
+        "source_url", "source_domain", "canonical_text",
     ]
     return [dict(zip(columns, row)) for row in rows]
 
@@ -110,6 +116,21 @@ def get_pipeline_stats(_db_conn) -> dict:
            ORDER BY timestamp DESC LIMIT 1""",
     ).fetchone()
 
+    # Count alerts in last 24h by tier
+    alert_counts = _db_conn.execute(
+        """SELECT alert_tier, COUNT(*)
+           FROM events
+           WHERE alert_tier IS NOT NULL
+             AND ingested_at > NOW() - INTERVAL '24h'
+           GROUP BY alert_tier""",
+    ).fetchall()
+
+    # Events ingested in last 24h
+    events_24h = _db_conn.execute(
+        """SELECT COUNT(*) FROM events
+           WHERE ingested_at > NOW() - INTERVAL '24h'""",
+    ).fetchone()
+
     return {
         "llm_calls_24h": llm[0] if llm else 0,
         "tokens_used_24h": llm[1] if llm else 0,
@@ -119,6 +140,8 @@ def get_pipeline_stats(_db_conn) -> dict:
         "last_run_at": last_run[1].isoformat() if last_run and last_run[1] else None,
         "daily_quota": int(quota[0]) if quota and quota[0] else 1000,
         "daily_used": int(quota[1]) if quota and quota[1] else 0,
+        "alert_counts": {row[0]: row[1] for row in alert_counts} if alert_counts else {},
+        "events_24h": events_24h[0] if events_24h else 0,
     }
 
 
@@ -128,7 +151,7 @@ def get_storyline_graph_data(_db_conn) -> list[dict]:
     rows = _db_conn.execute(
         """SELECT id, source_title, event_type, storyline_id,
                   storyline_hint, anchor_name_norm, country_iso,
-                  severity_score, occurred_at_est
+                  severity_score, occurred_at_est, alert_tier
            FROM events
            WHERE storyline_id IS NOT NULL
              AND status IN ('scored', 'reconciled')
@@ -139,6 +162,26 @@ def get_storyline_graph_data(_db_conn) -> list[dict]:
     columns = [
         "id", "source_title", "event_type", "storyline_id",
         "storyline_hint", "anchor_name_norm", "country_iso",
-        "severity_score", "occurred_at_est",
+        "severity_score", "occurred_at_est", "alert_tier",
     ]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+@st.cache_data(ttl=60)
+def get_geo_summary(_db_conn) -> list[dict]:
+    """Get event counts by country for choropleth / summary."""
+    rows = _db_conn.execute(
+        """SELECT country_iso,
+                  COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE alert_tier = 'CRITICAL') AS critical,
+                  COUNT(*) FILTER (WHERE alert_tier = 'ALERT') AS alert,
+                  COUNT(*) FILTER (WHERE alert_tier = 'WATCH') AS watch
+           FROM events
+           WHERE country_iso IS NOT NULL
+             AND status IN ('classified', 'scored', 'reconciled')
+           GROUP BY country_iso
+           ORDER BY total DESC
+           LIMIT 20""",
+    ).fetchall()
+    columns = ["country_iso", "total", "critical", "alert", "watch"]
     return [dict(zip(columns, row)) for row in rows]
