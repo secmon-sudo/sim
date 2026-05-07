@@ -231,6 +231,12 @@ with tab_anchors:
 # --- Cleanup ---
 if db_conn is not None:
     try:
+        # Commit to close any implicit transaction from SELECT queries
+        # so the pool doesn't log a rollback warning
+        db_conn.commit()
+    except Exception:
+        pass
+    try:
         put_connection(db_conn)
     except Exception:
         pass
