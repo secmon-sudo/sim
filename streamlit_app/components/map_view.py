@@ -56,13 +56,11 @@ def render_map(events: list[dict], czib_data: list[dict] | None = None):
                 "glow_color": glow,
                 "radius": radius,
                 "glow_radius": glow_radius,
-                "title": title,
-                "type": (e.get("event_type") or "unknown").replace("_", " ").title(),
-                "tier": tier or "—",
-                "severity": severity,
-                "anchor": e.get("anchor_name_norm") or "—",
-                "country": f"{flag} {e.get('country_iso') or '—'}",
-                "confidence": float(e.get("system_confidence") or 0),
+                "name": title,
+                "type_or_status": "Type:",
+                "value": (e.get("event_type") or "unknown").replace("_", " ").title(),
+                "extra_label": "Severity / Tier:",
+                "extra_value": f"{severity} / {tier or '—'}",
             })
 
     # Build CZIB layer data
@@ -79,9 +77,10 @@ def render_map(events: list[dict], czib_data: list[dict] | None = None):
                         "lat": lat,
                         "lon": lon,
                         "name": z.get("name", "CZIB Zone"),
-                        "status": z.get("status", "Active"),
-                        "countries": z.get("country_names", "—") or "—",
-                        "valid_until": z.get("valid_until", "—") or "—",
+                        "type_or_status": "Status:",
+                        "value": z.get("status", "Active"),
+                        "extra_label": "Valid Until:",
+                        "extra_value": z.get("valid_until", "—") or "—",
                     })
                 except (ValueError, IndexError):
                     continue
