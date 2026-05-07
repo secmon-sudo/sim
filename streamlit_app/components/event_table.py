@@ -164,24 +164,35 @@ def render_event_table(events: list[dict]):
         st.info("No events match the selected filters.")
 
 
+def _safe_str(val, default="—") -> str:
+    """Safely convert a value to string, handling NaN/float."""
+    if val is None:
+        return default
+    import math
+    if isinstance(val, float) and math.isnan(val):
+        return default
+    s = str(val).strip()
+    return s if s else default
+
+
 def _render_event_card_native(row: pd.Series):
     """Render a single event card using Streamlit native components."""
-    eid = str(row.get("id", "?"))[:8]
-    title = str(row.get("source_title") or "Untitled")
+    eid = _safe_str(row.get("id", "?"))[:8]
+    title = _safe_str(row.get("source_title"), "Untitled")
     etype = _event_type_label(row.get("event_type"))
     tier = row.get("alert_tier")
-    status = row.get("status", "raw")
+    status = _safe_str(row.get("status"), "raw")
     severity = int(row.get("severity_score") or 0)
     confidence = float(row.get("system_confidence") or 0)
-    anchor = str(row.get("anchor_name_norm") or "—")
-    country = str(row.get("country_iso") or "—")
+    anchor = _safe_str(row.get("anchor_name_norm"))
+    country = _safe_str(row.get("country_iso"))
     flag = _country_flag(row.get("country_iso"))
     ingested = row.get("ingested_at")
     occurred = row.get("occurred_at_est")
-    domain = str(row.get("source_domain") or "—")
-    url = str(row.get("source_url") or "")
-    provider = str(row.get("llm_provider") or "—")
-    model = str(row.get("llm_model") or "—")
+    domain = _safe_str(row.get("source_domain"))
+    url = _safe_str(row.get("source_url"), "")
+    provider = _safe_str(row.get("llm_provider"))
+    model = _safe_str(row.get("llm_model"))
     rel_time = _relative_time(ingested)
     full_time = _format_datetime(ingested)
 

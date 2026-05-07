@@ -23,7 +23,6 @@ from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
 from components.czib_dashboard import render_czib_dashboard
-from components.czib_overlay import render_czib_layer, get_czib_map_data
 from components.event_table import render_event_table
 from components.map_view import render_map
 from components.storyline_graph import render_storyline_graph
@@ -31,6 +30,7 @@ from components.telemetry_dashboard import render_telemetry
 from services.cache import (
     get_alert_events,
     get_czib_stats,
+    get_czib_zones,
     get_geo_summary,
     get_pipeline_stats,
     get_recent_events,
@@ -388,10 +388,8 @@ with tab_alerts:
 with tab_map:
     try:
         events = get_recent_events(db_conn)
-        render_map(events)
-        st.divider()
-        czib_map_data = get_czib_map_data(db_conn)
-        render_czib_layer(czib_map_data)
+        czib_zones = get_czib_zones(db_conn, only_active=False)
+        render_map(events, czib_data=czib_zones)
     except Exception as e:
         st.error(f"Map error: {e}")
 
