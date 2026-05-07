@@ -13,16 +13,20 @@ from pathlib import Path
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Add both project root and app dir for robust imports in all environments
+_APP_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _APP_DIR.parent
+sys.path.insert(0, str(_APP_DIR))
+sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.services.supabase_client import get_connection, put_connection
-from streamlit_app.components.alert_feed import render_alert_feed
-from streamlit_app.components.anchor_lookup import render_anchor_lookup
-from streamlit_app.components.event_table import render_event_table
-from streamlit_app.components.map_view import render_map
-from streamlit_app.components.storyline_graph import render_storyline_graph
-from streamlit_app.components.telemetry_dashboard import render_telemetry
-from streamlit_app.services.cache import (
+from components.alert_feed import render_alert_feed
+from components.anchor_lookup import render_anchor_lookup
+from components.event_table import render_event_table
+from components.map_view import render_map
+from components.storyline_graph import render_storyline_graph
+from components.telemetry_dashboard import render_telemetry
+from services.cache import (
     get_alert_events,
     get_geo_summary,
     get_pipeline_stats,
