@@ -46,7 +46,13 @@ def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
             event_id, lock_owner, last_hb, _ = row
 
             # Step 1: Write telemetry BEFORE clearing lock
-            stale_duration = (datetime.now(timezone.utc) - last_hb).total_seconds() if last_hb else 0
+            # Handle timezone-naive datetimes from PostgreSQL
+            if last_hb:
+                if last_hb.tzinfo is None:
+                    last_hb = last_hb.replace(tzinfo=timezone.utc)
+                stale_duration = (datetime.now(timezone.utc) - last_hb).total_seconds()
+            else:
+                stale_duration = 0
             telemetry_payload = {
                 "event_type": "stale_lock_cleared",
                 "event_id": str(event_id),

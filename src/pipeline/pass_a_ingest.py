@@ -103,18 +103,20 @@ def build_search_queries() -> list[dict]:
         for kw in keywords:
             base_queries.append({"query": f'"{kw}"', "broad": True})
 
-    # Distribute across regions — broad queries go to all regions, narrow to subset
+    # Distribute across regions — create region-grouped queries for fair sampling
+    queries_by_region = {region.get("label", "us"): [] for region in _GEO_REGIONS}
     for region in _GEO_REGIONS:
+        label = region.get("label", "us")
         for bq in base_queries:
-            queries.append({
+            queries_by_region[label].append({
                 "query": bq["query"],
                 "hl": region.get("hl", "en"),
                 "gl": region.get("gl", "US"),
                 "ceid": region.get("ceid", "US:en"),
-                "label": region.get("label", "us"),
+                "label": label,
             })
 
-    return queries
+    return queries_by_region
 
 
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
@@ -132,7 +134,10 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
         )
 
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        # Reddit requires a descriptive User-Agent
+        headers = {
+            "User-Agent": "SIM-OSINT-Bot/1.0 (Security Incident Monitor; contact@sim-osint.app)"
+        }
         resp = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
         resp.raise_for_status()
     except Exception:
@@ -159,10 +164,16 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
                 except Exception:
                     pass
 
-            if pub_dt is not None:
-                age_days = (now_utc - pub_dt).total_seconds() / 86400
-                if age_days > max_age:
-                    continue  # Skip old articles
+            # STRICT: Reject items with missing or unparseable pubDate
+            # This prevents old news without dates from entering the system
+            if pub_dt is None:
+                stats["age_filtered"] += 1
+                continue
+
+            age_days = (now_utc - pub_dt).total_seconds() / 86400
+            if age_days > max_age:
+                stats["age_filtered"] += 1
+                continue  # Skip old articles
 
             items.append({
                 "title": title,
@@ -320,16 +331,23 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "full_text_fetched": 0,
     }
 
-    queries = build_search_queries()
+    queries_by_region = build_search_queries()
     all_items = []
 
-    # Fetch from dynamic Google News feeds across regions
-    for query_info in queries[:50]:  # Limit queries per run
-        items = fetch_rss_feed(query_info, is_direct_url=False)
-        all_items.extend(items)
-        stats["queries_executed"] += 1
+    # Sample evenly across regions to avoid US bias
+    # Each region gets ~max_queries_per_region queries
+    max_total_queries = 50
+    region_labels = list(queries_by_region.keys())
+    queries_per_region = max(1, max_total_queries // len(region_labels))
 
-    # Fetch from static hardcoded feeds (Reddit, Twitter/Xcancel)
+    for label, query_list in queries_by_region.items():
+        selected = query_list[:queries_per_region]
+        for query_info in selected:
+            items = fetch_rss_feed(query_info, is_direct_url=False)
+            all_items.extend(items)
+            stats["queries_executed"] += 1
+
+    # Fetch from static hardcoded feeds (Reddit)
     static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
     for feed_url in static_feeds:
         items = fetch_rss_feed(feed_url, is_direct_url=True)
