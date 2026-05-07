@@ -65,10 +65,10 @@ def get_pool() -> ConnectionPool:
             _pool = ConnectionPool(
                 database_url,
                 min_size=1,
-                max_size=10,
+                max_size=20,
                 open=True,
             )
-            logger.info("Database connection pool created (max_size=10)")
+            logger.info("Database connection pool created (max_size=20)")
         return _pool
 
 def _get_streamlit_pool():
@@ -79,22 +79,32 @@ def _get_streamlit_pool():
     @st.cache_resource(ttl=3600)
     def _create_pool():
         database_url = _build_database_url()
+        # Basic validation: if host is localhost but we're likely in cloud, warn
+        if "localhost" in database_url and os.environ.get("STREAMLIT_RUNTIME_ENV"):
+             logger.warning("Database URL points to localhost in a Streamlit environment. Check secrets.")
+             
         pool = ConnectionPool(
             database_url,
             min_size=1,
-            max_size=10,
+            max_size=20,
             open=True,
         )
-        logger.info("Streamlit shared database pool created (max_size=10)")
+        logger.info("Streamlit shared database pool created (max_size=20)")
         return pool
         
     return _create_pool()
 
 
 def get_connection():
-    """Get a connection from the pool (legacy single-use compatibility)."""
-    pool = get_pool()
-    return pool.getconn()
+    """Get a connection from the pool with a clear error if it fails."""
+    try:
+        pool = get_pool()
+        # We use a 10s timeout instead of 30s for faster feedback in UI
+        return pool.getconn(timeout=10.0)
+    except Exception as e:
+        if "timeout" in str(e).lower():
+            raise RuntimeError("Database pool exhausted (10s timeout). Too many concurrent users or slow queries.") from e
+        raise e
 
 
 def put_connection(conn):

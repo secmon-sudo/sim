@@ -1,6 +1,6 @@
 {
   "pipeline": {
-    "run_interval_minutes": 30,
+    "run_interval_minutes": 120,
     "max_events_per_run": 100,
     "stale_lock_threshold_minutes": 15,
     "heartbeat_interval_seconds": 60,

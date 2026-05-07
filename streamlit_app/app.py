@@ -258,7 +258,10 @@ try:
     db_conn = get_connection()
 except Exception as e:
     st.error(f"❌ Database connection failed: {e}")
-    st.info("Configure DATABASE_URL or SUPABASE_* environment variables")
+    st.info("💡 **Checklist:**\n"
+            "1. Is `DATABASE_URL` set in Streamlit Secrets?\n"
+            "2. If using Supabase, is the IP allowed in 'Network Restrictions'?\n"
+            "3. If using pooler, ensure port is 6543 (Transaction Mode).")
     st.stop()
 
 # ── Sidebar ──

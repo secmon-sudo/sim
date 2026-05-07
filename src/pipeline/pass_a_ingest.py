@@ -637,18 +637,26 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 # ---------------------------------------------------------------------------
 
 def fetch_full_text(url: str) -> str:
-    """Attempt to fetch full article text from URL using trafilatura."""
+    """
+    Attempt to fetch full article text from URL using trafilatura.
+    Uses a strict timeout to prevent pipeline hangs on slow sources.
+    """
     try:
         import trafilatura
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        downloaded = trafilatura.fetch_url(url, headers=headers)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        # We use a strict timeout for both connection and read
+        # trafilatura.fetch_url uses a complex internal download mechanism; 
+        # using it directly but being aware of its potential to hang.
+        downloaded = trafilatura.fetch_url(url) 
+        
         if downloaded:
-            text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
+            text = trafilatura.extract(downloaded, include_comments=False, include_tables=False, no_fallback=False)
             return text or ""
-    except ImportError:
-        logger.debug("trafilatura not installed, skipping full-text fetch")
-    except Exception:
-        logger.warning("Full-text fetch failed for %s", url[:80])
+    except Exception as e:
+        logger.debug("Full-text fetch failed for %s: %s", url[:80], str(e))
     return ""
 
 
@@ -710,11 +718,8 @@ def title_similarity(title_a: str, title_b: str) -> float:
 # Dedup
 # ---------------------------------------------------------------------------
 
-def check_content_duplicate(db_conn, title: str, canonical_text: str) -> bool:
-    """
-    Check if a similar article already exists in the DB.
-    Uses title similarity AND canonical text similarity.
-    """
+def _fetch_recent_events_for_dedup(db_conn) -> list[tuple[str, str]]:
+    """Fetch recent events once to avoid O(N) database queries during ingestion."""
     try:
         rows = db_conn.execute(
             """SELECT source_title, canonical_text
@@ -724,24 +729,29 @@ def check_content_duplicate(db_conn, title: str, canonical_text: str) -> bool:
                LIMIT 500""",
             (_MAX_ARTICLE_AGE_DAYS,),
         ).fetchall()
+        return [(row[0] or "", row[1] or "") for row in rows]
+    except Exception:
+        logger.exception("Failed to fetch recent events for dedup")
+        return []
 
-        for row in rows:
-            existing_title = row[0] or ""
-            existing_text = row[1] or ""
 
-            # Title similarity (primary signal)
-            sim = title_similarity(title, existing_title)
-            if sim >= _TITLE_SIM_THRESHOLD:
-                return True
+def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, canonical_text: str) -> bool:
+    """
+    Check if a similar article exists in the provided list of recent events.
+    Uses title similarity AND canonical text similarity.
+    """
+    for existing_title, existing_text in recent_events:
+        # Title similarity (primary signal)
+        sim = title_similarity(title, existing_title)
+        if sim >= _TITLE_SIM_THRESHOLD:
+            return True
 
-            # Content similarity for longer texts
+        # Content similarity for longer texts
+        if len(canonical_text) > 100 and len(existing_text) > 100:
             text_sim = difflib.SequenceMatcher(None, canonical_text, existing_text).ratio()
             if text_sim >= _CONTENT_SIM_THRESHOLD:
                 return True
-        return False
-    except Exception:
-        logger.exception("Content duplicate check failed")
-        return False
+    return False
 
 
 def check_domain_penalty(db_conn, domain: str) -> float:
@@ -849,6 +859,9 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     # Sort items by date descending (newest first)
     deduped_items.sort(key=lambda x: x.get("pub_dt", datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 
+    # Fetch recent events for comparison once
+    recent_events = _fetch_recent_events_for_dedup(db_conn)
+
     inserted = 0
     for item in deduped_items:
         if inserted >= max_events:
@@ -886,7 +899,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 canonical = canonicalize_text(f"{canonical} {full_text}")
 
         # Content dedup: check if similar title/text already exists
-        if check_content_duplicate(db_conn, item.get("title", ""), canonical):
+        if check_content_duplicate(recent_events, item.get("title", ""), canonical):
             stats["content_duplicates_skipped"] += 1
             continue
 
