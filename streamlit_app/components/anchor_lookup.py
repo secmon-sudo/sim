@@ -11,6 +11,8 @@ import json
 
 import streamlit as st
 
+from streamlit_app.services.cache import _safe_execute
+
 
 def _country_flag(iso: str | None) -> str:
     if not isinstance(iso, str) or len(iso) != 2:
@@ -30,7 +32,8 @@ def render_anchor_lookup(db_conn):
     )
 
     if search and len(search) >= 2:
-        results = db_conn.execute(
+        results = _safe_execute(
+            db_conn,
             """SELECT iata_code, icao_code, canonical_name, country_iso,
                       anchor_type, czib_flag, aliases, latitude, longitude
                FROM anchor_master
@@ -103,11 +106,11 @@ def render_anchor_lookup(db_conn):
     st.divider()
     st.subheader("📊 Anchor Database")
 
-    total = db_conn.execute("SELECT COUNT(*) FROM anchor_master").fetchone()
-    czib_count = db_conn.execute("SELECT COUNT(*) FROM anchor_master WHERE czib_flag = TRUE").fetchone()
-    countries = db_conn.execute("SELECT COUNT(DISTINCT country_iso) FROM anchor_master").fetchone()
-    airports = db_conn.execute("SELECT COUNT(*) FROM anchor_master WHERE anchor_type = 'airport'").fetchone()
-    hotels = db_conn.execute("SELECT COUNT(*) FROM anchor_master WHERE anchor_type = 'hotel_chain'").fetchone()
+    total = _safe_execute(db_conn, "SELECT COUNT(*) FROM anchor_master").fetchone()
+    czib_count = _safe_execute(db_conn, "SELECT COUNT(*) FROM anchor_master WHERE czib_flag = TRUE").fetchone()
+    countries = _safe_execute(db_conn, "SELECT COUNT(DISTINCT country_iso) FROM anchor_master").fetchone()
+    airports = _safe_execute(db_conn, "SELECT COUNT(*) FROM anchor_master WHERE anchor_type = 'airport'").fetchone()
+    hotels = _safe_execute(db_conn, "SELECT COUNT(*) FROM anchor_master WHERE anchor_type = 'hotel_chain'").fetchone()
 
     s1, s2, s3, s4, s5 = st.columns(5)
     s1.metric("Total Anchors", total[0] if total else 0)
@@ -117,7 +120,8 @@ def render_anchor_lookup(db_conn):
     s5.metric("Countries", countries[0] if countries else 0)
 
     # Recent CZIB anchors table
-    czib_rows = db_conn.execute(
+    czib_rows = _safe_execute(
+        db_conn,
         """SELECT iata_code, icao_code, canonical_name, country_iso
            FROM anchor_master
            WHERE czib_flag = TRUE
