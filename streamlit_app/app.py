@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 # ── Path Setup ──
 _APP_DIR = Path(__file__).resolve().parent
@@ -270,25 +269,18 @@ with st.sidebar:
         <div style="text-align:center;margin-bottom:16px;">
           <div style="font-size:2em;margin-bottom:4px;">{_UI_CONFIG["app"]["page_icon"]}</div>
           <div style="font-weight:800;color:#F8FAFC;font-size:1.1em;">{_UI_CONFIG["app"]["title"]}</div>
-          <div style="font-size:0.75em;color:#64748B;">{_UI_CONFIG["app"]["subtitle"]}</div>
+          <div style="font-size:0.8em;color:#64748B;">{_UI_CONFIG["app"]["version"]}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.divider()
 
-    # Controls
-    st.markdown("### ⚙️ Controls")
-    auto_refresh = st.toggle("Auto Refresh (60s)", value=True, key="auto_ref")
-    if auto_refresh:
-        st_autorefresh(
-            interval=_UI_CONFIG["app"]["auto_refresh_seconds"] * 1000,
-            limit=None,
-            key="auto_refresh",
-        )
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.divider()
 
     # Quick stats
-    st.divider()
     st.markdown("### 📊 Quick Stats")
     try:
         stats = get_pipeline_stats(db_conn)

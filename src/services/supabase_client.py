@@ -36,7 +36,18 @@ def _build_database_url() -> str:
         dbname = os.environ.get("SUPABASE_DB_NAME", "postgres")
         user = os.environ.get("SUPABASE_DB_USER", "postgres")
         password = os.environ.get("SUPABASE_DB_PASSWORD", "")
+        
+        # Auto-switch to Transaction Mode (6543) if using Supabase Pooler on 5432
+        if "pooler.supabase.com" in host and port == "5432":
+            logger.info("Supabase pooler detected on 5432; auto-switching to port 6543 (Transaction Mode)")
+            port = "6543"
+            
         database_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
+    # If the database_url itself contains the pooler host on 5432, fix it
+    if "pooler.supabase.com" in database_url and ":5432/" in database_url:
+        logger.info("Supabase pooler detected in URL on 5432; auto-switching to port 6543 (Transaction Mode)")
+        database_url = database_url.replace(":5432/", ":6543/")
 
     return database_url
 
