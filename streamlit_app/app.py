@@ -21,16 +21,16 @@ sys.path.insert(0, str(_APP_DIR))
 sys.path.insert(0, str(_PROJECT_ROOT))
 importlib.invalidate_caches()
 
-# ── Close stale pool from previous module instance ──
-# Streamlit keeps old modules in sys.modules; their pools may have
-# stale configure callbacks. Close them before creating fresh ones.
-try:
-    import src.services.supabase_client as _sc
-    _sc.close_pool()
-except Exception:
-    pass
+# ── Force-reload supabase_client to clear stale configure callbacks ──
+# Streamlit Cloud caches old modules in sys.modules even after file edits.
+# We delete all cached instances and reload from disk.
+for _mod_key in list(sys.modules.keys()):
+    if "supabase_client" in _mod_key:
+        del sys.modules[_mod_key]
 
-# ── Lazy Imports ──
+import src.services.supabase_client
+importlib.reload(src.services.supabase_client)
+
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
