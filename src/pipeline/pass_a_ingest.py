@@ -13,7 +13,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -47,6 +47,84 @@ PROMPT_INJECTION_PATTERNS = re.compile(
 )
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en"
+
+# GDELT 2.0 Article List API
+GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
+
+
+def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
+    """
+    Fetch article URLs from GDELT 2.0 API for a given keyword query.
+    GDELT returns global news with tone analysis and precise timestamps.
+
+    Query syntax examples:
+    - 'airport AND attack' (AND/OR/NOT supported)
+    - 'theme:TAX_TERROR' (GDELT CAMEO themes)
+    - 'sourcecountry:NG' (Nigerian sources only)
+    - 'tone<-5' (highly negative tone)
+    """
+    now = datetime.now(timezone.utc)
+    end_dt = now.strftime("%Y%m%d%H%M%S")
+    start_dt = (now - timedelta(days=max_age_days)).strftime("%Y%m%d%H%M%S")
+
+    params = {
+        "query": query,
+        "mode": "ArtList",
+        "format": "json",
+        "maxrecords": GDELT_MAX_RECORDS,
+        "startdatetime": start_dt,
+        "enddatetime": end_dt,
+        "sort": "seendate",  # Most recent first
+    }
+
+    try:
+        resp = httpx.get(GDELT_DOC_API, params=params, timeout=30.0)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        logger.warning("GDELT fetch failed for query: %s", query[:60])
+        return []
+
+    items = []
+    for article in data.get("articles", []):
+        seendate_str = article.get("seendate", "")
+        title = article.get("title", "")
+        url = article.get("url", "")
+        domain = article.get("domain", "")
+
+        if not url or not title:
+            continue
+
+        # Parse GDELT seendate (YYYYMMDDHHMMSS) → datetime
+        pub_dt = None
+        if seendate_str and len(seendate_str) >= 8:
+            try:
+                pub_dt = datetime.strptime(seendate_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        # Strict age filter — reject if no date or too old
+        if pub_dt is None:
+            continue
+        age_days = (now - pub_dt).total_seconds() / 86400
+        if age_days > max_age_days:
+            continue
+
+        items.append({
+            "title": title,
+            "link": url,
+            "pub_date": seendate_str,
+            "pub_dt": pub_dt,
+            "description": "",  # GDELT ArtList does not provide descriptions
+            "source": "gdelt",
+            "domain": domain,
+        })
+
+    if items:
+        logger.info("GDELT: %d articles for '%s...' (last %dh)", len(items), query[:40], max_age_days * 24)
+
+    return items
 
 
 def _compile_noise_patterns() -> list[re.Pattern]:
@@ -111,6 +189,36 @@ def build_search_queries() -> list[dict]:
             queries.append({"query": f'"{kw}"', "broad": True})
 
     return queries
+
+
+def build_gdelt_queries() -> list[str]:
+    """
+    Build optimized GDELT query strings.
+    GDELT supports AND/OR/NOT and phrase search.
+    Each query targets a distinct threat category.
+    """
+    return [
+        # Drone attacks on critical infrastructure
+        '"drone attack" OR "UAV attack" OR "drone bombing" OR "drone strike"',
+        # Mass casualty events
+        '"mass shooting" OR "mass stabbing" OR "mass casualty" OR "massacre" OR "suicide bombing"',
+        # Airport attacks
+        '"airport attack" OR "airport bombing" OR "airport shooting" OR "airport terror"',
+        # Hotel / resort / tourism attacks
+        '"hotel attack" OR "hotel bombing" OR "resort attack" OR "beach attack" OR "cruise ship attack"',
+        # Aviation personnel attacks
+        '"pilot attacked" OR "cabin crew attacked" OR "ground staff attacked" OR "airline personnel attack"',
+        # African terrorism
+        '"Boko Haram" OR "Al-Shabaab" OR "jihadist attack" OR "ISIS Africa" OR "Sahel crisis"',
+        # War escalation & civilian casualties
+        '"missile strike" OR "airstrike" OR "war escalation" OR "ceasefire broken" OR "civilian casualties"',
+        # General terrorism & security
+        '"bomb threat" OR "explosion" OR "terrorism" OR "hostage" OR "active shooter"',
+        # Aviation incidents
+        '"hijack" OR "runway incursion" OR "emergency landing" OR "security breach"',
+        # Geopolitical conflict (broader)
+        '"military action" OR "invasion" OR "border clash" OR "troop buildup" OR "artillery shelling"',
+    ]
 
 
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
@@ -335,6 +443,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
     for feed_url in static_feeds:
         items = fetch_rss_feed(feed_url, is_direct_url=True)
+        all_items.extend(items)
+        stats["queries_executed"] += 1
+
+    # Fetch from GDELT — global news database with tone analysis
+    gdelt_queries = build_gdelt_queries()
+    for gdelt_query in gdelt_queries[:20]:  # Limit GDELT queries per run
+        items = fetch_gdelt_articles(gdelt_query, max_age_days=_MAX_ARTICLE_AGE_DAYS)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
