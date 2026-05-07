@@ -137,6 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_events_storyline   ON events(storyline_id);
 CREATE INDEX IF NOT EXISTS idx_events_anchor_norm ON events(anchor_name_norm);
 CREATE INDEX IF NOT EXISTS idx_events_occurred    ON events(occurred_at_est);
 CREATE INDEX IF NOT EXISTS idx_events_alert_tier  ON events(alert_tier);
+CREATE INDEX IF NOT EXISTS idx_events_ingested    ON events(ingested_at DESC);
 
 -- ============================================================
 -- 5. system_telemetry — Pipeline health & LLM tracking

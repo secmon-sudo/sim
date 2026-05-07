@@ -65,10 +65,10 @@ def get_pool() -> ConnectionPool:
             _pool = ConnectionPool(
                 database_url,
                 min_size=1,
-                max_size=3,
+                max_size=10,
                 open=True,
             )
-            logger.info("Database connection pool created (max_size=3)")
+            logger.info("Database connection pool created (max_size=10)")
         return _pool
 
 def _get_streamlit_pool():
@@ -82,10 +82,10 @@ def _get_streamlit_pool():
         pool = ConnectionPool(
             database_url,
             min_size=1,
-            max_size=3,
+            max_size=10,
             open=True,
         )
-        logger.info("Streamlit shared database pool created (max_size=3)")
+        logger.info("Streamlit shared database pool created (max_size=10)")
         return pool
         
     return _create_pool()

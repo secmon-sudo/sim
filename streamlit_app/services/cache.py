@@ -37,7 +37,8 @@ def get_recent_events(_db_conn, limit: int = 200) -> list[dict]:
                   occurred_at_est, ingested_at, status,
                   llm_provider, llm_model,
                   source_domain, source_url,
-                  canonical_text, raw_text
+                  LEFT(canonical_text, 1000) as canonical_text,
+                  LEFT(raw_text, 1000) as raw_text
            FROM events
            WHERE status IN ('classified', 'scored', 'reconciled')
            ORDER BY ingested_at DESC
@@ -68,7 +69,8 @@ def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
                   severity_score, system_confidence,
                   anchor_name_norm, country_iso,
                   occurred_at_est, ingested_at,
-                  source_url, source_domain, canonical_text
+                  source_url, source_domain,
+                  LEFT(canonical_text, 1000) as canonical_text
            FROM events
            WHERE alert_tier IS NOT NULL
              AND ingested_at > NOW() - INTERVAL '%s hours'
