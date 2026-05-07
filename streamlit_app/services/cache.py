@@ -27,70 +27,54 @@ def _safe_execute(conn, sql, params=None):
 @st.cache_data(ttl=60)
 def get_recent_events(_db_conn, limit: int = 100) -> list[dict]:
     """Fetch recent events for the main table and map."""
-    rows = _safe_execute(
-        _db_conn,
-        """SELECT id, source_title, event_type, alert_tier,
-                  severity_score, system_confidence,
-                  anchor_name_norm, anchor_confidence,
-                  country_iso, latitude, longitude,
-                  storyline_id, time_certainty,
-                  occurred_at_est, ingested_at, status,
-                  llm_provider, llm_model,
-                  source_domain, source_url,
-                  canonical_text, raw_text
-           FROM events
-           WHERE status IN ('classified', 'scored', 'reconciled')
-           ORDER BY ingested_at DESC
-           LIMIT %s""",
-        (limit,),
-    ).fetchall()
-
-    columns = [
-        "id", "source_title", "event_type", "alert_tier",
-        "severity_score", "system_confidence",
-        "anchor_name_norm", "anchor_confidence",
-        "country_iso", "latitude", "longitude",
-        "storyline_id", "time_certainty",
-        "occurred_at_est", "ingested_at", "status",
-        "llm_provider", "llm_model",
-        "source_domain", "source_url",
-        "canonical_text", "raw_text",
-    ]
-    return [dict(zip(columns, row)) for row in rows]
+    from psycopg.rows import dict_row
+    
+    with _db_conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """SELECT id, source_title, event_type, alert_tier,
+                      severity_score, system_confidence,
+                      anchor_name_norm, anchor_confidence,
+                      country_iso, latitude, longitude,
+                      storyline_id, time_certainty,
+                      occurred_at_est, ingested_at, status,
+                      llm_provider, llm_model,
+                      source_domain, source_url,
+                      canonical_text, raw_text
+               FROM events
+               WHERE status IN ('classified', 'scored', 'reconciled')
+               ORDER BY ingested_at DESC
+               LIMIT %s""",
+            (limit,),
+        )
+        return cur.fetchall()
 
 
 @st.cache_data(ttl=60)
 def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
     """Fetch events with alert tiers from the last N hours."""
-    rows = _safe_execute(
-        _db_conn,
-        """SELECT id, source_title, event_type, alert_tier,
-                  severity_score, system_confidence,
-                  anchor_name_norm, country_iso,
-                  occurred_at_est, ingested_at,
-                  source_url, source_domain,
-                  canonical_text
-           FROM events
-           WHERE alert_tier IS NOT NULL
-             AND ingested_at > NOW() - INTERVAL '%s hours'
-           ORDER BY
-             CASE alert_tier
-               WHEN 'CRITICAL' THEN 1
-               WHEN 'ALERT' THEN 2
-               WHEN 'WATCH' THEN 3
-             END,
-             ingested_at DESC""",
-        (hours,),
-    ).fetchall()
-
-    columns = [
-        "id", "source_title", "event_type", "alert_tier",
-        "severity_score", "system_confidence",
-        "anchor_name_norm", "country_iso",
-        "occurred_at_est", "ingested_at",
-        "source_url", "source_domain", "canonical_text",
-    ]
-    return [dict(zip(columns, row)) for row in rows]
+    from psycopg.rows import dict_row
+    
+    with _db_conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """SELECT id, source_title, event_type, alert_tier,
+                      severity_score, system_confidence,
+                      anchor_name_norm, country_iso,
+                      occurred_at_est, ingested_at,
+                      source_url, source_domain,
+                      canonical_text
+               FROM events
+               WHERE alert_tier IS NOT NULL
+                 AND ingested_at > NOW() - INTERVAL '%s hours'
+               ORDER BY
+                 CASE alert_tier
+                   WHEN 'CRITICAL' THEN 1
+                   WHEN 'ALERT' THEN 2
+                   WHEN 'WATCH' THEN 3
+                 END,
+                 ingested_at DESC""",
+            (hours,),
+        )
+        return cur.fetchall()
 
 
 @st.cache_data(ttl=60)

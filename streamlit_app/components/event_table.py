@@ -130,15 +130,22 @@ def render_event_table(events: list[dict]):
         if "canonical_text" in filtered.columns:
             mask = mask | filtered["canonical_text"].fillna("").str.lower().str.contains(q)
         filtered = filtered[mask]
+    
     if sel_type != "All":
         filtered = filtered[filtered["event_type"] == sel_type]
+    
     if sel_tier != "All":
         if sel_tier == "None":
             filtered = filtered[filtered["alert_tier"].isna()]
         else:
-            filtered = filtered[filtered["alert_tier"] == sel_tier]
+            # Case-insensitive, robust matching
+            filtered = filtered[
+                filtered["alert_tier"].fillna("").str.strip().str.upper() == sel_tier.upper()
+            ]
+            
     if sel_country != "All":
         filtered = filtered[filtered["country_iso"] == sel_country]
+        
     filtered = filtered[
         (filtered["severity_score"].fillna(0) >= sev_range[0]) &
         (filtered["severity_score"].fillna(0) <= sev_range[1])
@@ -153,9 +160,11 @@ def render_event_table(events: list[dict]):
     else:
         summary_text = f"Filtered: **{total_filt}** of **{total_all}** events"
 
-    crit_n = len(filtered[filtered["alert_tier"] == "CRITICAL"])
-    alert_n = len(filtered[filtered["alert_tier"] == "ALERT"])
-    watch_n = len(filtered[filtered["alert_tier"] == "WATCH"])
+    # Count using the same robust logic
+    tier_series = filtered["alert_tier"].fillna("").str.strip().str.upper()
+    crit_n = len(filtered[tier_series == "CRITICAL"])
+    alert_n = len(filtered[tier_series == "ALERT"])
+    watch_n = len(filtered[tier_series == "WATCH"])
 
     st.markdown(
         f"{summary_text} &nbsp;|&nbsp; "
