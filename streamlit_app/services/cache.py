@@ -25,7 +25,7 @@ def _safe_execute(conn, sql, params=None):
 
 
 @st.cache_data(ttl=60)
-def get_recent_events(_db_conn, limit: int = 50) -> list[dict]:
+def get_recent_events(_db_conn, limit: int = 100) -> list[dict]:
     """Fetch recent events for the main table and map."""
     rows = _safe_execute(
         _db_conn,
@@ -37,8 +37,7 @@ def get_recent_events(_db_conn, limit: int = 50) -> list[dict]:
                   occurred_at_est, ingested_at, status,
                   llm_provider, llm_model,
                   source_domain, source_url,
-                  LEFT(canonical_text, 1000) as canonical_text,
-                  LEFT(raw_text, 1000) as raw_text
+                  canonical_text, raw_text
            FROM events
            WHERE status IN ('classified', 'scored', 'reconciled')
            ORDER BY ingested_at DESC
@@ -70,7 +69,7 @@ def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
                   anchor_name_norm, country_iso,
                   occurred_at_est, ingested_at,
                   source_url, source_domain,
-                  LEFT(canonical_text, 1000) as canonical_text
+                  canonical_text
            FROM events
            WHERE alert_tier IS NOT NULL
              AND ingested_at > NOW() - INTERVAL '%s hours'

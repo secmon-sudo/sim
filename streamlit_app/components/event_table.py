@@ -64,9 +64,12 @@ def _badge_html(text: str, color: str, bg: str) -> str:
 
 
 def _tier_badge(tier: str | None) -> str:
-    if not tier or tier == "None":
+    if not tier or str(tier).strip().lower() == "none":
         return _badge_html("none", "#64748B", "rgba(100,116,139,0.12)")
-    cfg = _TIERS.get(tier, _TIERS["WATCH"])
+    
+    # Normalize for robust lookup
+    norm_tier = str(tier).strip().upper()
+    cfg = _TIERS.get(norm_tier, _TIERS["WATCH"])
     return _badge_html(cfg["label"], cfg["color"], cfg["bg"])
 
 
