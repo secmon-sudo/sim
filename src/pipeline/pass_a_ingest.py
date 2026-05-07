@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,9 +34,6 @@ _INGESTION = SETTINGS.get("ingestion", {})
 _DEDUP = SETTINGS.get("dedup", {})
 _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
-_GEO_REGIONS = _INGESTION.get("geo_regions", [
-    {"gl": "US", "hl": "en", "ceid": "US:en"}
-])
 _CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.82)
 _TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.85)
 
@@ -46,23 +44,60 @@ PROMPT_INJECTION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en"
+# Global Google News RSS — no geo lock.
+# Google auto-redirects to US if hl=en alone; append gl=US is removed
+# to let Google serve regionally mixed results.  We still force hl=en.
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
 
 # GDELT 2.0 Article List API
 GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
 
 
+# ---------------------------------------------------------------------------
+# HTTP helpers with retry / backoff
+# ---------------------------------------------------------------------------
+
+def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float = 15.0,
+                         max_retries: int = 3, backoff_base: float = 2.0) -> httpx.Response | None:
+    """Perform GET with exponential backoff on 429 / 5xx / network errors."""
+    headers = headers or {}
+    for attempt in range(max_retries):
+        try:
+            resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+            if resp.status_code == 429:
+                wait = backoff_base ** attempt
+                logger.warning("Rate limit (429) on %s, retry in %.1fs (attempt %d/%d)",
+                               url[:80], wait, attempt + 1, max_retries)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500 and attempt < max_retries - 1:
+                wait = backoff_base ** attempt
+                logger.warning("Server error %d on %s, retry in %.1fs",
+                               exc.response.status_code, url[:80], wait)
+                time.sleep(wait)
+                continue
+            raise
+        except Exception:
+            if attempt < max_retries - 1:
+                wait = backoff_base ** attempt
+                time.sleep(wait)
+                continue
+            raise
+    return None
+
+
+# ---------------------------------------------------------------------------
+# GDELT fetch
+# ---------------------------------------------------------------------------
+
 def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
     """
     Fetch article URLs from GDELT 2.0 API for a given keyword query.
-    GDELT returns global news with tone analysis and precise timestamps.
-
-    Query syntax examples:
-    - 'airport AND attack' (AND/OR/NOT supported)
-    - 'theme:TAX_TERROR' (GDELT CAMEO themes)
-    - 'sourcecountry:NG' (Nigerian sources only)
-    - 'tone<-5' (highly negative tone)
+    Includes retry/backoff for rate-limiting.
     """
     now = datetime.now(timezone.utc)
     end_dt = now.strftime("%Y%m%d%H%M%S")
@@ -75,12 +110,20 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
         "maxrecords": GDELT_MAX_RECORDS,
         "startdatetime": start_dt,
         "enddatetime": end_dt,
-        "sort": "seendate",  # Most recent first
+        "sort": "seendate",
     }
 
     try:
-        resp = httpx.get(GDELT_DOC_API, params=params, timeout=30.0)
-        resp.raise_for_status()
+        resp = _http_get_with_retry(
+            GDELT_DOC_API,
+            headers={},
+            timeout=30.0,
+            max_retries=3,
+            backoff_base=3.0,
+        )
+        if resp is None:
+            logger.warning("GDELT fetch failed after retries for query: %s", query[:60])
+            return []
         data = resp.json()
     except Exception:
         logger.warning("GDELT fetch failed for query: %s", query[:60])
@@ -96,7 +139,6 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
         if not url or not title:
             continue
 
-        # Parse GDELT seendate (YYYYMMDDHHMMSS) → datetime
         pub_dt = None
         if seendate_str and len(seendate_str) >= 8:
             try:
@@ -104,7 +146,6 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
             except Exception:
                 pass
 
-        # Strict age filter — reject if no date or too old
         if pub_dt is None:
             continue
         age_days = (now - pub_dt).total_seconds() / 86400
@@ -116,7 +157,7 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
             "link": url,
             "pub_date": seendate_str,
             "pub_dt": pub_dt,
-            "description": "",  # GDELT ArtList does not provide descriptions
+            "description": "",
             "source": "gdelt",
             "domain": domain,
         })
@@ -127,44 +168,82 @@ def fetch_gdelt_articles(query: str, max_age_days: int = 3) -> list[dict]:
     return items
 
 
+# ---------------------------------------------------------------------------
+# Noise filters
+# ---------------------------------------------------------------------------
+
 def _compile_noise_patterns() -> list[re.Pattern]:
     """Compile noise filters with word boundaries to reduce false positives."""
     patterns = []
     for pattern in KEYWORDS_CONFIG.get("noise_filters", []):
-        # Escape regex special chars and wrap with word boundaries
         escaped = re.escape(pattern)
         try:
             patterns.append(re.compile(rf"\b{escaped}\b", re.IGNORECASE))
         except re.error:
-            # Fallback to plain substring if word-boundary fails
             patterns.append(re.compile(re.escape(pattern), re.IGNORECASE))
     return patterns
 
 
 NOISE_PATTERNS = _compile_noise_patterns()
 
+# Additional hard-coded title-level sports/entertainment blockers.
+# These are compiled once and applied *before* the config-based filters.
+_SPORTS_ENT_BLOCKERS = [
+    re.compile(r"\btransfer\s+(window|deal|rumor|gossip|news)\b", re.IGNORECASE),
+    re.compile(r"\b(hijack|hijacked)\s+(deal|transfer|move|signing)\b", re.IGNORECASE),
+    re.compile(r"\b(football|soccer|premier\s+league|la\s+liga|bundesliga|serie\s+a|champions\s+league|fifa|uefa|world\s+cup)\b", re.IGNORECASE),
+    re.compile(r"\b(liverpool|tottenham|manchester\s+(united|city)|chelsea|arsenal|barcelona|real\s+madrid|bayern|juventus|ac\s+milan|inter\s+milan|psg|borussia)\b", re.IGNORECASE),
+    re.compile(r"\b(match|score|goal|fixture|kick\s*off|half[-\s]time|full[-\s]time)\b", re.IGNORECASE),
+    re.compile(r"\b(netflix|disney\+|hulu|amazon\s+prime|streaming|season\s+\d+|episode\s+\d+|doctor\s+who|tv\s+series|tv\s+show|movie\s+review|box\s+office)\b", re.IGNORECASE),
+    re.compile(r"\b(celebrity|gossip|rumour|rumor|speculation|insider)\b", re.IGNORECASE),
+    re.compile(r"\b(bitcoin|crypto|nft|blockchain|stock\s+market|shares\s+rise|shares\s+fall|ipo|earnings)\b", re.IGNORECASE),
+]
+
+
+def is_noise(text: str) -> bool:
+    """Check if text matches known noise patterns using word boundaries."""
+    text_lower = text.lower()
+    for pattern in NOISE_PATTERNS:
+        if pattern.search(text_lower):
+            return True
+    for pattern in _SPORTS_ENT_BLOCKERS:
+        if pattern.search(text_lower):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Query builders
+# ---------------------------------------------------------------------------
 
 def build_search_queries() -> list[dict]:
     """Build search queries from keywords config — GLOBAL (no region restriction).
 
     Strategy:
-    - Broad security keywords: search globally without aviation qualifier
-    - Specific aviation keywords: search with 'airport OR aviation' qualifier
-    - Geopolitical keywords: always broad
+    - Broad security keywords: search globally WITHOUT aviation qualifier
+      BUT require at least one aviation/hotel/tourism keyword in the phrase.
+    - Specific aviation keywords: search with 'airport OR aviation' qualifier.
+    - Geopolitical keywords: always broad.
     """
     queries = []
+    seen_queries = set()
 
-    # Keywords that should be searched broadly (security incidents anywhere)
+    # Broad keywords that are security-related anywhere (aviation, hotel, tourism, mass-casualty).
+    # We keep this intentionally narrow to avoid sports/entertainment noise.
     broad_keywords = {
-        "bomb threat", "active shooter", "hijack", "explosion",
+        "bomb threat", "active shooter", "explosion",
         "security breach", "evacuation", "terrorism", "suspicious package",
         "hostage", "weapon", "airport attack", "airport shooting",
         "airport bombing", "hotel attack", "hotel bombing", "hotel shooting",
         "hotel siege", "resort attack", "airline crew attack",
+        "mass shooting", "mass stabbing", "mass casualty", "massacre",
+        "suicide bombing", "drone attack", "UAV attack", "drone bombing",
+        "drone strike", "vehicle ramming", "IED explosion",
     }
 
-    # Build base queries — deduplicate to avoid redundant calls
-    seen_queries = set()
+    # Keywords that are TOO generic alone and MUST be qualified.
+    # "hijack" → "hijack" airport|plane|flight|aviation
+    must_qualify = {"hijack"}
 
     for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
         for kw in keywords:
@@ -172,11 +251,15 @@ def build_search_queries() -> list[dict]:
             if kw_lower in seen_queries:
                 continue
             seen_queries.add(kw_lower)
+
+            # Skip pure-generic words that would pull in sports/entertainment noise.
+            if kw_lower in must_qualify:
+                queries.append({"query": f'"{kw}" (airport OR aviation OR plane OR flight)', "broad": False})
+                continue
+
             if any(bk in kw_lower for bk in broad_keywords):
-                # Broad search — no aviation qualifier
                 queries.append({"query": f'"{kw}"', "broad": True})
             else:
-                # Narrow search — aviation context
                 queries.append({"query": f'"{kw}" airport OR aviation', "broad": False})
 
     # Geopolitical keywords are always broad
@@ -192,52 +275,42 @@ def build_search_queries() -> list[dict]:
 
 
 def build_gdelt_queries() -> list[str]:
-    """
-    Build optimized GDELT query strings.
-    GDELT supports AND/OR/NOT and phrase search.
-    Each query targets a distinct threat category.
-    """
+    """Build optimized GDELT query strings."""
     return [
-        # Drone attacks on critical infrastructure
         '"drone attack" OR "UAV attack" OR "drone bombing" OR "drone strike"',
-        # Mass casualty events
         '"mass shooting" OR "mass stabbing" OR "mass casualty" OR "massacre" OR "suicide bombing"',
-        # Airport attacks
         '"airport attack" OR "airport bombing" OR "airport shooting" OR "airport terror"',
-        # Hotel / resort / tourism attacks
         '"hotel attack" OR "hotel bombing" OR "resort attack" OR "beach attack" OR "cruise ship attack"',
-        # Aviation personnel attacks
         '"pilot attacked" OR "cabin crew attacked" OR "ground staff attacked" OR "airline personnel attack"',
-        # African terrorism
         '"Boko Haram" OR "Al-Shabaab" OR "jihadist attack" OR "ISIS Africa" OR "Sahel crisis"',
-        # War escalation & civilian casualties
         '"missile strike" OR "airstrike" OR "war escalation" OR "ceasefire broken" OR "civilian casualties"',
-        # General terrorism & security
         '"bomb threat" OR "explosion" OR "terrorism" OR "hostage" OR "active shooter"',
-        # Aviation incidents
         '"hijack" OR "runway incursion" OR "emergency landing" OR "security breach"',
-        # Geopolitical conflict (broader)
         '"military action" OR "invasion" OR "border clash" OR "troop buildup" OR "artillery shelling"',
     ]
 
 
+# ---------------------------------------------------------------------------
+# RSS / Atom fetch
+# ---------------------------------------------------------------------------
+
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | None = None) -> list[dict]:
-    """Fetch and parse an RSS feed. Returns items with parsed pub_date."""
+    """Fetch and parse an RSS or Atom feed. Returns items with parsed pub_date."""
     import xml.etree.ElementTree as ET
 
     if is_direct_url:
         url = query_info if isinstance(query_info, str) else query_info.get("url", "")
     else:
-        # Global Google News search — no region lock
         url = GOOGLE_NEWS_RSS.format(query=query_info["query"])
 
     try:
-        # Reddit requires a descriptive User-Agent
         headers = {
             "User-Agent": "SIM-OSINT-Bot/1.0 (Security Incident Monitor; contact@sim-osint.app)"
         }
-        resp = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
-        resp.raise_for_status()
+        resp = _http_get_with_retry(url, headers=headers, timeout=15.0, max_retries=2, backoff_base=2.0)
+        if resp is None:
+            logger.warning("RSS fetch failed for: %s", url[:80])
+            return []
     except Exception:
         logger.warning("RSS fetch failed for: %s", url[:80])
         return []
@@ -248,22 +321,75 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
     try:
         root = ET.fromstring(resp.text)
-        for item in root.findall(".//item"):
-            title = item.findtext("title", "")
-            link = item.findtext("link", "")
-            pub_date_str = item.findtext("pubDate", "")
-            description = item.findtext("description", "")
+        tag = root.tag.split("}")[-1] if "}" in root.tag else root.tag
 
-            # Parse pubDate and apply age filter
+        # Detect Atom vs RSS by root tag
+        is_atom = tag == "feed"
+
+        if is_atom:
+            entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+            if not entries:
+                entries = root.findall(".//entry")
+        else:
+            entries = root.findall(".//item")
+
+        for entry in entries:
+            title = ""
+            link = ""
+            pub_date_str = ""
+            description = ""
+
+            if is_atom:
+                # Atom: <title>, <link href="..."/>, <updated> or <published>, <content> or <summary>
+                title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
+                if title_elem is None:
+                    title_elem = entry.find("title")
+                title = (title_elem.text or "") if title_elem is not None else ""
+
+                link_elem = entry.find("{http://www.w3.org/2005/Atom}link")
+                if link_elem is None:
+                    link_elem = entry.find("link")
+                if link_elem is not None:
+                    link = link_elem.get("href", "")
+
+                pub_elem = entry.find("{http://www.w3.org/2005/Atom}published")
+                if pub_elem is None:
+                    pub_elem = entry.find("{http://www.w3.org/2005/Atom}updated")
+                if pub_elem is None:
+                    pub_elem = entry.find("published")
+                if pub_elem is None:
+                    pub_elem = entry.find("updated")
+                pub_date_str = (pub_elem.text or "") if pub_elem is not None else ""
+
+                content_elem = entry.find("{http://www.w3.org/2005/Atom}content")
+                if content_elem is None:
+                    content_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
+                if content_elem is None:
+                    content_elem = entry.find("content")
+                if content_elem is None:
+                    content_elem = entry.find("summary")
+                description = (content_elem.text or "") if content_elem is not None else ""
+            else:
+                # RSS 2.0
+                title = entry.findtext("title", "")
+                link = entry.findtext("link", "")
+                pub_date_str = entry.findtext("pubDate", "")
+                description = entry.findtext("description", "")
+
+            # Parse date
             pub_dt = None
             if pub_date_str:
                 try:
                     pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
                 except Exception:
                     pass
+                if pub_dt is None:
+                    # Try ISO 8601 (Atom)
+                    try:
+                        pub_dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+                    except Exception:
+                        pass
 
-            # STRICT: Reject items with missing or unparseable pubDate
-            # This prevents old news without dates from entering the system
             if pub_dt is None:
                 if stats is not None:
                     stats["age_filtered"] += 1
@@ -273,7 +399,7 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
             if age_days > max_age:
                 if stats is not None:
                     stats["age_filtered"] += 1
-                continue  # Skip old articles
+                continue
 
             items.append({
                 "title": title,
@@ -287,6 +413,10 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
     return items
 
+
+# ---------------------------------------------------------------------------
+# Full-text fetch
+# ---------------------------------------------------------------------------
 
 def fetch_full_text(url: str) -> str:
     """Attempt to fetch full article text from URL using trafilatura."""
@@ -304,39 +434,38 @@ def fetch_full_text(url: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Domain / URL helpers
+# ---------------------------------------------------------------------------
+
 def extract_domain(url: str) -> str:
     """Extract eTLD+1 domain from URL."""
     ext = tldextract.extract(url)
     return f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
 
 
+_GOOGLE_NEWS_REDIR = re.compile(r"^https?://news\.google\.com/rss/articles/")
+
 def compute_url_hash(url: str) -> str:
     """SHA-256 hash of normalized URL for deduplication."""
-    normalized = url.strip().lower().split("?")[0].split("#")[0]
+    normalized = url.strip().lower()
+    # For Google News redirect URLs, strip query params as well
+    # because the article ID is in the path, params are tracking.
+    if _GOOGLE_NEWS_REDIR.match(normalized):
+        normalized = normalized.split("?")[0].split("#")[0]
+    else:
+        normalized = normalized.split("?")[0].split("#")[0]
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def is_noise(text: str) -> bool:
-    """Check if text matches known noise patterns using word boundaries."""
-    text_lower = text.lower()
-    for pattern in NOISE_PATTERNS:
-        if pattern.search(text_lower):
-            return True
-    return False
-
+# ---------------------------------------------------------------------------
+# Text normalization
+# ---------------------------------------------------------------------------
 
 def canonicalize_text(raw_text: str) -> str:
-    """
-    Clean and normalize raw article text.
-    - Strips prompt injection patterns
-    - Normalizes whitespace
-    - Removes HTML tags
-    """
-    # Strip HTML tags (simple regex, acceptable for RSS snippets)
+    """Clean and normalize raw article text."""
     text = re.sub(r"<[^>]+>", " ", raw_text)
-    # Strip prompt injection patterns
     text = PROMPT_INJECTION_PATTERNS.sub("", text)
-    # Normalize whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -344,10 +473,9 @@ def canonicalize_text(raw_text: str) -> str:
 def normalize_title(title: str) -> str:
     """Normalize title for deduplication comparison."""
     text = title.lower()
-    text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
+    text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
-    # Remove common suffixes/prefixes from news outlets
-    text = re.sub(r"\s*-\s*(bbc news|cnn|reuters|ap news|the guardian|al jazeera).*", "", text)
+    text = re.sub(r"\s*-\s*(bbc news|cnn|reuters|ap news|the guardian|al jazeera|fox news|nbc|abc|cbs).*", "", text)
     return text
 
 
@@ -360,10 +488,14 @@ def title_similarity(title_a: str, title_b: str) -> float:
     return difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
 
 
+# ---------------------------------------------------------------------------
+# Dedup
+# ---------------------------------------------------------------------------
+
 def check_content_duplicate(db_conn, title: str, canonical_text: str) -> bool:
     """
     Check if a similar article already exists in the DB.
-    Compares against recent events using title similarity.
+    Uses title similarity AND canonical text similarity.
     """
     try:
         rows = db_conn.execute(
@@ -371,21 +503,23 @@ def check_content_duplicate(db_conn, title: str, canonical_text: str) -> bool:
                FROM events
                WHERE ingested_at > NOW() - INTERVAL '%s days'
                ORDER BY ingested_at DESC
-               LIMIT 200""",
+               LIMIT 500""",
             (_MAX_ARTICLE_AGE_DAYS,),
         ).fetchall()
 
         for row in rows:
             existing_title = row[0] or ""
             existing_text = row[1] or ""
+
+            # Title similarity (primary signal)
             sim = title_similarity(title, existing_title)
             if sim >= _TITLE_SIM_THRESHOLD:
                 return True
-            # Also check canonical text similarity for short texts
-            if len(canonical_text) < 500 and len(existing_text) < 500:
-                text_sim = difflib.SequenceMatcher(None, canonical_text, existing_text).ratio()
-                if text_sim >= _CONTENT_SIM_THRESHOLD:
-                    return True
+
+            # Content similarity for longer texts
+            text_sim = difflib.SequenceMatcher(None, canonical_text, existing_text).ratio()
+            if text_sim >= _CONTENT_SIM_THRESHOLD:
+                return True
         return False
     except Exception:
         logger.exception("Content duplicate check failed")
@@ -403,6 +537,10 @@ def check_domain_penalty(db_conn, domain: str) -> float:
     except Exception:
         return 0.0
 
+
+# ---------------------------------------------------------------------------
+# Main Pass A runner
+# ---------------------------------------------------------------------------
 
 def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     """
@@ -434,8 +572,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     queries = build_search_queries()
     all_items = []
 
-    # Execute global queries — no region restriction
-    # Limit to top 50 most important queries per run to stay within time budget
+    # Execute global queries
     for query_info in queries[:50]:
         items = fetch_rss_feed(query_info, is_direct_url=False, stats=stats)
         all_items.extend(items)
@@ -448,9 +585,11 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         all_items.extend(items)
         stats["queries_executed"] += 1
 
-    # Fetch from GDELT — global news database with tone analysis
+    # Fetch from GDELT — with inter-request sleep to respect rate limits
     gdelt_queries = build_gdelt_queries()
-    for gdelt_query in gdelt_queries[:20]:  # Limit GDELT queries per run
+    for idx, gdelt_query in enumerate(gdelt_queries[:10]):  # Reduced to 10 to avoid rate limits
+        if idx > 0:
+            time.sleep(2.0)  # 2-second gap between GDELT requests
         items = fetch_gdelt_articles(gdelt_query, max_age_days=_MAX_ARTICLE_AGE_DAYS)
         all_items.extend(items)
         stats["queries_executed"] += 1
@@ -458,8 +597,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     stats["items_fetched"] = len(all_items)
     logger.info("Pass A: Fetched %d items from %d sources/queries", len(all_items), stats["queries_executed"])
 
-    inserted = 0
+    # Run-level URL dedup — same URL may appear from multiple queries
+    seen_urls = set()
+    deduped_items = []
     for item in all_items:
+        url = item.get("link", "")
+        if not url:
+            continue
+        norm_url = url.strip().lower().split("?")[0].split("#")[0]
+        if norm_url in seen_urls:
+            continue
+        seen_urls.add(norm_url)
+        deduped_items.append(item)
+
+    inserted = 0
+    for item in deduped_items:
         if inserted >= max_events:
             break
 
@@ -492,7 +644,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             full_text = fetch_full_text(url)
             if full_text:
                 stats["full_text_fetched"] += 1
-                # Merge full text into canonical
                 canonical = canonicalize_text(f"{canonical} {full_text}")
 
         # Content dedup: check if similar title/text already exists

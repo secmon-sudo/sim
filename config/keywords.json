@@ -137,6 +137,14 @@
     "drone hobby", "recreational drone", "drone show", "drone light show",
     "man stabbed", "woman attacked", "woman stabbed", "man attacked",
     "person stabbed", "individual attacked", "street fight",
-    "bar fight", "domestic dispute", "robbery victim", "mugging"
+    "bar fight", "domestic dispute", "robbery victim", "mugging",
+    "transfer window", "transfer deal", "transfer rumor", "transfer gossip",
+    "football", "soccer", "premier league", "champions league", "world cup",
+    "la liga", "bundesliga", "serie a", "fa cup", "uefa", "fifa",
+    "netflix", "disney+", "hulu", "amazon prime", "streaming", "tv series",
+    "season premiere", "episode review", "box office", "hollywood",
+    "celebrity", "gossip", "rumour", "rumor", "speculation",
+    "bitcoin", "crypto", "cryptocurrency", "nft", "blockchain",
+    "ipo", "earnings report", "stock price", "market rally"
   ]
 }
