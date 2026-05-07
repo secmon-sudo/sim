@@ -49,10 +49,10 @@ def get_pool() -> ConnectionPool:
         _pool = ConnectionPool(
             database_url,
             min_size=1,
-            max_size=10,
+            max_size=3,
             open=True,
         )
-        logger.info("Database connection pool created (max_size=10)")
+        logger.info("Database connection pool created (max_size=3)")
     return _pool
 
 
