@@ -25,7 +25,7 @@ def _safe_execute(conn, sql, params=None):
 
 
 @st.cache_data(ttl=60)
-def get_recent_events(_db_conn, limit: int = 200) -> list[dict]:
+def get_recent_events(_db_conn, limit: int = 50) -> list[dict]:
     """Fetch recent events for the main table and map."""
     rows = _safe_execute(
         _db_conn,

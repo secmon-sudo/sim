@@ -284,7 +284,7 @@ with st.sidebar:
     st.divider()
 
     # Quick stats
-    st.markdown("### 📊 Quick Stats")
+    st.markdown("### 📊 Stats (24h)")
     try:
         stats = get_pipeline_stats(db_conn)
         events_24h = stats.get("events_24h", 0)
@@ -341,6 +341,11 @@ with st.sidebar:
     except Exception:
         pass
 
+    # View Settings
+    st.divider()
+    st.markdown("### ⚙️ View Settings")
+    evt_limit = st.slider("Events to load", 10, 200, 50, step=10)
+
     # Footer
     st.divider()
     st.markdown(
@@ -368,7 +373,7 @@ tab_events, tab_alerts, tab_map, tab_czib, tab_storylines, tab_telemetry, tab_an
 # Tab 1: Events
 with tab_events:
     try:
-        events = get_recent_events(db_conn)
+        events = get_recent_events(db_conn, limit=evt_limit)
         render_event_table(events)
     except Exception as e:
         st.error(f"Events error: {e}")
@@ -384,7 +389,7 @@ with tab_alerts:
 # Tab 3: Map
 with tab_map:
     try:
-        events = get_recent_events(db_conn)
+        events = get_recent_events(db_conn, limit=evt_limit)
         critical_events = [e for e in events if e.get("alert_tier") == "CRITICAL"]
         render_map(critical_events, czib_data=None)
     except Exception as e:

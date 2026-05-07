@@ -144,12 +144,18 @@ def render_event_table(events: list[dict]):
     # Summary bar
     total_all = len(df)
     total_filt = len(filtered)
+    
+    if total_filt == total_all:
+        summary_text = f"Showing all **{total_all}** recent events"
+    else:
+        summary_text = f"Filtered: **{total_filt}** of **{total_all}** events"
+
     crit_n = len(filtered[filtered["alert_tier"] == "CRITICAL"])
     alert_n = len(filtered[filtered["alert_tier"] == "ALERT"])
     watch_n = len(filtered[filtered["alert_tier"] == "WATCH"])
 
     st.markdown(
-        f"Showing **{total_filt}** of **{total_all}** events &nbsp;|&nbsp; "
+        f"{summary_text} &nbsp;|&nbsp; "
         f"<span style='color:#EF4444;'>🔴 {crit_n}</span> &nbsp;"
         f"<span style='color:#F97316;'>🟠 {alert_n}</span> &nbsp;"
         f"<span style='color:#EAB308;'>🟡 {watch_n}</span>",
