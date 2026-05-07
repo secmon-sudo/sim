@@ -46,7 +46,7 @@ PROMPT_INJECTION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl={hl}&gl={gl}&ceid={ceid}"
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en"
 
 
 def _compile_noise_patterns() -> list[re.Pattern]:
@@ -67,7 +67,7 @@ NOISE_PATTERNS = _compile_noise_patterns()
 
 
 def build_search_queries() -> list[dict]:
-    """Build search queries from keywords config with geo regions.
+    """Build search queries from keywords config — GLOBAL (no region restriction).
 
     Strategy:
     - Broad security keywords: search globally without aviation qualifier
@@ -85,38 +85,32 @@ def build_search_queries() -> list[dict]:
         "hotel siege", "resort attack", "airline crew attack",
     }
 
-    # Build base queries
-    base_queries = []
+    # Build base queries — deduplicate to avoid redundant calls
+    seen_queries = set()
 
     for lang, keywords in KEYWORDS_CONFIG.get("emergency_keywords", {}).items():
         for kw in keywords:
             kw_lower = kw.lower()
+            if kw_lower in seen_queries:
+                continue
+            seen_queries.add(kw_lower)
             if any(bk in kw_lower for bk in broad_keywords):
                 # Broad search — no aviation qualifier
-                base_queries.append({"query": f'"{kw}"', "broad": True})
+                queries.append({"query": f'"{kw}"', "broad": True})
             else:
                 # Narrow search — aviation context
-                base_queries.append({"query": f'"{kw}" airport OR aviation', "broad": False})
+                queries.append({"query": f'"{kw}" airport OR aviation', "broad": False})
 
     # Geopolitical keywords are always broad
     for lang, keywords in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).items():
         for kw in keywords:
-            base_queries.append({"query": f'"{kw}"', "broad": True})
+            kw_lower = kw.lower()
+            if kw_lower in seen_queries:
+                continue
+            seen_queries.add(kw_lower)
+            queries.append({"query": f'"{kw}"', "broad": True})
 
-    # Distribute across regions — create region-grouped queries for fair sampling
-    queries_by_region = {region.get("label", "us"): [] for region in _GEO_REGIONS}
-    for region in _GEO_REGIONS:
-        label = region.get("label", "us")
-        for bq in base_queries:
-            queries_by_region[label].append({
-                "query": bq["query"],
-                "hl": region.get("hl", "en"),
-                "gl": region.get("gl", "US"),
-                "ceid": region.get("ceid", "US:en"),
-                "label": label,
-            })
-
-    return queries_by_region
+    return queries
 
 
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
@@ -126,12 +120,8 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
     if is_direct_url:
         url = query_info if isinstance(query_info, str) else query_info.get("url", "")
     else:
-        url = GOOGLE_NEWS_RSS.format(
-            query=query_info["query"],
-            hl=query_info["hl"],
-            gl=query_info["gl"],
-            ceid=query_info["ceid"],
-        )
+        # Global Google News search — no region lock
+        url = GOOGLE_NEWS_RSS.format(query=query_info["query"])
 
     try:
         # Reddit requires a descriptive User-Agent
@@ -331,21 +321,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "full_text_fetched": 0,
     }
 
-    queries_by_region = build_search_queries()
+    queries = build_search_queries()
     all_items = []
 
-    # Sample evenly across regions to avoid US bias
-    # Each region gets ~max_queries_per_region queries
-    max_total_queries = 50
-    region_labels = list(queries_by_region.keys())
-    queries_per_region = max(1, max_total_queries // len(region_labels))
-
-    for label, query_list in queries_by_region.items():
-        selected = query_list[:queries_per_region]
-        for query_info in selected:
-            items = fetch_rss_feed(query_info, is_direct_url=False)
-            all_items.extend(items)
-            stats["queries_executed"] += 1
+    # Execute global queries — no region restriction
+    # Limit to top 50 most important queries per run to stay within time budget
+    for query_info in queries[:50]:
+        items = fetch_rss_feed(query_info, is_direct_url=False)
+        all_items.extend(items)
+        stats["queries_executed"] += 1
 
     # Fetch from static hardcoded feeds (Reddit)
     static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])

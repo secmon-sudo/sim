@@ -5,12 +5,35 @@ Tests for Pass A ingestion logic.
 import pytest
 
 from src.pipeline.pass_a_ingest import (
+    build_search_queries,
     canonicalize_text,
     compute_url_hash,
     is_noise,
     normalize_title,
     title_similarity,
 )
+
+
+class TestBuildSearchQueries:
+    def test_returns_list(self):
+        queries = build_search_queries()
+        assert isinstance(queries, list)
+        assert len(queries) > 0
+
+    def test_no_region_params(self):
+        queries = build_search_queries()
+        for q in queries:
+            # Global queries should NOT have region-specific gl/ceid params
+            assert "gl" not in q
+            assert "ceid" not in q
+            assert "query" in q
+
+    def test_deduplication(self):
+        queries = build_search_queries()
+        seen = set()
+        for q in queries:
+            assert q["query"] not in seen
+            seen.add(q["query"])
 
 
 class TestCanonicalizeText:

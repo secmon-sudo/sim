@@ -7,24 +7,9 @@
     "heartbeat_max_consecutive_errors": 5
   },
   "ingestion": {
-    "max_article_age_days": 4,
+    "max_article_age_days": 3,
     "fetch_full_text": false,
-    "geo_regions": [
-      {"gl": "US", "hl": "en", "ceid": "US:en", "label": "us"},
-      {"gl": "GB", "hl": "en", "ceid": "GB:en", "label": "uk"},
-      {"gl": "DE", "hl": "de", "ceid": "DE:de", "label": "de"},
-      {"gl": "FR", "hl": "fr", "ceid": "FR:fr", "label": "fr"},
-      {"gl": "TR", "hl": "tr", "ceid": "TR:tr", "label": "tr"},
-      {"gl": "EG", "hl": "ar", "ceid": "EG:ar", "label": "mena"},
-      {"gl": "AE", "hl": "en", "ceid": "AE:en", "label": "mena_en"},
-      {"gl": "IN", "hl": "en", "ceid": "IN:en", "label": "india"},
-      {"gl": "AU", "hl": "en", "ceid": "AU:en", "label": "apac"},
-      {"gl": "JP", "hl": "en", "ceid": "JP:en", "label": "japan"},
-      {"gl": "NG", "hl": "en", "ceid": "NG:en", "label": "nigeria"},
-      {"gl": "ZA", "hl": "en", "ceid": "ZA:en", "label": "south_africa"},
-      {"gl": "KE", "hl": "en", "ceid": "KE:en", "label": "kenya"},
-      {"gl": "SA", "hl": "ar", "ceid": "SA:ar", "label": "saudi"}
-    ]
+    "query_language": "en"
   },
   "dedup": {
     "url_hash_algorithm": "sha256",
