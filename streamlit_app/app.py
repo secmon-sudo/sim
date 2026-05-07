@@ -269,7 +269,7 @@ with st.sidebar:
         <div style="text-align:center;margin-bottom:16px;">
           <div style="font-size:2em;margin-bottom:4px;">{_UI_CONFIG["app"]["page_icon"]}</div>
           <div style="font-weight:800;color:#F8FAFC;font-size:1.1em;">{_UI_CONFIG["app"]["title"]}</div>
-          <div style="font-size:0.8em;color:#64748B;">{_UI_CONFIG["app"]["version"]}</div>
+          <div style="font-size:0.75em;color:#64748B;">V20.1 Intelligence</div>
         </div>
         """,
         unsafe_allow_html=True,
