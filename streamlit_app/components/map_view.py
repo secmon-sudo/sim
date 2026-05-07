@@ -31,7 +31,7 @@ TIER_GLOW_MAP = {
 
 
 def _country_flag(iso: str | None) -> str:
-    if not iso or len(iso) != 2:
+    if not isinstance(iso, str) or len(iso) != 2:
         return ""
     return chr(0x1F1E6 + ord(iso[0].upper()) - 65) + chr(0x1F1E6 + ord(iso[1].upper()) - 65)
 
