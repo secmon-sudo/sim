@@ -3,7 +3,6 @@ SIM — CZIB (Conflict Zone Information Bulletin) Dashboard
 EASA CZIB data viewer with status cards, country breakdown, and sync controls.
 """
 
-import html
 from datetime import datetime
 from pathlib import Path
 
@@ -16,18 +15,12 @@ def _country_flag(iso: str | None) -> str:
     return chr(0x1F1E6 + ord(iso[0].upper()) - 65) + chr(0x1F1E6 + ord(iso[1].upper()) - 65)
 
 
-def _status_badge(status: str) -> str:
-    colors = {
-        "Active": ("#10B981", "rgba(16,185,129,0.15)"),
-        "Suspended": ("#F59E0B", "rgba(245,158,11,0.15)"),
-        "Withdrawn": ("#64748B", "rgba(100,116,139,0.15)"),
-    }
-    c, bg = colors.get(status, ("#64748B", "rgba(100,116,139,0.15)"))
-    return f"""
-    <span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:0.7em;font-weight:700;color:{c};background:{bg};border:1px solid {c}40;text-transform:uppercase;">
-      {status}
-    </span>
-    """
+def _status_color(status: str) -> str:
+    return {
+        "Active": "#10B981",
+        "Suspended": "#F59E0B",
+        "Withdrawn": "#64748B",
+    }.get(status, "#64748B")
 
 
 def render_czib_dashboard(db_conn):
@@ -49,7 +42,7 @@ def render_czib_dashboard(db_conn):
 
     st.divider()
 
-    # Filters
+    # Filters + Sync
     f1, f2 = st.columns([3, 1])
     with f1:
         show_status = st.segmented_control(
@@ -80,19 +73,17 @@ def render_czib_dashboard(db_conn):
         st.info("No CZIB zones in database. Click 'Sync CZIB Data' to fetch from EASA.")
         return
 
-    # Filter
     if show_status and show_status != "All":
         zones = [z for z in zones if z.get("status") == show_status]
 
     st.caption(f"Showing {len(zones)} zone{'s' if len(zones) > 1 else ''}")
 
-    # Zone cards
     for zone in zones:
-        _render_zone_card(zone)
+        _render_zone_card_native(zone)
 
 
-def _render_zone_card(zone: dict):
-    """Render a single CZIB zone card."""
+def _render_zone_card_native(zone: dict):
+    """Render a single CZIB zone card with native Streamlit components."""
     status = zone.get("status", "Unknown")
     name = zone.get("name", "Untitled")
     countries = zone.get("countries", []) or []
@@ -102,53 +93,38 @@ def _render_zone_card(zone: dict):
     coords = zone.get("coordinates", "")
     updated = zone.get("updated_at")
 
-    # Format dates
     issued_str = ""
     if issued and isinstance(issued, datetime):
         issued_str = issued.strftime("%Y-%m-%d")
 
-    # Country flags
+    status_color = _status_color(status)
     flags = " ".join(_country_flag(c) for c in countries[:12])
     if len(countries) > 12:
         flags += f" +{len(countries) - 12}"
 
-    st.markdown(
-        f"""
-        <div style="
-            background: #151E32;
-            border: 1px solid #1E293B;
-            border-radius: 10px;
-            padding: 14px 16px;
-            margin-bottom: 10px;
-        ">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-            <div style="flex:1;min-width:0;">
-              <div style="margin-bottom:6px;">{_status_badge(status)}</div>
-              <div style="font-weight:700;color:#F8FAFC;font-size:0.95em;line-height:1.3;word-break:break-word;">
-                {html.escape(name)}
-              </div>
-              <div style="margin-top:6px;font-size:0.8em;color:#94A3B8;">
-                {flags}
-              </div>
-            </div>
-            <div style="text-align:right;flex-shrink:0;min-width:100px;">
-              <div style="font-size:0.75em;color:#64748B;">Valid until</div>
-              <div style="font-size:0.85em;color:#F8FAFC;font-weight:600;">{html.escape(valid) or '—'}</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        # Header row
+        h1, h2 = st.columns([4, 1])
+        with h1:
+            st.markdown(
+                f"<span style='display:inline-block;padding:3px 10px;border-radius:999px;font-size:0.75em;font-weight:700;color:{status_color};background:{status_color}15;border:1px solid {status_color}40;text-transform:uppercase;'>{status}</span>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"**{name}**")
+        with h2:
+            st.caption("Valid until")
+            st.write(f"**{valid or '—'}**")
 
-    with st.expander("Details"):
-        d1, d2 = st.columns(2)
-        with d1:
-            st.write(f"**Countries:** {country_names or '—'}")
-            st.write(f"**Issued:** {issued_str or '—'}")
-            st.write(f"**Coordinates:** {coords or '—'}")
-        with d2:
-            st.write(f"**Status:** {status}")
-            st.write(f"**Valid Until:** {valid or '—'}")
-            if updated and isinstance(updated, datetime):
-                st.write(f"**Last Updated:** {updated.strftime('%Y-%m-%d %H:%M UTC')}")
+        st.caption(f"{flags}")
+
+        with st.expander("Details"):
+            d1, d2 = st.columns(2)
+            with d1:
+                st.write(f"**Countries:** {country_names or '—'}")
+                st.write(f"**Issued:** {issued_str or '—'}")
+                st.write(f"**Coordinates:** {coords or '—'}")
+            with d2:
+                st.write(f"**Status:** {status}")
+                st.write(f"**Valid Until:** {valid or '—'}")
+                if updated and isinstance(updated, datetime):
+                    st.write(f"**Last Updated:** {updated.strftime('%Y-%m-%d %H:%M UTC')}")

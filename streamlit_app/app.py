@@ -311,25 +311,12 @@ with st.sidebar:
     st.markdown("### 🛡️ EASA CZIB")
     try:
         czib_stats = get_czib_stats(db_conn)
-        st.markdown(
-            f"""
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;margin-bottom:6px;">
-              <span style="font-size:0.8em;color:#10B981;font-weight:600;">🟢 Active Zones</span>
-              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('active', 0)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:6px;">
-              <span style="font-size:0.8em;color:#F59E0B;font-weight:600;">🟡 Suspended</span>
-              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('suspended', 0)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;">
-              <span style="font-size:0.8em;color:#6366F1;font-weight:600;">🌍 Affected Countries</span>
-              <span style="font-size:1em;color:#F8FAFC;font-weight:800;">{czib_stats.get('countries', 0)}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        cz1, cz2, cz3 = st.columns(3)
+        cz1.metric("🟢 Active", czib_stats.get("active", 0))
+        cz2.metric("🟡 Susp.", czib_stats.get("suspended", 0))
+        cz3.metric("🌍 Countries", czib_stats.get("countries", 0))
     except Exception:
-        pass
+        st.caption("CZIB data not available")
 
     # Geo summary mini table
     st.divider()

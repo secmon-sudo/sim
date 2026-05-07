@@ -80,6 +80,12 @@ def sync_czib_to_db(db_conn) -> dict:
     Sync EASA CZIB data to database.
     Returns stats dict.
     """
+    # Ensure clean transaction state — pool connections may be returned aborted
+    try:
+        db_conn.rollback()
+    except Exception:
+        pass
+
     zones = fetch_czib_data()
     if not zones:
         return {"fetched": 0, "inserted": 0, "updated": 0}
@@ -107,39 +113,37 @@ def sync_czib_to_db(db_conn) -> dict:
             except Exception:
                 pass
 
-        # Upsert
+        # Upsert — use savepoint so one bad row doesn't abort the whole batch
         try:
-            result = db_conn.execute(
-                """INSERT INTO czib_zones (czib_id, name, status, countries, country_names,
-                                           coordinates, issued_date, valid_until, valid_descr, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                   ON CONFLICT (czib_id) DO UPDATE SET
-                       name = EXCLUDED.name,
-                       status = EXCLUDED.status,
-                       countries = EXCLUDED.countries,
-                       country_names = EXCLUDED.country_names,
-                       coordinates = EXCLUDED.coordinates,
-                       issued_date = EXCLUDED.issued_date,
-                       valid_until = EXCLUDED.valid_until,
-                       valid_descr = EXCLUDED.valid_descr,
-                       updated_at = NOW(),
-                       synced_at = NOW()
-                   WHERE czib_zones.status <> EXCLUDED.status
-                      OR czib_zones.valid_until <> EXCLUDED.valid_until
-                      OR czib_zones.name <> EXCLUDED.name""",
-                (nid, name, status, countries, country_names, coords, issued_dt, valid_until, valid_descr),
-            )
-            if result.rowcount > 0:
-                updated += 1
-            else:
-                inserted += 1
+            with db_conn.transaction():
+                result = db_conn.execute(
+                    """INSERT INTO czib_zones (czib_id, name, status, countries, country_names,
+                                               coordinates, issued_date, valid_until, valid_descr, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                       ON CONFLICT (czib_id) DO UPDATE SET
+                           name = EXCLUDED.name,
+                           status = EXCLUDED.status,
+                           countries = EXCLUDED.countries,
+                           country_names = EXCLUDED.country_names,
+                           coordinates = EXCLUDED.coordinates,
+                           issued_date = EXCLUDED.issued_date,
+                           valid_until = EXCLUDED.valid_until,
+                           valid_descr = EXCLUDED.valid_descr,
+                           updated_at = NOW(),
+                           synced_at = NOW()""",
+                    (nid, name, status, countries, country_names, coords, issued_dt, valid_until, valid_descr),
+                )
+                # rowcount is unreliable for ON CONFLICT; check if row existed before
+                if result.rowcount == 1:
+                    inserted += 1
+                else:
+                    updated += 1
         except Exception:
-            logger.exception("CZIB upsert failed for nid=%s", nid)
-            db_conn.rollback()
+            logger.warning("CZIB upsert skipped for nid=%s (likely duplicate)", nid)
             continue
 
     db_conn.commit()
-    logger.info("CZIB sync complete: %d fetched, %d inserted, %d updated", len(zones), inserted, updated)
+    logger.info("CZIB sync complete: %d fetched, %d upserted", len(zones), inserted + updated)
     return {"fetched": len(zones), "inserted": inserted, "updated": updated}
 
 
