@@ -221,7 +221,7 @@ def build_gdelt_queries() -> list[str]:
     ]
 
 
-def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
+def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | None = None) -> list[dict]:
     """Fetch and parse an RSS feed. Returns items with parsed pub_date."""
     import xml.etree.ElementTree as ET
 
@@ -265,12 +265,14 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False) -> list[dict]:
             # STRICT: Reject items with missing or unparseable pubDate
             # This prevents old news without dates from entering the system
             if pub_dt is None:
-                stats["age_filtered"] += 1
+                if stats is not None:
+                    stats["age_filtered"] += 1
                 continue
 
             age_days = (now_utc - pub_dt).total_seconds() / 86400
             if age_days > max_age:
-                stats["age_filtered"] += 1
+                if stats is not None:
+                    stats["age_filtered"] += 1
                 continue  # Skip old articles
 
             items.append({
@@ -435,14 +437,14 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     # Execute global queries — no region restriction
     # Limit to top 50 most important queries per run to stay within time budget
     for query_info in queries[:50]:
-        items = fetch_rss_feed(query_info, is_direct_url=False)
+        items = fetch_rss_feed(query_info, is_direct_url=False, stats=stats)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
     # Fetch from static hardcoded feeds (Reddit)
     static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
     for feed_url in static_feeds:
-        items = fetch_rss_feed(feed_url, is_direct_url=True)
+        items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
