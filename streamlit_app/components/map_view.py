@@ -178,12 +178,14 @@ def render_map(events: list[dict], czib_data: list[dict] | None = None):
     )
 
     # Combined legend
-    legend_items = [
-        ("#EF4444", "Critical"),
-        ("#F97316", "Alert"),
-        ("#EAB308", "Watch"),
-        ("#64748B", "No Alert"),
-    ]
+    legend_items = []
+    if map_data:
+        legend_items.extend([
+            ("#EF4444", "Critical"),
+            ("#F97316", "Alert"),
+            ("#EAB308", "Watch"),
+            ("#64748B", "No Alert"),
+        ])
     if czib_map_data:
         legend_items.append(("#EF4444", "CZIB Zone ⚠️"))
 

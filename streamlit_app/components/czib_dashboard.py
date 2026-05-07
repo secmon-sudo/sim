@@ -78,6 +78,9 @@ def render_czib_dashboard(db_conn):
 
     st.caption(f"Showing {len(zones)} zone{'s' if len(zones) > 1 else ''}")
 
+    from components.map_view import render_map
+    render_map([], czib_data=zones)
+
     for zone in zones:
         _render_zone_card_native(zone)
 

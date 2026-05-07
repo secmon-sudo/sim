@@ -398,8 +398,8 @@ with tab_alerts:
 with tab_map:
     try:
         events = get_recent_events(db_conn)
-        czib_zones = get_czib_zones(db_conn, only_active=False)
-        render_map(events, czib_data=czib_zones)
+        critical_events = [e for e in events if e.get("alert_tier") == "CRITICAL"]
+        render_map(critical_events, czib_data=None)
     except Exception as e:
         st.error(f"Map error: {e}")
 
