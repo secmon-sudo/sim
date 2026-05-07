@@ -60,7 +60,7 @@ GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
 # ---------------------------------------------------------------------------
 
 def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float = 15.0,
-                         max_retries: int = 3, backoff_base: float = 2.0,
+                         max_retries: int = 4, backoff_base: float = 8.0,
                          params: dict | None = None) -> httpx.Response | None:
     """Perform GET with exponential backoff on 429 / 5xx / network errors."""
     headers = headers or {}
@@ -104,6 +104,18 @@ try:
 except ImportError:
     pass
 
+# GDELT uses FIPS 10-4 country codes, not ISO2.
+_ISO2_TO_FIPS = {
+    # Middle East
+    "IL": "IS", "IQ": "IZ", "TR": "TU", "YE": "YM", "KW": "KU", "LB": "LE", "JO": "JO", "PS": "WE",
+    # Africa
+    "NG": "NI", "NE": "NG", "BF": "UV", "SD": "SU", "SS": "OD", "DZ": "AG", "LY": "LY",
+    # Eurasia
+    "UA": "UP", "RU": "RS", "GE": "GG", "MD": "MD", "AZ": "AJ", "AM": "AM",
+    # Asia
+    "KP": "KN", "KR": "KS", "VN": "VM", "PH": "RP", "MM": "BM", "KH": "CB",
+}
+
 
 def _parse_gdelt_date(seendate_str: str) -> datetime | None:
     """Parse GDELT seendate (YYYYMMDDHHMMSS) to datetime."""
@@ -128,9 +140,12 @@ def _gdelt_articles_from_raw(
 
     full_query = query
     if tone:
-        full_query = f"{full_query} tone{tone}"
+        full_query = f"({full_query}) tone{tone}"
     if source_countries:
-        country_filter = " OR ".join(f"sourcecountry:{c}" for c in source_countries)
+        # Map ISO2 to FIPS for GDELT
+        fips_list = [_ISO2_TO_FIPS.get(c, c) for c in source_countries]
+        # Keep filter short to avoid GDELT query length limits
+        country_filter = " OR ".join(f"sourcecountry:{c}" for c in fips_list[:10])
         full_query = f"({full_query}) AND ({country_filter})"
 
     params = {
@@ -198,7 +213,7 @@ def _gdelt_articles_with_client(
             end_date=end_date,
             num_records=GDELT_MAX_RECORDS,
             tone=tone,
-            country=source_countries if source_countries else None,
+            country=[_ISO2_TO_FIPS.get(c, c) for c in source_countries[:10]] if source_countries else None,
         )
         gd = GdeltDoc()
         df = gd.article_search(f)
@@ -508,7 +523,7 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
     try:
         headers = {
-            "User-Agent": "SIM-OSINT-Bot/1.0 (Security Incident Monitor; contact@sim-osint.app)"
+            "User-Agent": "python:sim-osint:v20.1 (by /u/sim_osint_bot)"
         }
         resp = _http_get_with_retry(url, headers=headers, timeout=15.0, max_retries=2, backoff_base=2.0)
         if resp is None:
@@ -830,6 +845,9 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             continue
         seen_urls.add(norm_url)
         deduped_items.append(item)
+
+    # Sort items by date descending (newest first)
+    deduped_items.sort(key=lambda x: x.get("pub_dt", datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 
     inserted = 0
     for item in deduped_items:

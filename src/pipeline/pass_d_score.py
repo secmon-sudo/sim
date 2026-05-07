@@ -243,7 +243,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         event["alert_tier"] = alert_tier
 
         # Send alert if tier is high enough and not suppressed
-        if alert_tier in ("CRITICAL", "ALERT"):
+        if alert_tier in ("CRITICAL", "ALERT", "WATCH"):
             supp_key = build_suppression_key(event)
             if not is_suppressed(db_conn, supp_key):
                 if send_telegram_alert(event):
