@@ -21,14 +21,6 @@ sys.path.insert(0, str(_APP_DIR))
 sys.path.insert(0, str(_PROJECT_ROOT))
 importlib.invalidate_caches()
 
-# ── Force-reload supabase_client to clear stale configure callbacks ──
-# Streamlit Cloud caches old modules in sys.modules even after file edits.
-import src.services.supabase_client
-try:
-    importlib.reload(src.services.supabase_client)
-except Exception:
-    pass
-
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
