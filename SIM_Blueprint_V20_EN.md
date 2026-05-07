@@ -927,7 +927,7 @@ def render_telemetry(db_conn, llm_router=None):
                 "Used/Limit": f"{acct.bucket._daily_used}/{acct.rpd}",
                 "RPM": acct.rpm,
             })
-        st.dataframe(status_data, use_container_width=True)
+        st.dataframe(status_data, width="stretch")
 ```
 
 ---

@@ -81,7 +81,7 @@ def render_anchor_lookup(db_conn):
                         key=f"alias_{iata}_{icao}",
                         placeholder="e.g. Cairo Airport",
                     )
-                    if st.button("➕ Add Alias", key=f"btn_{iata}_{icao}", use_container_width=False):
+                    if st.button("➕ Add Alias", key=f"btn_{iata}_{icao}"):
                         if new_alias and new_alias.strip():
                             try:
                                 db_conn.execute(
@@ -136,4 +136,4 @@ def render_anchor_lookup(db_conn):
             }
             for r in czib_rows
         ]
-        st.dataframe(czib_data, use_container_width=True, hide_index=True)
+        st.dataframe(czib_data, width="stretch", hide_index=True)

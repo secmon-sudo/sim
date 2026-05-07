@@ -173,7 +173,7 @@ def render_map(events: list[dict], czib_data: list[dict] | None = None):
             tooltip=tooltip,
             map_style="mapbox://styles/mapbox/dark-v11",
         ),
-        use_container_width=True,
+        width="stretch",
         height=550,
     )
 

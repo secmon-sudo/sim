@@ -156,7 +156,7 @@ def render_telemetry(stats: dict, llm_router=None):
             })
         st.dataframe(
             status_data,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Util %": st.column_config.TextColumn("Util %", width="small"),
                 "Errors": st.column_config.NumberColumn("Errors", width="small"),

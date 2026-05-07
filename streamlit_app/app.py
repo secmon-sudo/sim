@@ -23,13 +23,11 @@ importlib.invalidate_caches()
 
 # ── Force-reload supabase_client to clear stale configure callbacks ──
 # Streamlit Cloud caches old modules in sys.modules even after file edits.
-# We delete all cached instances and reload from disk.
-for _mod_key in list(sys.modules.keys()):
-    if "supabase_client" in _mod_key:
-        del sys.modules[_mod_key]
-
 import src.services.supabase_client
-importlib.reload(src.services.supabase_client)
+try:
+    importlib.reload(src.services.supabase_client)
+except Exception:
+    pass
 
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed

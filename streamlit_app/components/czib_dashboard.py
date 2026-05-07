@@ -52,7 +52,7 @@ def render_czib_dashboard(db_conn):
             key="czib_status_filter",
         )
     with f2:
-        if st.button("🔄 Sync CZIB Data", use_container_width=True):
+        if st.button("🔄 Sync CZIB Data", width="stretch"):
             with st.spinner("Fetching from EASA..."):
                 try:
                     from src.services.czib_client import sync_czib_to_db
