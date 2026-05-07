@@ -6,6 +6,7 @@ Security Incident Monitor — Aviation OSINT Intelligence Dashboard.
 Modern dark theme with glassmorphism, rich sidebar, and tabbed navigation.
 """
 
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -13,12 +14,15 @@ from pathlib import Path
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-# Add both project root and app dir for robust imports in all environments
+# ── Path Setup ──
 _APP_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _APP_DIR.parent
 sys.path.insert(0, str(_APP_DIR))
 sys.path.insert(0, str(_PROJECT_ROOT))
+importlib.invalidate_caches()  # Clear stale module caches on reload
 
+# ── Lazy Imports ──
+# Import after path setup to avoid caching issues.
 from src.services.supabase_client import get_connection, put_connection
 from components.alert_feed import render_alert_feed
 from components.anchor_lookup import render_anchor_lookup
@@ -251,12 +255,19 @@ with col_h2:
 
 st.divider()
 
-# ── Database Connection ──
+# ── Database Connection (with retry) ──
 db_conn = None
-try:
-    db_conn = get_connection()
-except Exception as e:
-    st.error(f"❌ Database connection failed: {e}")
+_conn_err = None
+for _attempt in range(3):
+    try:
+        db_conn = get_connection()
+        break
+    except Exception as e:
+        _conn_err = e
+        import time
+        time.sleep(1.0)
+if db_conn is None:
+    st.error(f"❌ Database connection failed: {_conn_err}")
     st.info("Configure DATABASE_URL or SUPABASE_* environment variables")
     st.stop()
 
