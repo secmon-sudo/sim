@@ -11,7 +11,7 @@ def test_telegram():
     # Mock event data
     test_event = {
         "id": "test-uuid-123",
-        "source_title": "TEST ALERT: Aviation Security Incident Simulation",
+        "source_title": "TEST ALERT KEMAL: Aviation Security Incident Simulation",
         "event_type": "security_incident",
         "anchor_name_norm": "LHR",
         "country_iso": "GB",
