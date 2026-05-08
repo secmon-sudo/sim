@@ -3,7 +3,7 @@ name: SIM OSINT Pipeline
 on:
   schedule:
     - cron: '0 */2 * * *'  # Every 2 hours
-  workflow_dispatch: {}       # Manual trigger
+  workflow_dispatch:       # Manual trigger
 
 concurrency:
   group: sim-pipeline
