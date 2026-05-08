@@ -35,8 +35,8 @@ _INGESTION = SETTINGS.get("ingestion", {})
 _DEDUP = SETTINGS.get("dedup", {})
 _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
-_CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.82)
-_TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.85)
+_CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.72)
+_TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.78)
 
 # Prompt injection patterns to strip before LLM classification
 PROMPT_INJECTION_PATTERNS = re.compile(
@@ -699,9 +699,16 @@ def canonicalize_text(raw_text: str) -> str:
 def normalize_title(title: str) -> str:
     """Normalize title for deduplication comparison."""
     text = title.lower()
+    # Strip trailing source attribution BEFORE removing punctuation
+    # Heuristic: if the part after the last dash/pipe is short, it's likely a source name
+    for sep in (" - ", " | ", " — ", " – "):
+        if sep in text:
+            parts = text.rsplit(sep, 1)
+            if len(parts) == 2 and len(parts[1].strip()) <= 45:
+                text = parts[0].strip()
+                break
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s*-\s*(bbc news|cnn|reuters|ap news|the guardian|al jazeera|fox news|nbc|abc|cbs).*", "", text)
     return text
 
 
@@ -726,7 +733,7 @@ def _fetch_recent_events_for_dedup(db_conn) -> list[tuple[str, str]]:
                FROM events
                WHERE ingested_at > NOW() - INTERVAL '%s days'
                ORDER BY ingested_at DESC
-               LIMIT 500""",
+               LIMIT 2000""",
             (_MAX_ARTICLE_AGE_DAYS,),
         ).fetchall()
         return [(row[0] or "", row[1] or "") for row in rows]
@@ -918,6 +925,10 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             if result.rowcount > 0:
                 inserted += 1
                 stats["events_inserted"] += 1
+                # Inline dedup: add to recent_events so later items in this run are compared against it
+                recent_events.insert(0, (item.get("title", ""), canonical))
+                if len(recent_events) > 2500:
+                    recent_events.pop()
             else:
                 stats["duplicates_skipped"] += 1
         except Exception:

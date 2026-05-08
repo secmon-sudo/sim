@@ -14,8 +14,8 @@
   "dedup": {
     "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
-    "content_similarity_threshold": 0.82,
-    "title_similarity_threshold": 0.85
+    "content_similarity_threshold": 0.70,
+    "title_similarity_threshold": 0.75
   },
   "scoring": {
     "proximity_bonus": 30,
