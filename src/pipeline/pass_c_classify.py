@@ -17,8 +17,20 @@ from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classificatio
 
 logger = logging.getLogger(__name__)
 
-CLASSIFICATION_SYSTEM_PROMPT = """You are a global security incident classifier for aviation and critical infrastructure.
-Analyze the following news text and extract:
+CLASSIFICATION_SYSTEM_PROMPT = """You are a global security and geopolitical incident classifier.
+Your job is to analyze news reports and determine if they describe REAL security incidents, conflicts, or threats.
+
+STEP 1 — RELEVANCE CHECK:
+Score the relevance of this text to security monitoring (0-100):
+- 90-100: Active security incident, attack, or military conflict with confirmed details
+- 70-89: Credible threat, escalation, or developing security situation
+- 50-69: Related security event but limited details, or indirect impact
+- 30-49: Tangentially related — mentions security topics but is NOT an incident (policy, opinion, analysis)
+- 10-29: Mostly irrelevant — hobby content, entertainment, historical, reviews
+- 0-9: Completely irrelevant — no security connection whatsoever
+
+STEP 2 — CLASSIFICATION (if relevance >= 30):
+Extract the following fields:
 
 1. event_type: One of:
    bomb_threat, active_shooter, hijacking, runway_incursion,
@@ -33,7 +45,7 @@ Analyze the following news text and extract:
    other_aviation_related,
    noise
 
-2. sub_type: More specific classification if applicable (same codes), or null
+2. sub_type: More specific classification if applicable, or null
 3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text)
 4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO")
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
@@ -41,26 +53,42 @@ Analyze the following news text and extract:
 7. storyline_hint: A short phrase describing the core event for grouping related articles
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
+10. relevance_score: Integer 0-100 from Step 1
+11. relevance_reasoning: One sentence explaining why this relevance score was given
 
-REJECT RULES — classify as "noise" if ANY of these apply:
-- Hobby/enthusiast content: flight simulators, plane spotting, aviation photography, model aircraft, cockpit tours
-- Historical/retrospective: documentaries, "on this day", anniversaries, memorials, museum exhibits
-- Reviews: airline reviews, seat reviews, hotel reviews, trip reports, lounge reviews
-- Entertainment: movies, TV shows, video games, books about aviation
-- Non-incident posts: delivery flights, new liveries, airline route announcements, frequent flyer programs
-- Reddit-style discussion: "what is this plane", "spotted this aircraft", "cool photo", personal experiences with no security incident
-- Opinion/analysis: editorials, policy discussions, regulatory updates with no actual incident
+WHEN TO USE event_type "noise" (relevance < 30):
+- Flight simulators, plane spotting, aviation photography, model aircraft
+- Historical articles, documentaries, anniversaries, museum exhibits
+- Airline/hotel/seat reviews, trip reports, lounge reviews
+- Movies, TV shows, video games, books
+- Delivery flights, new liveries, route announcements, frequent flyer programs
+- Reddit hobby discussions: "what is this plane", "spotted this", personal travel
+- Opinion editorials, policy analysis with NO actual incident
+- Generic street crime with NO link to aviation/infrastructure/military
 
-PRIORITY RULES — Apply these strictly:
-- Aviation personnel attacked (pilot, cabin crew, ground staff, baggage handler, TSA, security, check-in agent, air traffic controller) → HIGH priority, event_type: aviation_personnel_attack or sub_type
-- Drone attack on airport, military base, power plant, port, refinery → event_type: drone_attack_critical_infra or sub_type
-- Mass casualty: 3+ deaths OR 10+ injuries → event_type: mass_casualty_event or sub_type, severity is higher
-- African terrorism (Mali, Burkina Faso, Niger, Somalia, Nigeria, Sahel) → event_type: african_terrorism or sub_type
-- War escalation, ceasefire violation, civilian casualties in conflict zones → event_type: war_escalation, ceasefire_violation, civilian_casualties
-- Generic street crime (man stabbed, woman attacked, bar fight) with NO aviation/critical infrastructure link → classify as noise
-- Resort, hotel, beach, cruise ship, tourist bus attacks → event_type: resort_attack or sub_type
+WHEN TO CLASSIFY (relevance >= 30, even if borderline):
+- Any mention of an actual attack, shooting, bombing, stabbing at a specific location
+- Military operations, airstrikes, troop movements, escalations
+- Drone attacks on infrastructure, airports, bases
+- Mass casualty events regardless of location
+- Terrorism or insurgency attacks anywhere
+- Personnel attacks at airports, airlines, hotels
+- Active threats, bomb scares, evacuations
+- Civil unrest that threatens critical infrastructure
+
+PRIORITY RULES:
+- Aviation personnel attacked → event_type: aviation_personnel_attack, HIGH priority
+- Drone attack on critical infrastructure → event_type: drone_attack_critical_infra
+- Mass casualty (3+ deaths OR 10+ injuries) → event_type: mass_casualty_event
+- African terrorism (Sahel, Horn of Africa) → event_type: african_terrorism
+- War escalation, ceasefire violations → event_type: war_escalation or ceasefire_violation
+- Resort/hotel/beach attacks → event_type: resort_attack
+
+IMPORTANT: When in doubt, classify the event rather than marking as noise.
+It is better to let a borderline event through than to miss a real incident.
 
 Respond ONLY with valid JSON. No markdown, no explanation."""
+
 
 
 
@@ -115,11 +143,16 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
 
     try:
         with HeartbeatWorker(event_id, str(worker_id), interval=60):
-            # Build prompt
-            prompt = f"""Classify this aviation security report:
+            # Build prompt — include title for better relevance judgment
+            source_title = event.get('source_title', '') or ''
+            source_domain = event.get('source_domain', 'unknown') or 'unknown'
+            canonical_text = event.get('canonical_text', '') or ''
+            
+            prompt = f"""Classify this news report:
 
-Title/Source: {event.get('source_domain', 'unknown')}
-Text: {event.get('canonical_text', '')[:3000]}"""
+Headline: {source_title[:500]}
+Source: {source_domain}
+Text: {canonical_text[:3000]}"""
 
             # Call LLM through multi-provider router
             result = call_llm(
@@ -132,12 +165,15 @@ Text: {event.get('canonical_text', '')[:3000]}"""
             # Parse response
             parsed = validate_and_parse(result.get("content", ""))
 
-            # If LLM classified as noise, archive it immediately and skip further processing
+            # Graduated relevance handling using LLM's relevance_score
             event_type = parsed.get("event_type", "other_aviation_related")
-            if event_type == "noise":
+            relevance = int(parsed.get("relevance_score", 50))
+
+            # Tier 1: Clear noise (relevance < 20) → archive immediately
+            if relevance < 20 or (event_type == "noise" and relevance < 30):
                 db_conn.execute(
                     """UPDATE events
-                       SET event_type = 'noise',
+                       SET event_type = %s,
                            llm_raw_output = %s,
                            llm_parsed_output = %s,
                            llm_provider = %s,
@@ -146,6 +182,7 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                            updated_at = NOW()
                        WHERE id = %s""",
                     (
+                        event_type if event_type != "noise" else "noise",
                         json.dumps(result.get("response", {})),
                         json.dumps(parsed),
                         result.get("provider"),
@@ -155,9 +192,24 @@ Text: {event.get('canonical_text', '')[:3000]}"""
                 )
                 db_conn.commit()
                 log_llm_telemetry(db_conn, result, router, success=True)
-                logger.info("Event %s classified as NOISE — archived", event_id[:8])
+                logger.info("Event %s archived — relevance=%d, type=%s, reason=%s",
+                            event_id[:8], relevance, event_type,
+                            parsed.get("relevance_reasoning", "")[:80])
                 release_lock(db_conn, event_id, worker_id)
                 return parsed
+
+            # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
+            # These events proceed through the pipeline but with reduced priority
+            if relevance < 40 or event_type == "noise":
+                # Re-classify noise with some relevance as other_aviation_related
+                # so it still flows through scoring but won't get high priority
+                if event_type == "noise":
+                    event_type = "other_aviation_related"
+                    parsed["event_type"] = event_type
+                logger.info("Event %s low-relevance (%d) — classifying as %s",
+                            event_id[:8], relevance, event_type)
+
+            # Tier 3: Relevant (40+) → proceed normally with classification
 
             # Validate event_type against active catalog
             active_check = db_conn.execute(

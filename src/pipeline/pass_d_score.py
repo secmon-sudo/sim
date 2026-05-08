@@ -249,34 +249,35 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
                 if send_telegram_alert(event):
                     record_suppression(db_conn, supp_key, alert_tier, event_id, ttl_hours=4)
 
-        # 6. Update event
-        db_conn.execute(
-            """UPDATE events
-               SET anchor_name_norm = %s,
-                   anchor_confidence = %s,
-                   latitude = %s,
-                   longitude = %s,
-                   country_iso = COALESCE(%s, country_iso),
-                   severity_score = %s,
-                   system_confidence = %s,
-                   alert_tier = %s,
-                   storyline_id = %s,
-                   status = 'scored',
-                   updated_at = NOW()
-               WHERE id = %s""",
-            (
-                anchor["norm"],
-                anchor["level"],
-                anchor.get("latitude"),
-                anchor.get("longitude"),
-                anchor.get("country_iso"),
-                severity,
-                system_conf,
-                alert_tier,
-                storyline_id,
-                event_id,
-            ),
-        )
+        # 6. Update event — wrapped in savepoint for isolation
+        with db_conn.transaction():
+            db_conn.execute(
+                """UPDATE events
+                   SET anchor_name_norm = %s,
+                       anchor_confidence = %s,
+                       latitude = %s,
+                       longitude = %s,
+                       country_iso = COALESCE(%s, country_iso),
+                       severity_score = %s,
+                       system_confidence = %s,
+                       alert_tier = %s,
+                       storyline_id = %s,
+                       status = 'scored',
+                       updated_at = NOW()
+                   WHERE id = %s""",
+                (
+                    anchor["norm"],
+                    anchor["level"],
+                    anchor.get("latitude"),
+                    anchor.get("longitude"),
+                    anchor.get("country_iso"),
+                    severity,
+                    system_conf,
+                    alert_tier,
+                    storyline_id,
+                    event_id,
+                ),
+            )
         db_conn.commit()
 
         logger.info(
@@ -293,7 +294,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         }
 
     except Exception:
-        db_conn.rollback()
+        try:
+            db_conn.rollback()
+        except Exception:
+            pass
         logger.exception("Error scoring event %s", event_id)
         return None
 

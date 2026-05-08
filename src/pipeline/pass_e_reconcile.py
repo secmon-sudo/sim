@@ -98,36 +98,41 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 new_system_conf = compute_confidence(llm_conf, new_conf)
 
                 # Update with upgraded anchor
-                db_conn.execute(
-                    """UPDATE events
-                       SET anchor_name_norm = %s,
-                           anchor_confidence = %s,
-                           latitude = COALESCE(%s, latitude),
-                           longitude = COALESCE(%s, longitude),
-                           country_iso = COALESCE(%s, country_iso),
-                           severity_score = %s,
-                           system_confidence = %s,
-                           status = 'reconciled',
-                           updated_at = NOW()
-                       WHERE id = %s""",
-                    (new_norm, new_level, lat, lon, country,
-                     new_severity, new_system_conf, event_id),
-                )
+                with db_conn.transaction():
+                    db_conn.execute(
+                        """UPDATE events
+                           SET anchor_name_norm = %s,
+                               anchor_confidence = %s,
+                               latitude = COALESCE(%s, latitude),
+                               longitude = COALESCE(%s, longitude),
+                               country_iso = COALESCE(%s, country_iso),
+                               severity_score = %s,
+                               system_confidence = %s,
+                               status = 'reconciled',
+                               updated_at = NOW()
+                           WHERE id = %s""",
+                        (new_norm, new_level, lat, lon, country,
+                         new_severity, new_system_conf, event_id),
+                    )
                 db_conn.commit()
                 return True
 
         # No upgrade — just mark as reconciled
-        db_conn.execute(
-            """UPDATE events
-               SET status = 'reconciled', updated_at = NOW()
-               WHERE id = %s""",
-            (event_id,),
-        )
+        with db_conn.transaction():
+            db_conn.execute(
+                """UPDATE events
+                   SET status = 'reconciled', updated_at = NOW()
+                   WHERE id = %s""",
+                (event_id,),
+            )
         db_conn.commit()
         return True
 
     except Exception:
-        db_conn.rollback()
+        try:
+            db_conn.rollback()
+        except Exception:
+            pass
         logger.exception("Error reconciling event %s", event_id)
         return False
 
