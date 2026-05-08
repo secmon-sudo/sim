@@ -12,7 +12,7 @@ from datetime import datetime
 import streamlit as st
 
 
-def _conn_id(conn) -> str:
+def get_conn_key(conn) -> str:
     """Return a stable identifier for the connection to enable cache hits.
     Without this, passing the conn object directly causes cache misses
     every rerun since the object reference changes."""

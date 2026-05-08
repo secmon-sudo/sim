@@ -25,9 +25,9 @@ def _status_color(status: str) -> str:
 
 def render_czib_dashboard(db_conn):
     """Render CZIB dashboard with zones list, stats, and sync button."""
-    from services.cache import _conn_id, get_czib_stats, get_czib_zones
+    from services.cache import get_conn_key, get_czib_stats, get_czib_zones
 
-    ck = _conn_id(db_conn)
+    ck = get_conn_key(db_conn)
 
     st.markdown("#### ⚠️ EASA Conflict Zone Information Bulletins")
     st.caption("Data sourced from [EASA CZIB](https://www.easa.europa.eu/en/domains/air-operations/czibs). Updated automatically.")

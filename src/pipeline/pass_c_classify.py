@@ -100,17 +100,33 @@ class LLMParseError(Exception):
 def validate_and_parse(content: str) -> dict:
     """
     Parse and validate LLM classification output.
-    Extracts JSON from response, handling potential markdown wrapping.
+    Handles common LLM JSON issues: markdown wrapping, trailing commas,
+    single quotes, text before/after JSON.
     """
+    import re
+
     if not content:
         raise LLMParseError("Empty LLM response")
 
-    # Strip markdown code block if present
     text = content.strip()
+
+    # Strip markdown code block if present
     if text.startswith("```"):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
+
+    # Extract JSON object if there's text before/after it
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        text = match.group(0)
+
+    # Fix trailing commas before closing braces/brackets (most common LLM issue)
+    text = re.sub(r',\s*}', '}', text)
+    text = re.sub(r',\s*]', ']', text)
+
+    # Remove control characters that break JSON
+    text = re.sub(r'[\x00-\x1f]', lambda m: ' ' if m.group() not in '\n\r\t' else m.group(), text)
 
     try:
         parsed = json.loads(text)
@@ -126,6 +142,7 @@ def validate_and_parse(content: str) -> dict:
         parsed["event_type"] = "other_aviation_related"
 
     return parsed
+
 
 
 def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uuid.UUID) -> dict | None:

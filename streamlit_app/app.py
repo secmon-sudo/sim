@@ -29,7 +29,7 @@ from components.map_view import render_map
 from components.storyline_graph import render_storyline_graph
 from components.telemetry_dashboard import render_telemetry
 from services.cache import (
-    _conn_id,
+    get_conn_key,
     get_alert_events,
     get_czib_stats,
     get_czib_zones,
@@ -266,7 +266,7 @@ except Exception as e:
     st.stop()
 
 # Stable cache key for this connection
-ck = _conn_id(db_conn)
+ck = get_conn_key(db_conn)
 
 # ── Sidebar ──
 with st.sidebar:
