@@ -170,7 +170,10 @@ Text: {canonical_text[:3000]}"""
             relevance = int(parsed.get("relevance_score", 50))
 
             # Tier 1: Clear noise (relevance < 20) → archive immediately
+            # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'
+            # The original LLM classification is preserved in llm_parsed_output for auditing
             if relevance < 20 or (event_type == "noise" and relevance < 30):
+                archive_type = "other_aviation_related"  # FK-safe fallback
                 db_conn.execute(
                     """UPDATE events
                        SET event_type = %s,
@@ -182,7 +185,7 @@ Text: {canonical_text[:3000]}"""
                            updated_at = NOW()
                        WHERE id = %s""",
                     (
-                        event_type if event_type != "noise" else "noise",
+                        archive_type,
                         json.dumps(result.get("response", {})),
                         json.dumps(parsed),
                         result.get("provider"),
@@ -192,11 +195,12 @@ Text: {canonical_text[:3000]}"""
                 )
                 db_conn.commit()
                 log_llm_telemetry(db_conn, result, router, success=True)
-                logger.info("Event %s archived — relevance=%d, type=%s, reason=%s",
+                logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
                             event_id[:8], relevance, event_type,
                             parsed.get("relevance_reasoning", "")[:80])
                 release_lock(db_conn, event_id, worker_id)
                 return parsed
+
 
             # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
             # These events proceed through the pipeline but with reduced priority

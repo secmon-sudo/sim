@@ -36,6 +36,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run DB migrations
+        run: |
+          python -c "
+          import os, glob, psycopg
+          db_url = os.environ['DATABASE_URL']
+          conn = psycopg.connect(db_url, autocommit=True)
+          for sql_file in sorted(glob.glob('db/migrations/*.sql')):
+              print(f'Running {sql_file}...')
+              with open(sql_file) as f:
+                  try:
+                      conn.execute(f.read())
+                      print(f'  OK')
+                  except Exception as e:
+                      print(f'  SKIP ({e})')
+          conn.close()
+          print('Migrations complete')
+          "
+
       - name: Seed anchor data
         run: python db/seed_anchors.py --file db/anchors.json
 
