@@ -1,0 +1,4457 @@
+[
+  {
+    "name": "Prince Nayef bin Abdulaziz Regional Airport",
+    "type": "Airport",
+    "city": "AL QASSIM",
+    "lat": 26.1942235,
+    "lon": 43.4565711,
+    "iata": "ELQ",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "King Abdulaziz International Airport",
+    "type": "Airport",
+    "city": "JEDDAH",
+    "lat": 21.6585157,
+    "lon": 39.1746303,
+    "iata": "JED",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Movenpick Hotel Star Jeddah",
+    "type": "Hotel",
+    "city": "JEDDAH",
+    "lat": 21.5504432,
+    "lon": 39.1742363
+  },
+  {
+    "name": "Prince Mohammad bin Abdulaziz International Airport",
+    "type": "Airport",
+    "city": "MEDINAH",
+    "lat": 24.5554858,
+    "lon": 39.7060859,
+    "iata": "MED",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "King Khalid International Airport",
+    "type": "Airport",
+    "city": "RIYADH",
+    "lat": 24.9586204,
+    "lon": 46.7110396,
+    "iata": "RUH",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Ryadh Airport Hotel",
+    "type": "Hotel",
+    "city": "RIYADH",
+    "lat": 24.9428,
+    "lon": 46.6953
+  },
+  {
+    "name": "Ta'if Regional Airport",
+    "type": "Airport",
+    "city": "TAIF",
+    "lat": 21.2702801,
+    "lon": 40.4158308,
+    "iata": "TIF",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Yanbu Airport",
+    "type": "Airport",
+    "city": "YANBU",
+    "lat": 24.1480301,
+    "lon": 38.0626738,
+    "iata": "YNB",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Seychelles International Airport",
+    "type": "Airport",
+    "city": "SEYCHELLES",
+    "lat": -4.6742625,
+    "lon": 55.5212004,
+    "iata": "SEZ",
+    "country": "SC",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Khartoum International Airport",
+    "type": "Airport",
+    "city": "KHARTOUM",
+    "lat": 15.5902124,
+    "lon": 32.5550536,
+    "iata": "KRT",
+    "country": "SD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Port Sudan International Airport",
+    "type": "Airport",
+    "city": "Port Sudan",
+    "lat": 19.4344105,
+    "lon": 37.2339233,
+    "iata": "PZU",
+    "country": "SD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Göteborg Landvetter Airport",
+    "type": "Airport",
+    "city": "GOTEBORG",
+    "lat": 57.7072326,
+    "lon": 11.9670171,
+    "iata": "GOT",
+    "country": "SE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Stockholm Arlanda Airport",
+    "type": "Airport",
+    "city": "STOCKHOLM",
+    "lat": 59.6467921,
+    "lon": 17.9370443,
+    "iata": "ARN",
+    "country": "SE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Clarion Hotel",
+    "type": "Hotel",
+    "city": "STOCKHOLM",
+    "lat": 59.3346948,
+    "lon": 18.0533268
+  },
+  {
+    "name": "Singapore Changi Airport",
+    "type": "Airport",
+    "city": "CHANGI",
+    "lat": 1.352975,
+    "lon": 103.9960555,
+    "iata": "SIN",
+    "country": "SG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mercure Singapore on Stevens",
+    "type": "Hotel",
+    "city": "CHANGI",
+    "lat": 1.3539247,
+    "lon": 103.9746973
+  },
+  {
+    "name": "Ljubljana Jo?e Pu?nik Airport",
+    "type": "Airport",
+    "city": "LJUBLJANA",
+    "lat": 46.0500268,
+    "lon": 14.5069289,
+    "iata": "LJU",
+    "country": "SI",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Košice International Airport",
+    "type": "Airport",
+    "city": "KOSICE",
+    "lat": 48.6614342,
+    "lon": 21.2391397,
+    "iata": "KSC",
+    "country": "SK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Lungi International Airport",
+    "type": "Airport",
+    "city": "Freetown",
+    "lat": 8.479004,
+    "lon": -13.26795,
+    "iata": "FNA",
+    "country": "SL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Blue",
+    "type": "Hotel",
+    "city": "Freetown",
+    "lat": 8.479004,
+    "lon": -13.26795
+  },
+  {
+    "name": "Vilnius International Airport",
+    "type": "Airport",
+    "city": "VILNIUS",
+    "lat": 54.6349685,
+    "lon": 25.2905394,
+    "iata": "VNO",
+    "country": "LT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Luxembourg Airport",
+    "type": "Airport",
+    "city": "LUXEMBOURG",
+    "lat": 49.6263906,
+    "lon": 6.2094446,
+    "iata": "LUX",
+    "country": "LU",
+    "czib": false,
+    "aliases": ["Findel"]
+  },
+  {
+    "name": "Riga International Airport",
+    "type": "Airport",
+    "city": "RIGA",
+    "lat": 56.9233973,
+    "lon": 23.9791559,
+    "iata": "RIX",
+    "country": "LV",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "RIX HOTEL",
+    "type": "Hotel",
+    "city": "RIGA",
+    "lat": 56.9521982,
+    "lon": 24.1053675
+  },
+  {
+    "name": "Benina International Airport",
+    "type": "Airport",
+    "city": "BENGHAZI",
+    "lat": 32.1009176,
+    "lon": 20.2734102,
+    "iata": "BEN",
+    "country": "LY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Misrata International Airport",
+    "type": "Airport",
+    "city": "MISURATA",
+    "lat": 32.3264843,
+    "lon": 15.0609316,
+    "iata": "MRA",
+    "country": "LY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sebha International Airport",
+    "type": "Airport",
+    "city": "SEBHA",
+    "lat": 26.9926975,
+    "lon": 14.466104,
+    "iata": "SEB",
+    "country": "LY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Tripoli International Airport",
+    "type": "Airport",
+    "city": "TRIPOLI",
+    "lat": 32.6684925,
+    "lon": 13.149414,
+    "iata": "TIP",
+    "country": "LY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mohammed V International Airport",
+    "type": "Airport",
+    "city": "CASABLANCA",
+    "lat": 33.5945144,
+    "lon": -7.6200284,
+    "iata": "CMN",
+    "country": "MA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "CMN Hotel",
+    "type": "Hotel",
+    "city": "CASABLANCA",
+    "lat": 33.5945144,
+    "lon": -7.6200284
+  },
+  {
+    "name": "Marrakesh Menara Airport",
+    "type": "Airport",
+    "city": "Marrakesh",
+    "lat": 31.6258257,
+    "lon": -7.9891608,
+    "iata": "RAK",
+    "country": "MA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Movenpick Hotel Mansour Eddahbi",
+    "type": "Hotel",
+    "city": "Marrakesh",
+    "lat": 31.6258257,
+    "lon": -7.9891608
+  },
+  {
+    "name": "Chi?in?u International Airport",
+    "type": "Airport",
+    "city": "CHISINAU",
+    "lat": 47.0245117,
+    "lon": 28.8322923,
+    "iata": "KIV",
+    "country": "MD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "KIV HOTEL",
+    "type": "Hotel",
+    "city": "CHISINAU",
+    "lat": 47.0245117,
+    "lon": 28.8322923
+  },
+  {
+    "name": "Podgorica Airport",
+    "type": "Airport",
+    "city": "PODGORICA",
+    "lat": 42.4228618,
+    "lon": 19.2916558,
+    "iata": "TGD",
+    "country": "ME",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ivato International Airport",
+    "type": "Airport",
+    "city": "ANTANANARIVO",
+    "lat": -18.7961372,
+    "lon": 47.4734286,
+    "iata": "TNR",
+    "country": "MG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "CARLTON HOTEL",
+    "type": "Hotel",
+    "city": "ANTANANARIVO",
+    "lat": -18.9147088,
+    "lon": 47.5178248
+  },
+  {
+    "name": "Skopje \"Alexander the Great\" Airport",
+    "type": "Airport",
+    "city": "SKOPJE",
+    "lat": 41.9961816,
+    "lon": 21.4319213,
+    "iata": "SKP",
+    "country": "MK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "SKP Hotel",
+    "type": "Hotel",
+    "city": "SKOPJE",
+    "lat": 41.9961816,
+    "lon": 21.4319213
+  },
+  {
+    "name": "Bamako–Sénou International Airport",
+    "type": "Airport",
+    "city": "BAMAKO",
+    "lat": 12.5353304,
+    "lon": -7.948765,
+    "iata": "BKO",
+    "country": "ML",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Azalai Hotel",
+    "type": "Hotel",
+    "city": "BAMAKO",
+    "lat": 12.6294699,
+    "lon": -8.0079417
+  },
+  {
+    "name": "Yangon International Airport",
+    "type": "Airport",
+    "city": "Yangon",
+    "lat": 16.9122626,
+    "lon": 96.1368079,
+    "iata": "RGN",
+    "country": "MM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Chinggis Khaan International Airport",
+    "type": "Airport",
+    "city": "ULAAN BAATAR",
+    "lat": 47.8429763,
+    "lon": 106.7667562,
+    "iata": "UBN",
+    "country": "MN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Holiday Inn",
+    "type": "Hotel",
+    "city": "ULAAN BAATAR",
+    "lat": 47.9219721,
+    "lon": 106.9015649
+  },
+  {
+    "name": "Malta International Airport",
+    "type": "Airport",
+    "city": "LUQA",
+    "lat": 35.8491987,
+    "lon": 14.4953109,
+    "iata": "MLA",
+    "country": "MT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sir Seewoosagur Ramgoolam International Airport",
+    "type": "Airport",
+    "city": "PORT LOUIS",
+    "lat": -20.1624522,
+    "lon": 57.5028044,
+    "iata": "MRU",
+    "country": "MU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HOLIDAY INN MAURITIUS MON TRESOR",
+    "type": "Hotel",
+    "city": "PORT LOUIS",
+    "lat": -20.1624522,
+    "lon": 57.5028044
+  },
+  {
+    "name": "Velana International Airport",
+    "type": "Airport",
+    "city": "MALE",
+    "lat": 4.1961894,
+    "lon": 73.5301042,
+    "iata": "MLE",
+    "country": "MV",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Jen Maldives Shangri LA",
+    "type": "Hotel",
+    "city": "MALE",
+    "lat": 4.1779879,
+    "lon": 73.5107387
+  },
+  {
+    "name": "Kuala Lumpur International Airport",
+    "type": "Airport",
+    "city": "KUALA LUMPUR",
+    "lat": 3.1526589,
+    "lon": 101.7022205,
+    "iata": "KUL",
+    "country": "MY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Crown Plaza Kuala Lumpur City Center",
+    "type": "Hotel",
+    "city": "KUALA LUMPUR",
+    "lat": 3.1526589,
+    "lon": 101.7022205
+  },
+  {
+    "name": "Maputo International Airport",
+    "type": "Airport",
+    "city": "MAPUTO",
+    "lat": -25.906355,
+    "lon": 32.5826451,
+    "iata": "MPM",
+    "country": "MZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "MPM HOTEL",
+    "type": "Hotel",
+    "city": "MAPUTO",
+    "lat": -25.9761107,
+    "lon": 32.5821944
+  },
+  {
+    "name": "DETROIT",
+    "type": "Airport",
+    "city": "DETROIT",
+    "lat": 42.3677514,
+    "lon": -83.072425,
+    "iata": "DTW",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Double Tree By Hilton Dearborn",
+    "type": "Hotel",
+    "city": "DETROIT",
+    "lat": 42.3315509,
+    "lon": -83.0466403
+  },
+  {
+    "name": "Melbourne Havalimanı",
+    "type": "Airport",
+    "city": "Melbourne",
+    "lat": -37.8142454,
+    "lon": 144.9631732,
+    "iata": "MEL",
+    "country": "AU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sheraton Melbourne Hotel",
+    "type": "Hotel",
+    "city": "Melbourne",
+    "lat": -37.8127011,
+    "lon": 144.9726307
+  },
+  {
+    "name": "Diori Hamani International Airport",
+    "type": "Airport",
+    "city": "NIAMEY",
+    "lat": 13.4901663,
+    "lon": 2.1846007,
+    "iata": "NIM",
+    "country": "NE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Bravia Hotel",
+    "type": "Hotel",
+    "city": "NIAMEY",
+    "lat": 13.5215251,
+    "lon": 2.0997705
+  },
+  {
+    "name": "Mallam Aminu Kano International Airport",
+    "type": "Airport",
+    "city": "KANO",
+    "lat": 12.0468517,
+    "lon": 8.5213229,
+    "iata": "KAN",
+    "country": "NG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Nnamdi Azikiwe International Airport",
+    "type": "Airport",
+    "city": "ABUJA",
+    "lat": 9.0207137,
+    "lon": 7.2677714,
+    "iata": "ABV",
+    "country": "NG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Abuja",
+    "type": "Hotel",
+    "city": "ABUJA",
+    "lat": 9.0749659,
+    "lon": 7.494881
+  },
+  {
+    "name": "Port Harcourt International Airport",
+    "type": "Airport",
+    "city": "Port Harcourt",
+    "lat": 4.7676576,
+    "lon": 7.0188527,
+    "iata": "PHC",
+    "country": "NG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Amsterdam Airport Schiphol",
+    "type": "Airport",
+    "city": "AMSTERDAM",
+    "lat": 52.3730796,
+    "lon": 4.8924534,
+    "iata": "AMS",
+    "country": "NL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Rotterdam The Hague Airport",
+    "type": "Airport",
+    "city": "ROTTERDAM",
+    "lat": 51.9563359,
+    "lon": 4.4397319,
+    "iata": "RTM",
+    "country": "NL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Oslo Airport",
+    "type": "Airport",
+    "city": "OSLO",
+    "lat": 59.9133301,
+    "lon": 10.7389701,
+    "iata": "OSL",
+    "country": "NO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Park Inn Oslo Airport",
+    "type": "Hotel",
+    "city": "OSLO",
+    "lat": 59.9133301,
+    "lon": 10.7389701
+  },
+  {
+    "name": "Muscat International Airport",
+    "type": "Airport",
+    "city": "MUSCAT",
+    "lat": 23.5994728,
+    "lon": 58.2738006,
+    "iata": "MCT",
+    "country": "OM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Intercity Hotel",
+    "type": "Hotel",
+    "city": "MUSCAT",
+    "lat": 23.6123628,
+    "lon": 58.5938134
+  },
+  {
+    "name": "Ninoy Aquino International Airport",
+    "type": "Airport",
+    "city": "MANILA",
+    "lat": 14.5123016,
+    "lon": 121.0218861,
+    "iata": "MNL",
+    "country": "PH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "The Peninsula Hotel Manila",
+    "type": "Hotel",
+    "city": "MANILA",
+    "lat": 14.5549507,
+    "lon": 121.0251943
+  },
+  {
+    "name": "Tribhuvan International Airport",
+    "type": "Airport",
+    "city": "KATHMANDU",
+    "lat": 27.6939119,
+    "lon": 85.3582197,
+    "iata": "KTM",
+    "country": "NP",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Marriott Kathmandu",
+    "type": "Hotel",
+    "city": "KATHMANDU",
+    "lat": 27.7130092,
+    "lon": 85.3244752
+  },
+  {
+    "name": "Islamabad International Airport",
+    "type": "Airport",
+    "city": "ISLAMABAD",
+    "lat": 33.6938118,
+    "lon": 73.0651511,
+    "iata": "ISB",
+    "country": "PK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Movenpick Centaurus Islamabad",
+    "type": "Hotel",
+    "city": "ISLAMABAD",
+    "lat": 33.7077,
+    "lon": 73.0499
+  },
+  {
+    "name": "Jinnah International Airport",
+    "type": "Airport",
+    "city": "KARACHI",
+    "lat": 24.9058248,
+    "lon": 67.1614489,
+    "iata": "KHI",
+    "country": "PK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Pearl Continental Hotel",
+    "type": "Hotel",
+    "city": "KARACHI",
+    "lat": 24.8478294,
+    "lon": 67.025322
+  },
+  {
+    "name": "Allama Iqbal International Airport",
+    "type": "Airport",
+    "city": "LAHORE",
+    "lat": 31.519419,
+    "lon": 74.4009971,
+    "iata": "LHE",
+    "country": "PK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Royal Swiss Hotel",
+    "type": "Hotel",
+    "city": "LAHORE",
+    "lat": 31.5656822,
+    "lon": 74.3141829
+  },
+  {
+    "name": "Warsaw Chopin Airport",
+    "type": "Airport",
+    "city": "WARSAW",
+    "lat": 52.1630651,
+    "lon": 20.9708149,
+    "iata": "WAW",
+    "country": "PL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Lisbon Humberto Delgado Airport",
+    "type": "Airport",
+    "city": "LISBON",
+    "lat": 38.7809542,
+    "lon": -9.1319006,
+    "iata": "LIS",
+    "country": "PT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Francisco Sá Carneiro Airport",
+    "type": "Airport",
+    "city": "PORTO",
+    "lat": 41.2489618,
+    "lon": -8.6802796,
+    "iata": "OPO",
+    "country": "PT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hamad International Airport",
+    "type": "Airport",
+    "city": "DOHA",
+    "lat": 25.2748602,
+    "lon": 51.6124512,
+    "iata": "DOH",
+    "country": "QA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Marriot Marquis City Center Doha",
+    "type": "Hotel",
+    "city": "DOHA",
+    "lat": 25.2856329,
+    "lon": 51.5264162
+  },
+  {
+    "name": "Bucharest Henri Coand? International Airport",
+    "type": "Airport",
+    "city": "BUCHAREST",
+    "lat": 44.4361414,
+    "lon": 26.1027202,
+    "iata": "OTP",
+    "country": "RO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Constan?a \"Mihail Kog?lniceanu\" International Airport",
+    "type": "Airport",
+    "city": "CONSTANTA",
+    "lat": 44.1767161,
+    "lon": 28.6507598,
+    "iata": "CND",
+    "country": "RO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Avram Iancu Cluj International Airport",
+    "type": "Airport",
+    "city": "CLUJ",
+    "lat": 46.769379,
+    "lon": 23.5899542,
+    "iata": "CLJ",
+    "country": "RO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Belgrade Nikola Tesla Airport",
+    "type": "Airport",
+    "city": "BELGRADE",
+    "lat": 44.8182557,
+    "lon": 20.3023595,
+    "iata": "BEG",
+    "country": "RS",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Vnukovo International Airport",
+    "type": "Airport",
+    "city": "MOSCOW",
+    "lat": 55.5995278,
+    "lon": 37.2735752,
+    "iata": "VKO",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "DoubleTree by Hilton Moscow",
+    "type": "Hotel",
+    "city": "MOSCOW",
+    "lat": 55.8332078,
+    "lon": 37.4848224
+  },
+  {
+    "name": "Novosibirsk Tolmachevo Airport",
+    "type": "Airport",
+    "city": "NOVOSIBIRSK",
+    "lat": 55.0289729,
+    "lon": 82.5997585,
+    "iata": "OVB",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Double Tree by Hilton",
+    "type": "Hotel",
+    "city": "NOVOSIBIRSK",
+    "lat": 54.9678145,
+    "lon": 82.9515989
+  },
+  {
+    "name": "Koltsovo International Airport",
+    "type": "Airport",
+    "city": "YEKATERINBURG",
+    "lat": 56.7445764,
+    "lon": 60.8027902,
+    "iata": "SVX",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "ANGELO HOTEL",
+    "type": "Hotel",
+    "city": "YEKATERINBURG",
+    "lat": 56.7509031,
+    "lon": 60.7988998
+  },
+  {
+    "name": "Kazan International Airport",
+    "type": "Airport",
+    "city": "KAZAN",
+    "lat": 55.7946485,
+    "lon": 49.1115022,
+    "iata": "KZN",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Kravt Hotel",
+    "type": "Hotel",
+    "city": "KAZAN",
+    "lat": 55.7946485,
+    "lon": 49.1115022
+  },
+  {
+    "name": "Rostov-on-Don International Airport",
+    "type": "Airport",
+    "city": "ROSTOV ON DON",
+    "lat": 47.2610441,
+    "lon": 39.7249086,
+    "iata": "ROV",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sochi International Airport",
+    "type": "Airport",
+    "city": "SOCHI",
+    "lat": 43.4439715,
+    "lon": 39.9400928,
+    "iata": "AER",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ufa International Airport",
+    "type": "Airport",
+    "city": "UFA",
+    "lat": 54.5543581,
+    "lon": 55.8822099,
+    "iata": "UFA",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Narimanovo Airport",
+    "type": "Airport",
+    "city": "ASTRAKHAN",
+    "lat": 46.2873096,
+    "lon": 47.9998025,
+    "iata": "ASF",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Stavropol Shpakovskoye Airport",
+    "type": "Airport",
+    "city": "STAVROPOL",
+    "lat": 45.1109439,
+    "lon": 42.1161718,
+    "iata": "STW",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Chertovitskoye Uluslararası Havalimanı",
+    "type": "Airport",
+    "city": "VORONEZH",
+    "lat": 51.8146379,
+    "lon": 39.2218234,
+    "iata": "VOZ",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Pulkovo Airport",
+    "type": "Airport",
+    "city": "SAINT PETERSBURG",
+    "lat": 59.8016986,
+    "lon": 30.2676011,
+    "iata": "LED",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Cosmos Pulkovo Airport",
+    "type": "Hotel",
+    "city": "SAINT PETERSBURG",
+    "lat": 59.9606739,
+    "lon": 30.1586551
+  },
+  {
+    "name": "Kurumoch International Airport",
+    "type": "Airport",
+    "city": "SAMARA",
+    "lat": 53.5057511,
+    "lon": 50.1569939,
+    "iata": "KUF",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Krasnodar Pashkovsky International Airport",
+    "type": "Airport",
+    "city": "KRASNODAR",
+    "lat": 45.0351532,
+    "lon": 38.9772396,
+    "iata": "KRR",
+    "country": "RU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Kigali International Airport",
+    "type": "Airport",
+    "city": "KIGALI",
+    "lat": -1.968276,
+    "lon": 30.1375843,
+    "iata": "KGL",
+    "country": "RW",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "King Fahd International Airport",
+    "type": "Airport",
+    "city": "DAMMAM",
+    "lat": 26.4673967,
+    "lon": 49.7988784,
+    "iata": "DMM",
+    "country": "SA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Al Khobar King Fahad Causeway",
+    "type": "Hotel",
+    "city": "DAMMAM",
+    "lat": 26.4367824,
+    "lon": 50.1039991
+  },
+  {
+    "name": "Moi International Airport",
+    "type": "Airport",
+    "city": "MOMBASA",
+    "lat": -4.0265226,
+    "lon": 39.6007207,
+    "iata": "MBA",
+    "country": "KE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sarova Whitesands Hotel",
+    "type": "Hotel",
+    "city": "MOMBASA",
+    "lat": -4.05052,
+    "lon": 39.667169
+  },
+  {
+    "name": "Narita International Airport",
+    "type": "Airport",
+    "city": "NARITA",
+    "lat": 35.7758715,
+    "lon": 140.3933101,
+    "iata": "NRT",
+    "country": "JP",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Narita Airport",
+    "type": "Hotel",
+    "city": "NARITA",
+    "lat": 35.7846215,
+    "lon": 140.3536553
+  },
+  {
+    "name": "Haneda Airport",
+    "type": "Airport",
+    "city": "TOKYO",
+    "lat": 35.5456924,
+    "lon": 139.7760994,
+    "iata": "HND",
+    "country": "JP",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "GRAND NIKKO TOKYO DAIBA",
+    "type": "Hotel",
+    "city": "TOKYO",
+    "lat": 35.625093,
+    "lon": 139.7718543
+  },
+  {
+    "name": "Jomo Kenyatta International Airport",
+    "type": "Airport",
+    "city": "NAIROBI",
+    "lat": -1.3169486,
+    "lon": 36.9288569,
+    "iata": "NBO",
+    "country": "KE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HILTON GARDEN INN",
+    "type": "Hotel",
+    "city": "NAIROBI",
+    "lat": -1.3540686,
+    "lon": 36.9071583
+  },
+  {
+    "name": "Manas International Airport",
+    "type": "Airport",
+    "city": "BISHKEK",
+    "lat": 42.8761424,
+    "lon": 74.6036724,
+    "iata": "FRU",
+    "country": "KG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sheraton  BISHKEK",
+    "type": "Hotel",
+    "city": "BISHKEK",
+    "lat": 42.8747382,
+    "lon": 74.5906061
+  },
+  {
+    "name": "Phnom Penh International Airport",
+    "type": "Airport",
+    "city": "Phnom Penh",
+    "lat": 11.5537276,
+    "lon": 104.8441057,
+    "iata": "PNH",
+    "country": "KH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Moroni Prince Said Ibrahim International",
+    "type": "Airport",
+    "city": "MORONI",
+    "lat": -11.6931255,
+    "lon": 43.2543044,
+    "iata": "HAH",
+    "country": "KM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Incheon International Airport",
+    "type": "Airport",
+    "city": "SEOUL",
+    "lat": 37.5850597,
+    "lon": 126.8105758,
+    "iata": "ICN",
+    "country": "KR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Grand Hyatt Incheon",
+    "type": "Hotel",
+    "city": "SEOUL",
+    "lat": 37.5666791,
+    "lon": 126.9782914
+  },
+  {
+    "name": "Kuwait International Airport",
+    "type": "Airport",
+    "city": "KUWAIT",
+    "lat": 29.2202681,
+    "lon": 47.9551556,
+    "iata": "KWI",
+    "country": "KW",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Garden Inn Hilton Kuwait",
+    "type": "Hotel",
+    "city": "KUWAIT",
+    "lat": 29.3048972,
+    "lon": 47.9414983
+  },
+  {
+    "name": "Almaty International Airport",
+    "type": "Airport",
+    "city": "ALMATY",
+    "lat": 43.3556863,
+    "lon": 77.0425838,
+    "iata": "ALA",
+    "country": "KZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "INTERCONTINENTAL ALMATY",
+    "type": "Hotel",
+    "city": "ALMATY",
+    "lat": 43.235893,
+    "lon": 76.9417
+  },
+  {
+    "name": "Astana International Airport",
+    "type": "Airport",
+    "city": "ASTANA",
+    "lat": 51.1282205,
+    "lon": 71.4306682,
+    "iata": "NQZ",
+    "country": "KZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Astana SAAD",
+    "type": "Hotel",
+    "city": "ASTANA",
+    "lat": 51.1282205,
+    "lon": 71.4306682
+  },
+  {
+    "name": "Aktau International Airport",
+    "type": "Airport",
+    "city": "Aktau",
+    "lat": 43.8589111,
+    "lon": 51.0931439,
+    "iata": "SCO",
+    "country": "KZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Atyrau Airport",
+    "type": "Airport",
+    "city": "Atyrau",
+    "lat": 47.1212402,
+    "lon": 51.8232747,
+    "iata": "GUW",
+    "country": "KZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Beirut–Rafic Hariri International Airport",
+    "type": "Airport",
+    "city": "BEIRUT",
+    "lat": 33.8892265,
+    "lon": 35.5025585,
+    "iata": "BEY",
+    "country": "LB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "RADISSON BLU MARTINEZ",
+    "type": "Hotel",
+    "city": "BEIRUT",
+    "lat": 33.9001191,
+    "lon": 35.4925849
+  },
+  {
+    "name": "Bandaranaike International Airport",
+    "type": "Airport",
+    "city": "COLOMBO",
+    "lat": 6.9388614,
+    "lon": 79.8542005,
+    "iata": "CMB",
+    "country": "LK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Vivanta Colombo Airport Hotel",
+    "type": "Hotel",
+    "city": "COLOMBO",
+    "lat": 6.9388614,
+    "lon": 79.8542005
+  },
+  {
+    "name": "Copenhagen Airport",
+    "type": "Airport",
+    "city": "COPENHAGEN",
+    "lat": 55.6867243,
+    "lon": 12.5700724,
+    "iata": "CPH",
+    "country": "DK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Scandic CPH Strandpark Hotel",
+    "type": "Hotel",
+    "city": "COPENHAGEN",
+    "lat": 55.6867243,
+    "lon": 12.5700724
+  },
+  {
+    "name": "Houari Boumediene Airport",
+    "type": "Airport",
+    "city": "ALGIERS",
+    "lat": 36.7014097,
+    "lon": 3.2293305,
+    "iata": "ALG",
+    "country": "DZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "MERCURE HOTEL",
+    "type": "Hotel",
+    "city": "ALGIERS",
+    "lat": 36.7138106,
+    "lon": 3.1964767
+  },
+  {
+    "name": "Aalborg Airport",
+    "type": "Airport",
+    "city": "AALBORG",
+    "lat": 57.0864352,
+    "lon": 9.8679819,
+    "iata": "AAL",
+    "country": "DK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Billund Airport",
+    "type": "Airport",
+    "city": "BILLUND",
+    "lat": 55.740737,
+    "lon": 9.1603919,
+    "iata": "BLL",
+    "country": "DK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "ZLEEP HOTEL",
+    "type": "Hotel",
+    "city": "BILLUND",
+    "lat": 55.7457018,
+    "lon": 9.141675
+  },
+  {
+    "name": "Ahmed Ben Bella Airport",
+    "type": "Airport",
+    "city": "ORAN",
+    "lat": 35.6205667,
+    "lon": -0.6225237,
+    "iata": "ORN",
+    "country": "DZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "LE MERIDIEN ORAN",
+    "type": "Hotel",
+    "city": "ORAN",
+    "lat": 35.7266886,
+    "lon": -0.5934675
+  },
+  {
+    "name": "Mohammed Boudiaf International Airport",
+    "type": "Airport",
+    "city": "CONSTANTINE",
+    "lat": 36.3641642,
+    "lon": 6.6084281,
+    "iata": "CZL",
+    "country": "DZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Zenata-Messali El Hadj Airport",
+    "type": "Airport",
+    "city": "TLEMCEN",
+    "lat": 35.0129843,
+    "lon": -1.4554483,
+    "iata": "TLM",
+    "country": "DZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mostepha Ben Boulaid Airport",
+    "type": "Airport",
+    "city": "BATNA",
+    "lat": 35.7537619,
+    "lon": 6.3094073,
+    "iata": "BLJ",
+    "country": "DZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Dallas Fort Worth",
+    "type": "Airport",
+    "city": "Dallas",
+    "lat": 32.7695069,
+    "lon": -96.830273,
+    "iata": "DFW",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Renaissance Addison Hotel",
+    "type": "Hotel",
+    "city": "Dallas",
+    "lat": 32.9568608,
+    "lon": -96.822996
+  },
+  {
+    "name": "Tallinn Airport",
+    "type": "Airport",
+    "city": "TALLINN",
+    "lat": 59.414383,
+    "lon": 24.8368511,
+    "iata": "TLL",
+    "country": "EE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Borg El Arab Int. Airport",
+    "type": "Airport",
+    "city": "ALEXANDRIA",
+    "lat": 44.8349534,
+    "lon": 8.7450304,
+    "iata": "HBE",
+    "country": "EG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Cairo International Airport",
+    "type": "Airport",
+    "city": "CAIRO",
+    "lat": 30.1140504,
+    "lon": 31.4245461,
+    "iata": "CAI",
+    "country": "EG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hurghada International Airport",
+    "type": "Airport",
+    "city": "HURGHADA",
+    "lat": 27.1799951,
+    "lon": 33.7884013,
+    "iata": "HRG",
+    "country": "EG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sharm El Sheikh Int. Airport",
+    "type": "Airport",
+    "city": "SHARM EL SHEIKH",
+    "lat": 27.8644422,
+    "lon": 34.295447,
+    "iata": "SSH",
+    "country": "EG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Luxor International Airport",
+    "type": "Airport",
+    "city": "Luxor",
+    "lat": 25.6706441,
+    "lon": 32.7065365,
+    "iata": "LXR",
+    "country": "EG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Asmara International Airport",
+    "type": "Airport",
+    "city": "ASMARA",
+    "lat": 15.2933078,
+    "lon": 38.9161873,
+    "iata": "ASM",
+    "country": "ER",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Asmara Palace Hotel",
+    "type": "Hotel",
+    "city": "ASMARA",
+    "lat": 15.3140797,
+    "lon": 38.9119841
+  },
+  {
+    "name": "Barcelona–El Prat Airport",
+    "type": "Airport",
+    "city": "BARCELONA",
+    "lat": 41.296944,
+    "lon": 2.0790474,
+    "iata": "BCN",
+    "country": "ES",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Four Points Barcelona Airport Hotel",
+    "type": "Hotel",
+    "city": "BARCELONA",
+    "lat": 41.3825802,
+    "lon": 2.177073
+  },
+  {
+    "name": "Bilbao Airport",
+    "type": "Airport",
+    "city": "BILBAO",
+    "lat": 43.2630018,
+    "lon": -2.9350039,
+    "iata": "BIO",
+    "country": "ES",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Adolfo Suárez Madrid–Barajas Airport",
+    "type": "Airport",
+    "city": "MADRID",
+    "lat": 40.4952269,
+    "lon": -3.5733733,
+    "iata": "MAD",
+    "country": "ES",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Novotel Madrid Campo de las Naciones",
+    "type": "Hotel",
+    "city": "MADRID",
+    "lat": 40.416782,
+    "lon": -3.703507
+  },
+  {
+    "name": "Málaga Airport",
+    "type": "Airport",
+    "city": "MALAGA",
+    "lat": 36.6785446,
+    "lon": -4.4999552,
+    "iata": "AGP",
+    "country": "ES",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Valencia Airport",
+    "type": "Airport",
+    "city": "VALENCIA",
+    "lat": 39.4878647,
+    "lon": -0.4812092,
+    "iata": "VLC",
+    "country": "ES",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Addis Ababa Bole International Airport",
+    "type": "Airport",
+    "city": "ADDIS ABABA",
+    "lat": 8.9791887,
+    "lon": 38.7965793,
+    "iata": "ADD",
+    "country": "ET",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ethiopian Skylight Hotel",
+    "type": "Hotel",
+    "city": "ADDIS ABABA",
+    "lat": 8.9869542,
+    "lon": 38.7890925
+  },
+  {
+    "name": "Helsinki Airport",
+    "type": "Airport",
+    "city": "HELSINKI",
+    "lat": 60.3218156,
+    "lon": 24.9473611,
+    "iata": "HEL",
+    "country": "FI",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HILTON VANTAA HILTON AIRPORT",
+    "type": "Hotel",
+    "city": "HELSINKI",
+    "lat": 60.1666204,
+    "lon": 24.9435408
+  },
+  {
+    "name": "Rovaniemi",
+    "type": "Airport",
+    "city": "ROVANIEMI",
+    "lat": 66.498013,
+    "lon": 25.7049674,
+    "iata": "RVN",
+    "country": "FI",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Lyon–Saint Exupéry Airport",
+    "type": "Airport",
+    "city": "LYON",
+    "lat": 45.7244237,
+    "lon": 5.0865172,
+    "iata": "LYS",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Marseille Provence Airport",
+    "type": "Airport",
+    "city": "MARSEILLE",
+    "lat": 43.2961743,
+    "lon": 5.3699525,
+    "iata": "MRS",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Nice Côte d'Azur Airport",
+    "type": "Airport",
+    "city": "NICE",
+    "lat": 43.6598152,
+    "lon": 7.213746,
+    "iata": "NCE",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Paris Charles de Gaulle Airport",
+    "type": "Airport",
+    "city": "PARIS",
+    "lat": 48.8588897,
+    "lon": 2.320041,
+    "iata": "CDG",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mercure CDG Convention",
+    "type": "Hotel",
+    "city": "PARIS",
+    "lat": 48.8588897,
+    "lon": 2.320041
+  },
+  {
+    "name": "Toulouse Blagnac Airport",
+    "type": "Airport",
+    "city": "TOULOUSE",
+    "lat": 43.629978,
+    "lon": 1.3608099,
+    "iata": "TLS",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Bordeaux–Mérignac Airport",
+    "type": "Airport",
+    "city": "Bordeaux",
+    "lat": 44.8292748,
+    "lon": -0.7125609,
+    "iata": "BOD",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Libreville International Airport",
+    "type": "Airport",
+    "city": "LIBREVILLE",
+    "lat": 0.4620431,
+    "lon": 9.4113035,
+    "iata": "LBV",
+    "country": "GA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "RADISSON BLU OKOUME HOTEL",
+    "type": "Hotel",
+    "city": "LIBREVILLE",
+    "lat": 0.4301449,
+    "lon": 9.4203573
+  },
+  {
+    "name": "Alexander Kartveli Batumi International Airport",
+    "type": "Airport",
+    "city": "BATUMI",
+    "lat": 41.6093233,
+    "lon": 41.6011929,
+    "iata": "BUS",
+    "country": "GE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Shota Rustaveli Tbilisi International Airport",
+    "type": "Airport",
+    "city": "TBILISI",
+    "lat": 41.6934591,
+    "lon": 44.8014495,
+    "iata": "TBS",
+    "country": "GE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "TBS CIP LOUNGE",
+    "type": "Hotel",
+    "city": "TBILISI",
+    "lat": 41.6934591,
+    "lon": 44.8014495
+  },
+  {
+    "name": "Kotoka International Airport",
+    "type": "Airport",
+    "city": "ACCRA",
+    "lat": 5.6038402,
+    "lon": -0.1682694,
+    "iata": "ACC",
+    "country": "GH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "KEMPINSKI HOTEL",
+    "type": "Hotel",
+    "city": "ACCRA",
+    "lat": 5.5535879,
+    "lon": -0.196415
+  },
+  {
+    "name": "BANJUL",
+    "type": "Airport",
+    "city": "BANJUL",
+    "lat": 13.4410165,
+    "lon": -16.5627509,
+    "iata": "BJL",
+    "country": "GM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Strasbourg Airport",
+    "type": "Airport",
+    "city": "Strasbourg",
+    "lat": 48.5388709,
+    "lon": 7.6254457,
+    "iata": "SXB",
+    "country": "FR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "MALABO",
+    "type": "Airport",
+    "city": "MALABO",
+    "lat": 3.741877,
+    "lon": 8.7740663,
+    "iata": "SSG",
+    "country": "GQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Athens International Airport",
+    "type": "Airport",
+    "city": "ATHENS",
+    "lat": 33.9597677,
+    "lon": -83.376398,
+    "iata": "ATH",
+    "country": "GR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Thessaloniki International Airport",
+    "type": "Airport",
+    "city": "THESSALONIKI",
+    "lat": 40.5198019,
+    "lon": 22.9740868,
+    "iata": "SKG",
+    "country": "GR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Bissau Osvaldo Vieira Airport",
+    "type": "Airport",
+    "city": "Bissau",
+    "lat": 11.861324,
+    "lon": -15.583055,
+    "iata": "OXB",
+    "country": "GW",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Franjo Tu?man International Airport",
+    "type": "Airport",
+    "city": "ZAGREB",
+    "lat": 45.8130967,
+    "lon": 15.9772795,
+    "iata": "ZAG",
+    "country": "HR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Dubrovnik Airport",
+    "type": "Airport",
+    "city": "DUBROVNIK",
+    "lat": 42.5614934,
+    "lon": 18.2643363,
+    "iata": "DBV",
+    "country": "HR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Budapest Ferenc Liszt International Airport",
+    "type": "Airport",
+    "city": "BUDAPEST",
+    "lat": 47.435273,
+    "lon": 19.2535106,
+    "iata": "BUD",
+    "country": "HU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "BUD Hotel",
+    "type": "Hotel",
+    "city": "BUDAPEST",
+    "lat": 47.4813896,
+    "lon": 19.1460941
+  },
+  {
+    "name": "Soekarno–Hatta International Airport",
+    "type": "Airport",
+    "city": "JAKARTA",
+    "lat": -6.1797874,
+    "lon": 106.7923764,
+    "iata": "CGK",
+    "country": "ID",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Novotel Tangerang",
+    "type": "Hotel",
+    "city": "JAKARTA",
+    "lat": -6.1754049,
+    "lon": 106.827168
+  },
+  {
+    "name": "Denpasar Bali Airport",
+    "type": "Airport",
+    "city": "Denpasar",
+    "lat": -8.7458582,
+    "lon": 115.167339,
+    "iata": "DPS",
+    "country": "ID",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Novotel Bali Ngurah Airport",
+    "type": "Hotel",
+    "city": "Denpasar",
+    "lat": -8.6524973,
+    "lon": 115.2191175
+  },
+  {
+    "name": "Clayton Hotel Dublin Airport",
+    "type": "Hotel",
+    "city": "Dublin",
+    "lat": 53.4117188,
+    "lon": -6.2181764
+  },
+  {
+    "name": "Dublin Airport",
+    "type": "Airport",
+    "city": "DUBLIN",
+    "lat": 53.4282916,
+    "lon": -6.2472741,
+    "iata": "DUB",
+    "country": "IE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ben Gurion International Airport",
+    "type": "Airport",
+    "city": "TEL AVIV",
+    "lat": 32.0852997,
+    "lon": 34.7818064,
+    "iata": "TLV",
+    "country": "IL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "NYX Tel Aviv Hotel",
+    "type": "Hotel",
+    "city": "TEL AVIV",
+    "lat": 32.0852997,
+    "lon": 34.7818064
+  },
+  {
+    "name": "Chhatrapati Shivaji Maharaj International Airport",
+    "type": "Airport",
+    "city": "MUMBAI",
+    "lat": 19.0901376,
+    "lon": 72.8638223,
+    "iata": "BOM",
+    "country": "IN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Westin Mumbai Powai Lake",
+    "type": "Hotel",
+    "city": "MUMBAI",
+    "lat": 19.1344801,
+    "lon": 72.901453
+  },
+  {
+    "name": "Indira Gandhi International Airport",
+    "type": "Airport",
+    "city": "DELHI",
+    "lat": 28.5553942,
+    "lon": 77.0847985,
+    "iata": "DEL",
+    "country": "IN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "THE WESTIN GURGAON",
+    "type": "Hotel",
+    "city": "DELHI",
+    "lat": 28.5799,
+    "lon": 77.1893
+  },
+  {
+    "name": "Baghdad International Airport",
+    "type": "Airport",
+    "city": "BAGHDAD",
+    "lat": 33.2636461,
+    "lon": 44.2236202,
+    "iata": "BGW",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Basrah International Airport",
+    "type": "Airport",
+    "city": "BASRAH",
+    "lat": 30.5450472,
+    "lon": 47.6699113,
+    "iata": "BSR",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mosul International Airport",
+    "type": "Airport",
+    "city": "MOSUL",
+    "lat": 36.2951179,
+    "lon": 43.1504789,
+    "iata": "OSM",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Al Najaf International Airport",
+    "type": "Airport",
+    "city": "AL NAJAF",
+    "lat": 31.9892565,
+    "lon": 44.4037338,
+    "iata": "NJF",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sulaimaniyah International Airport",
+    "type": "Airport",
+    "city": "SULAYMANIYAH",
+    "lat": 35.5614112,
+    "lon": 45.3170114,
+    "iata": "ISU",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Isfahan International Airport",
+    "type": "Airport",
+    "city": "ISFAHAN",
+    "lat": 32.7614539,
+    "lon": 51.8881754,
+    "iata": "IFN",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Erbil International Airport",
+    "type": "Airport",
+    "city": "ERBIL",
+    "lat": 36.2404123,
+    "lon": 43.9465692,
+    "iata": "EBL",
+    "country": "IQ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Shahid Ashrafi Esfahani Airport",
+    "type": "Airport",
+    "city": "KERMANSHAH",
+    "lat": 34.3475567,
+    "lon": 47.1689136,
+    "iata": "KSH",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mashhad International Airport",
+    "type": "Airport",
+    "city": "MASHHAD",
+    "lat": 36.2340908,
+    "lon": 59.6418668,
+    "iata": "MHD",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Shiraz International Airport",
+    "type": "Airport",
+    "city": "SHRAZ",
+    "lat": 29.5392,
+    "lon": 52.5898,
+    "iata": "SYZ",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Shahid Madani of Tabriz International Airport",
+    "type": "Airport",
+    "city": "TABRIZ",
+    "lat": 38.0738612,
+    "lon": 46.2978789,
+    "iata": "TBZ",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Laleh Park",
+    "type": "Hotel",
+    "city": "TABRIZ",
+    "lat": 38.0724764,
+    "lon": 46.3688244
+  },
+  {
+    "name": "Imam Khomeini International Airport",
+    "type": "Airport",
+    "city": "TEHRAN",
+    "lat": 35.4164608,
+    "lon": 51.1448324,
+    "iata": "IKA",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Rexan Hotel",
+    "type": "Hotel",
+    "city": "TEHRAN",
+    "lat": 35.6892523,
+    "lon": 51.3896004
+  },
+  {
+    "name": "Ahwaz International Airport",
+    "type": "Airport",
+    "city": "AHWAZ",
+    "lat": 31.3375148,
+    "lon": 48.7618376,
+    "iata": "AWZ",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Bologna Guglielmo Marconi Airport",
+    "type": "Airport",
+    "city": "BOLOGNA",
+    "lat": 44.5344306,
+    "lon": 11.288447,
+    "iata": "BLQ",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Goa International Airport",
+    "type": "Airport",
+    "city": "GENOVA",
+    "lat": 44.40726,
+    "lon": 8.9338624,
+    "iata": "GOA",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Milan–Malpensa Airport",
+    "type": "Airport",
+    "city": "MILANO",
+    "lat": 45.4641943,
+    "lon": 9.1896346,
+    "iata": "MXP",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Dolce by Wyndham Milan Malpensa",
+    "type": "Hotel",
+    "city": "MILANO",
+    "lat": 45.4641943,
+    "lon": 9.1896346
+  },
+  {
+    "name": "Naples International Airport",
+    "type": "Airport",
+    "city": "NAPLES",
+    "lat": 40.8839923,
+    "lon": 14.2845457,
+    "iata": "NAP",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Fiumicino – Leonardo da Vinci International Airport",
+    "type": "Airport",
+    "city": "ROME",
+    "lat": 41.8933203,
+    "lon": 12.4829321,
+    "iata": "FCO",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sheraton Parco de' Medici Hotel",
+    "type": "Hotel",
+    "city": "ROME",
+    "lat": 41.8149259,
+    "lon": 12.3999971
+  },
+  {
+    "name": "Turin Airport",
+    "type": "Airport",
+    "city": "TORINO",
+    "lat": 45.2009688,
+    "lon": 7.6489751,
+    "iata": "TRN",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Venice Marco Polo Airport",
+    "type": "Airport",
+    "city": "VENICE",
+    "lat": 45.5035386,
+    "lon": 12.3425797,
+    "iata": "VCE",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Catania–Fontanarossa Airport",
+    "type": "Airport",
+    "city": "CATANIA",
+    "lat": 37.4672405,
+    "lon": 15.0675846,
+    "iata": "CTA",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Pisa International Airport",
+    "type": "Airport",
+    "city": "PISA",
+    "lat": 43.6847937,
+    "lon": 10.395527,
+    "iata": "PSA",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Bari Karol Wojty?a Airport",
+    "type": "Airport",
+    "city": "BARI",
+    "lat": 41.1257843,
+    "lon": 16.8620293,
+    "iata": "BRI",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Falcone–Borsellino Airport",
+    "type": "Airport",
+    "city": "PALERMO",
+    "lat": 38.1765169,
+    "lon": 13.091643,
+    "iata": "PMO",
+    "country": "IT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "King Hussein International Airport",
+    "type": "Airport",
+    "city": "AQABA",
+    "lat": 29.6099965,
+    "lon": 35.018937,
+    "iata": "AQJ",
+    "country": "JO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Queen Alia International Airport",
+    "type": "Airport",
+    "city": "AMMAN",
+    "lat": 31.7238024,
+    "lon": 36.007237,
+    "iata": "AMM",
+    "country": "JO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Amman Airport Hotel",
+    "type": "Hotel",
+    "city": "AMMAN",
+    "lat": 31.7193574,
+    "lon": 35.9650464
+  },
+  {
+    "name": "Kansai International Airport",
+    "type": "Airport",
+    "city": "OSAKA",
+    "lat": 34.4342045,
+    "lon": 135.222523,
+    "iata": "KIX",
+    "country": "JP",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Aloft Osaka Dojima",
+    "type": "Hotel",
+    "city": "OSAKA",
+    "lat": 34.6937569,
+    "lon": 135.5014539
+  },
+  {
+    "name": "Donetsk Sergey Prokofiev International Airport",
+    "type": "Airport",
+    "city": "DONETSK",
+    "lat": 48.0158753,
+    "lon": 37.8013407,
+    "iata": "DOK",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Boryspil International Airport",
+    "type": "Airport",
+    "city": "KIEV",
+    "lat": 50.3401779,
+    "lon": 30.8915573,
+    "iata": "KBP",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Lviv Danylo Halytskyi International Airport",
+    "type": "Airport",
+    "city": "LVIV",
+    "lat": 49.8105751,
+    "lon": 23.9574437,
+    "iata": "LWO",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Kilimanjaro International Airport",
+    "type": "Airport",
+    "city": "KILIMANJARO",
+    "lat": -3.4280794,
+    "lon": 37.0762889,
+    "iata": "JRO",
+    "country": "TZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "MOUNT MERU HOTEL",
+    "type": "Hotel",
+    "city": "KILIMANJARO",
+    "lat": -3.0786534,
+    "lon": 37.4198556
+  },
+  {
+    "name": "Dnipropetrovsk International Airport",
+    "type": "Airport",
+    "city": "DNIPROPETROVSK",
+    "lat": 48.662589,
+    "lon": 34.9501715,
+    "iata": "DNK",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Anemon Hotel",
+    "type": "Hotel",
+    "city": "DNIPROPETROVSK",
+    "lat": 48.662589,
+    "lon": 34.9501715
+  },
+  {
+    "name": "Odessa International Airport",
+    "type": "Airport",
+    "city": "ODESSA",
+    "lat": 46.4405134,
+    "lon": 30.6767657,
+    "iata": "ODS",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Kherson International Airport",
+    "type": "Airport",
+    "city": "KHERSON",
+    "lat": 46.6764412,
+    "lon": 32.5086339,
+    "iata": "KHE",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Simferopol International Airport",
+    "type": "Airport",
+    "city": "SIMFEROPOL",
+    "lat": 45.0382587,
+    "lon": 33.9830812,
+    "iata": "SIP",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Zaporizhzhya International Airport",
+    "type": "Airport",
+    "city": "ZAPORIZHIA",
+    "lat": 47.4165079,
+    "lon": 35.922969,
+    "iata": "OZH",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ivano-Frankivsk International Airport",
+    "type": "Airport",
+    "city": "IVANO FRANKIVSK",
+    "lat": 48.8888035,
+    "lon": 24.6881212,
+    "iata": "IFO",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Kharkiv International Airport",
+    "type": "Airport",
+    "city": "Kharkiv",
+    "lat": 49.9226221,
+    "lon": 36.28843,
+    "iata": "HRK",
+    "country": "UA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Entebbe International Airport",
+    "type": "Airport",
+    "city": "ENTEBBE",
+    "lat": 0.0390733,
+    "lon": 32.454053,
+    "iata": "EBB",
+    "country": "UG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Speke Munyonyo Resort  - Entebbe",
+    "type": "Hotel",
+    "city": "ENTEBBE",
+    "lat": 0.0611715,
+    "lon": 32.4698564
+  },
+  {
+    "name": "Birmingham Airport",
+    "type": "Airport",
+    "city": "BIRMINGHAM",
+    "lat": 33.5646818,
+    "lon": -86.7504578,
+    "iata": "BHX",
+    "country": "GB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Manchester Airport",
+    "type": "Airport",
+    "city": "MANCHESTER",
+    "lat": 53.3503421,
+    "lon": -2.2803693,
+    "iata": "MAN",
+    "country": "GB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Heathrow Airport",
+    "type": "Airport",
+    "city": "London-LHR",
+    "lat": 51.467739,
+    "lon": -0.4587801,
+    "iata": "LHR",
+    "country": "GB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Crowne Plaza London Heathrow Terminal 4 Otel",
+    "type": "Hotel",
+    "city": "London-LHR",
+    "lat": 51.467739,
+    "lon": -0.4587801
+  },
+  {
+    "name": "Gatwick Airport",
+    "type": "Airport",
+    "city": "London-LGW",
+    "lat": 51.1540772,
+    "lon": -0.1823226,
+    "iata": "LGW",
+    "country": "GB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton London Gatwick Airport",
+    "type": "Hotel",
+    "city": "London-LGW",
+    "lat": 51.1540772,
+    "lon": -0.1823226
+  },
+  {
+    "name": "Edinburg Airport",
+    "type": "Airport",
+    "city": "EDINBURGH",
+    "lat": 55.9501289,
+    "lon": -3.359508,
+    "iata": "EDI",
+    "country": "GB",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Chicago O'Hare International Airport",
+    "type": "Airport",
+    "city": "CHICAGO",
+    "lat": 41.8755616,
+    "lon": -87.6244212,
+    "iata": "ORD",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hyatt Schaumburg Hotel",
+    "type": "Hotel",
+    "city": "CHICAGO",
+    "lat": 41.8755616,
+    "lon": -87.6244212
+  },
+  {
+    "name": "George Bush Intercontinental Airport",
+    "type": "Airport",
+    "city": "HOUSTON",
+    "lat": 29.9841416,
+    "lon": -95.332986,
+    "iata": "IAH",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton North Houston",
+    "type": "Hotel",
+    "city": "HOUSTON",
+    "lat": 29.9469634,
+    "lon": -95.4069495
+  },
+  {
+    "name": "John F. Kennedy",
+    "type": "Airport",
+    "city": "NEW YORK",
+    "lat": 40.8629096,
+    "lon": -73.6328758,
+    "iata": "JFK",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Paramount Hotel",
+    "type": "Hotel",
+    "city": "NEW YORK",
+    "lat": 40.7596487,
+    "lon": -73.9870077
+  },
+  {
+    "name": "Washington Dulles International Airport",
+    "type": "Airport",
+    "city": "WASHINGTON",
+    "lat": 38.8950368,
+    "lon": -77.0365427,
+    "iata": "IAD",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Fairfax",
+    "type": "Hotel",
+    "city": "WASHINGTON",
+    "lat": 38.8950368,
+    "lon": -77.0365427
+  },
+  {
+    "name": "General Edward Lawrence Logan International Airport",
+    "type": "Airport",
+    "city": "BOSTON",
+    "lat": 42.3554334,
+    "lon": -71.060511,
+    "iata": "BOS",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Omni Boston at Seaport",
+    "type": "Hotel",
+    "city": "BOSTON",
+    "lat": 42.3554334,
+    "lon": -71.060511
+  },
+  {
+    "name": "San Francisco International Airport",
+    "type": "Airport",
+    "city": "SAN FRANCISCO",
+    "lat": 37.622452,
+    "lon": -122.3839894,
+    "iata": "SFO",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Embassy Suites Burlingame Hotel",
+    "type": "Hotel",
+    "city": "SAN FRANCISCO",
+    "lat": 37.7792588,
+    "lon": -122.4193286
+  },
+  {
+    "name": "Miami International Airport",
+    "type": "Airport",
+    "city": "MIAMI",
+    "lat": 25.7949789,
+    "lon": -80.2867234,
+    "iata": "MIA",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Yotel Hotel",
+    "type": "Hotel",
+    "city": "MIAMI",
+    "lat": 25.7764295,
+    "lon": -80.1897375
+  },
+  {
+    "name": "Newark International Airport",
+    "type": "Airport",
+    "city": "Newark",
+    "lat": 40.6890641,
+    "lon": -74.1772549,
+    "iata": "EWR",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Meadowlands",
+    "type": "Hotel",
+    "city": "Newark",
+    "lat": 40.735657,
+    "lon": -74.1723667
+  },
+  {
+    "name": "Orlando International Airport",
+    "type": "Airport",
+    "city": "Orlando",
+    "lat": 28.4129036,
+    "lon": -81.3094431,
+    "iata": "MCO",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Seattle International Airport",
+    "type": "Airport",
+    "city": "Seattle",
+    "lat": 47.6038321,
+    "lon": -122.330062,
+    "iata": "SEA",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hotel Interurban",
+    "type": "Hotel",
+    "city": "Seattle",
+    "lat": 47.6038321,
+    "lon": -122.330062
+  },
+  {
+    "name": "Las Vegas International Airport",
+    "type": "Airport",
+    "city": "Las Vegas",
+    "lat": 36.0861034,
+    "lon": -115.1611002,
+    "iata": "LAS",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Tashkent International Airport",
+    "type": "Airport",
+    "city": "TASHKENT",
+    "lat": 41.2599624,
+    "lon": 69.285117,
+    "iata": "TAS",
+    "country": "UZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hyatt Regency Taskent",
+    "type": "Hotel",
+    "city": "TASHKENT",
+    "lat": 41.3165337,
+    "lon": 69.2776604
+  },
+  {
+    "name": "Samarkand International Airport",
+    "type": "Airport",
+    "city": "SAMARKAND",
+    "lat": 39.6988761,
+    "lon": 66.9912281,
+    "iata": "SKD",
+    "country": "UZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Garden Inn Samarkand",
+    "type": "Hotel",
+    "city": "SAMARKAND",
+    "lat": 39.6736593,
+    "lon": 66.9668187
+  },
+  {
+    "name": "Maiquetía \"Simón Bolívar\" International Airport",
+    "type": "Airport",
+    "city": "CARACAS",
+    "lat": 10.5060934,
+    "lon": -66.9146008,
+    "iata": "CCS",
+    "country": "VE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "MARRIOT PLAYA GRANDE",
+    "type": "Hotel",
+    "city": "CARACAS",
+    "lat": 10.5060934,
+    "lon": -66.9146008
+  },
+  {
+    "name": "Tân S?n Nh?t International Airport",
+    "type": "Airport",
+    "city": "HO CHI MINH",
+    "lat": 10.7755254,
+    "lon": 106.7021047,
+    "iata": "SGN",
+    "country": "VN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "New World Saigon Hotel",
+    "type": "Hotel",
+    "city": "HO CHI MINH",
+    "lat": 10.7755254,
+    "lon": 106.7021047
+  },
+  {
+    "name": "N?i Bài International Airport",
+    "type": "Airport",
+    "city": "HANOI",
+    "lat": 21.0283334,
+    "lon": 105.854041,
+    "iata": "HAN",
+    "country": "VN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Pullman Hanoi",
+    "type": "Hotel",
+    "city": "HANOI",
+    "lat": 21.0298499,
+    "lon": 105.8288091
+  },
+  {
+    "name": "Pristina International Airport",
+    "type": "Airport",
+    "city": "PRISHTINA",
+    "lat": 42.5766911,
+    "lon": 21.0323546,
+    "iata": "PRN",
+    "country": "XK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Aden International Airport",
+    "type": "Airport",
+    "city": "ADEN",
+    "lat": 12.8295435,
+    "lon": 45.0315522,
+    "iata": "ADE",
+    "country": "YE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sana'a International Airport",
+    "type": "Airport",
+    "city": "SANAA",
+    "lat": 15.4745454,
+    "lon": 44.2197357,
+    "iata": "SAH",
+    "country": "YE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "O. R. Tambo International Airport",
+    "type": "Airport",
+    "city": "JOHANNESBURG",
+    "lat": -26.1350013,
+    "lon": 28.2270057,
+    "iata": "JNB",
+    "country": "ZA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Protea Fire&Ice Menlyn Hotel",
+    "type": "Hotel",
+    "city": "JOHANNESBURG",
+    "lat": -26.205,
+    "lon": 28.049722
+  },
+  {
+    "name": "King Shaka International Airport",
+    "type": "Airport",
+    "city": "DURBAN",
+    "lat": -29.861825,
+    "lon": 31.009909,
+    "iata": "DUR",
+    "country": "ZA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Southern Sun Elangeni & Maharani",
+    "type": "Hotel",
+    "city": "DURBAN",
+    "lat": -29.8457126,
+    "lon": 31.0346123
+  },
+  {
+    "name": "Kenneth Kaunda International Airport",
+    "type": "Airport",
+    "city": "LUSAKA",
+    "lat": -15.3301972,
+    "lon": 28.4532008,
+    "iata": "LUN",
+    "country": "ZM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Frankfurt Airport",
+    "type": "Airport",
+    "city": "FRANKFURT",
+    "lat": 50.0244126,
+    "lon": 8.5552003,
+    "iata": "FRA",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sheraton Frankfurt Airport",
+    "type": "Hotel",
+    "city": "FRANKFURT",
+    "lat": 50.0521826,
+    "lon": 8.572719
+  },
+  {
+    "name": "Bodensee Airport Friedrichshafen",
+    "type": "Airport",
+    "city": "FRIEDRICHSHAFEN",
+    "lat": 47.6714081,
+    "lon": 9.5114977,
+    "iata": "FDH",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hamburg Airport",
+    "type": "Airport",
+    "city": "HAMBURG",
+    "lat": 53.6363621,
+    "lon": 9.9945501,
+    "iata": "HAM",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Airport Plaza",
+    "type": "Hotel",
+    "city": "HAMBURG",
+    "lat": 53.6320286,
+    "lon": 10.0054726
+  },
+  {
+    "name": "Hannover Airport",
+    "type": "Airport",
+    "city": "HANNOVER",
+    "lat": 52.4614408,
+    "lon": 9.6863337,
+    "iata": "HAJ",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Maritim Airport Hotel",
+    "type": "Hotel",
+    "city": "HANNOVER",
+    "lat": 52.4598368,
+    "lon": 9.6985147
+  },
+  {
+    "name": "Leipzig/Halle Airport",
+    "type": "Airport",
+    "city": "LEIPZIG",
+    "lat": 51.3406321,
+    "lon": 12.3747329,
+    "iata": "LEJ",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "GLOBANA HOTEL",
+    "type": "Hotel",
+    "city": "LEIPZIG",
+    "lat": 51.3406321,
+    "lon": 12.3747329
+  },
+  {
+    "name": "Munich Airport",
+    "type": "Airport",
+    "city": "MUNICH",
+    "lat": 48.1371079,
+    "lon": 11.5753822,
+    "iata": "MUC",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "NH Munchen Ost Conference Center",
+    "type": "Hotel",
+    "city": "MUNICH",
+    "lat": 48.1371079,
+    "lon": 11.5753822
+  },
+  {
+    "name": "Nuremberg Airport",
+    "type": "Airport",
+    "city": "NUREMBERG",
+    "lat": 49.4982685,
+    "lon": 11.0781063,
+    "iata": "NUE",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Movenpick Airport Hotel",
+    "type": "Hotel",
+    "city": "NUREMBERG",
+    "lat": 49.4930387,
+    "lon": 11.0799383
+  },
+  {
+    "name": "Münster Osnabrück International Airport",
+    "type": "Airport",
+    "city": "MUNSTER",
+    "lat": 51.9625101,
+    "lon": 7.6251879,
+    "iata": "FMO",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "IBIS HOTEL",
+    "type": "Hotel",
+    "city": "MUNSTER",
+    "lat": 51.955428,
+    "lon": 7.6309612
+  },
+  {
+    "name": "Stuttgart Airport",
+    "type": "Airport",
+    "city": "STUTTGART",
+    "lat": 48.710066,
+    "lon": 9.169622,
+    "iata": "STR",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Mercure Airport Messa",
+    "type": "Hotel",
+    "city": "STUTTGART",
+    "lat": 48.7784485,
+    "lon": 9.1800132
+  },
+  {
+    "name": "Djibouti–Ambouli International Airport",
+    "type": "Airport",
+    "city": "DJIBOUTI",
+    "lat": 11.5470406,
+    "lon": 43.159144,
+    "iata": "JIB",
+    "country": "DJ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "DJIBOUTI PALACE KEMPINSKI HOTEL",
+    "type": "Hotel",
+    "city": "DJIBOUTI",
+    "lat": 11.8145966,
+    "lon": 42.8453061
+  },
+  {
+    "name": "ABU DHABİ",
+    "type": "Airport",
+    "city": "ABU DHABI",
+    "lat": 24.4538352,
+    "lon": 54.3774014,
+    "iata": "AUH",
+    "country": "AE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Dusit Thani Hotel",
+    "type": "Hotel",
+    "city": "ABU DHABI",
+    "lat": 24.4538352,
+    "lon": 54.3774014
+  },
+  {
+    "name": "DUBAİ",
+    "type": "Airport",
+    "city": "DUBAI",
+    "lat": 25.0742823,
+    "lon": 55.1885387,
+    "iata": "DXB",
+    "country": "AE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Swiss Otel Living Al Ghueair",
+    "type": "Hotel",
+    "city": "DUBAI",
+    "lat": 25.0742823,
+    "lon": 55.1885387
+  },
+  {
+    "name": "Sharjah International Airport",
+    "type": "Airport",
+    "city": "SHARJAH",
+    "lat": 25.3401476,
+    "lon": 55.5137442,
+    "iata": "SHJ",
+    "country": "AE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Four Points by Sheraton Hotel",
+    "type": "Hotel",
+    "city": "SHARJAH",
+    "lat": 25.3605673,
+    "lon": 56.3135004
+  },
+  {
+    "name": "Hamid Karzai International Airport",
+    "type": "Airport",
+    "city": "Kabul",
+    "lat": 34.5666884,
+    "lon": 69.2065007,
+    "iata": "KBL",
+    "country": "AF",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "KABUL STAR HOTEL",
+    "type": "Hotel",
+    "city": "Kabul",
+    "lat": 34.5312817,
+    "lon": 69.1773859
+  },
+  {
+    "name": "Mazar-i Sharif International Airport",
+    "type": "Airport",
+    "city": "MAZAR-I SHARIF",
+    "lat": 36.7090366,
+    "lon": 67.1114085,
+    "iata": "MZR",
+    "country": "AF",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Tirana International Airport",
+    "type": "Airport",
+    "city": "TIRAN",
+    "lat": 41.3281482,
+    "lon": 19.8184435,
+    "iata": "TIA",
+    "country": "AL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hotel Airport Tirana",
+    "type": "Hotel",
+    "city": "TIRAN",
+    "lat": 41.3281482,
+    "lon": 19.8184435
+  },
+  {
+    "name": "Luanda Quatro de Fevereiro",
+    "type": "Airport",
+    "city": "Luanda",
+    "lat": -8.8272699,
+    "lon": 13.2439512,
+    "iata": "LAD",
+    "country": "AO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ministro Pistarini International Airport",
+    "type": "Airport",
+    "city": "BUENOS AIRES",
+    "lat": -34.8168141,
+    "lon": -58.5474234,
+    "iata": "EZE",
+    "country": "AR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HOLIDAY INN EZEIZA",
+    "type": "Hotel",
+    "city": "BUENOS AIRES",
+    "lat": -34.7338134,
+    "lon": -58.5200757
+  },
+  {
+    "name": "Salzburg Airport",
+    "type": "Airport",
+    "city": "SALZBURG",
+    "lat": 47.7934551,
+    "lon": 13.0018306,
+    "iata": "SZG",
+    "country": "AT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "CROWNE PLAZA",
+    "type": "Hotel",
+    "city": "SALZBURG",
+    "lat": 47.7981346,
+    "lon": 13.0464806
+  },
+  {
+    "name": "Vienna International Airport",
+    "type": "Airport",
+    "city": "VIENNA",
+    "lat": 48.2083537,
+    "lon": 16.3725042,
+    "iata": "VIE",
+    "country": "AT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Moxy Airport Hotel",
+    "type": "Hotel",
+    "city": "VIENNA",
+    "lat": 48.2083537,
+    "lon": 16.3725042
+  },
+  {
+    "name": "Graz Airport",
+    "type": "Airport",
+    "city": "GRAZ",
+    "lat": 46.9887481,
+    "lon": 15.4400233,
+    "iata": "GRZ",
+    "country": "AT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HOTEL RAMADA",
+    "type": "Hotel",
+    "city": "GRAZ",
+    "lat": 46.9761392,
+    "lon": 15.4273238
+  },
+  {
+    "name": "Linz Blue Danube Airport",
+    "type": "Airport",
+    "city": "LINZ",
+    "lat": 48.2363749,
+    "lon": 14.1877134,
+    "iata": "LNZ",
+    "country": "AT",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Heydar Aliyev International Airport",
+    "type": "Airport",
+    "city": "BAKU",
+    "lat": 40.472815,
+    "lon": 50.0491469,
+    "iata": "GYD",
+    "country": "AZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "GYD Hotel",
+    "type": "Hotel",
+    "city": "BAKU",
+    "lat": 40.3755885,
+    "lon": 49.8328009
+  },
+  {
+    "name": "Ganja International Airport",
+    "type": "Airport",
+    "city": "GANJA",
+    "lat": 40.6798083,
+    "lon": 46.3597178,
+    "iata": "GNJ",
+    "country": "AZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "VEGO OTEL",
+    "type": "Hotel",
+    "city": "GANJA",
+    "lat": 40.6798083,
+    "lon": 46.3597178
+  },
+  {
+    "name": "Nakhchivan International Airport",
+    "type": "Airport",
+    "city": "NAKHCHIVAN",
+    "lat": 39.217497,
+    "lon": 45.4069671,
+    "iata": "NAJ",
+    "country": "AZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sarajevo International Airport",
+    "type": "Airport",
+    "city": "SARAJEVO",
+    "lat": 43.825362,
+    "lon": 18.3331473,
+    "iata": "SJJ",
+    "country": "BA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "IBIS STYLES SARAJEVO",
+    "type": "Hotel",
+    "city": "SARAJEVO",
+    "lat": 43.8483396,
+    "lon": 18.3494212
+  },
+  {
+    "name": "Hazrat Shahjalal International Airport",
+    "type": "Airport",
+    "city": "DHAKA",
+    "lat": 23.8431441,
+    "lon": 90.4053032,
+    "iata": "DAC",
+    "country": "BD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Blue Water Garden",
+    "type": "Hotel",
+    "city": "DHAKA",
+    "lat": 23.7643863,
+    "lon": 90.3890144
+  },
+  {
+    "name": "Chittagong Shah Amanat Airport",
+    "type": "Airport",
+    "city": "Chittagong",
+    "lat": 22.333778,
+    "lon": 91.8344348,
+    "iata": "CGP",
+    "country": "BD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Brussels Airport",
+    "type": "Airport",
+    "city": "BRUSSELS",
+    "lat": 43.7490496,
+    "lon": -81.2372654,
+    "iata": "BRU",
+    "country": "BE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "SHERATON AIRPORT",
+    "type": "Hotel",
+    "city": "BRUSSELS",
+    "lat": 50.8465573,
+    "lon": 4.351697
+  },
+  {
+    "name": "Ouagadougou Airport",
+    "type": "Airport",
+    "city": "OUAGADOUGOU",
+    "lat": 12.3504132,
+    "lon": -1.5124425,
+    "iata": "OUA",
+    "country": "BF",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "LAİCO HOTEL",
+    "type": "Hotel",
+    "city": "OUAGADOUGOU",
+    "lat": 12.3681873,
+    "lon": -1.5270944
+  },
+  {
+    "name": "Sofia Airport",
+    "type": "Airport",
+    "city": "SOFIA",
+    "lat": 42.6879741,
+    "lon": 23.4161918,
+    "iata": "SOF",
+    "country": "BG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "BEST WESTERN PREMIER HOTEL AIRPORT",
+    "type": "Hotel",
+    "city": "SOFIA",
+    "lat": 42.6977028,
+    "lon": 23.3217359
+  },
+  {
+    "name": "Varna Airport",
+    "type": "Airport",
+    "city": "VARNA",
+    "lat": 43.233936,
+    "lon": 27.8233416,
+    "iata": "VAR",
+    "country": "BG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Swiss-Belhotel Varna",
+    "type": "Hotel",
+    "city": "VARNA",
+    "lat": 43.2073873,
+    "lon": 27.9166653
+  },
+  {
+    "name": "Bahrain International Airport",
+    "type": "Airport",
+    "city": "BAHRAIN",
+    "lat": 26.2696777,
+    "lon": 50.6328844,
+    "iata": "BAH",
+    "country": "BH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Wyndham Amwaj",
+    "type": "Hotel",
+    "city": "BAHRAIN",
+    "lat": 26.1551249,
+    "lon": 50.5344606
+  },
+  {
+    "name": "Minsk National Airport",
+    "type": "Airport",
+    "city": "MINSK",
+    "lat": 53.8876628,
+    "lon": 28.0341227,
+    "iata": "MSQ",
+    "country": "BY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "CROWN PLAZA",
+    "type": "Hotel",
+    "city": "MINSK",
+    "lat": 53.9024716,
+    "lon": 27.5618225
+  },
+  {
+    "name": "Toronto Pearson International Airport",
+    "type": "Airport",
+    "city": "TORONTO",
+    "lat": 43.6782236,
+    "lon": -79.6288047,
+    "iata": "YYZ",
+    "country": "CA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HOLIDAY INN",
+    "type": "Hotel",
+    "city": "TORONTO",
+    "lat": 43.6931752,
+    "lon": -79.5728311
+  },
+  {
+    "name": "Cardinal Bernadin Gantin International Airport",
+    "type": "Airport",
+    "city": "COTONOU",
+    "lat": 6.3676953,
+    "lon": 2.4252507,
+    "iata": "COO",
+    "country": "BJ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "São Paulo/Guarulhos–Governador André Franco Montoro Int. Airport",
+    "type": "Airport",
+    "city": "SAO PAULO",
+    "lat": -23.5506507,
+    "lon": -46.6333824,
+    "iata": "GRU",
+    "country": "BR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Grand Mercure Ibirapuera Hotel",
+    "type": "Hotel",
+    "city": "SAO PAULO",
+    "lat": -23.5927613,
+    "lon": -46.6493288
+  },
+  {
+    "name": "Montréal–Pierre Elliott Trudeau International Airport",
+    "type": "Airport",
+    "city": "MONTREAL",
+    "lat": 45.5031824,
+    "lon": -73.5698065,
+    "iata": "YUL",
+    "country": "CA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "LE CENTRE SHERATON",
+    "type": "Hotel",
+    "city": "MONTREAL",
+    "lat": 45.4980338,
+    "lon": -73.5715359
+  },
+  {
+    "name": "Vancouver International Airport",
+    "type": "Airport",
+    "city": "Vancouver",
+    "lat": 49.1928337,
+    "lon": -123.1829087,
+    "iata": "YVR",
+    "country": "CA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Vancouver Airport Hotel",
+    "type": "Hotel",
+    "city": "Vancouver",
+    "lat": 49.1717251,
+    "lon": -123.1406554
+  },
+  {
+    "name": "Pointe Noire Agostinho-Neto",
+    "type": "Airport",
+    "city": "POINTE NOIRE",
+    "lat": -4.7975373,
+    "lon": 11.8503297,
+    "iata": "PNR",
+    "country": "CG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "DoubleTree Hilton",
+    "type": "Hotel",
+    "city": "POINTE NOIRE",
+    "lat": -4.8033326,
+    "lon": 11.8490225
+  },
+  {
+    "name": "N'djili Airport",
+    "type": "Airport",
+    "city": "KINSHASA",
+    "lat": -4.3196982,
+    "lon": 15.3424196,
+    "iata": "FIH",
+    "country": "CD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "HILTON HOTEL",
+    "type": "Hotel",
+    "city": "KINSHASA",
+    "lat": -4.2984253,
+    "lon": 15.3121237
+  },
+  {
+    "name": "EuroAirport Basel-Mulhouse-Freiburg",
+    "type": "Airport",
+    "city": "BASEL",
+    "lat": 47.5581077,
+    "lon": 7.5878261,
+    "iata": "BSL",
+    "country": "CH",
+    "czib": false,
+    "aliases": ["Mulhouse", "Freiburg"]
+  },
+  {
+    "name": "Basel Airport Hotel",
+    "type": "Hotel",
+    "city": "BASEL",
+    "lat": 47.5738478,
+    "lon": 7.5637864
+  },
+  {
+    "name": "Fergana Uluslararası Havalimanı",
+    "type": "Airport",
+    "city": "FERGANA",
+    "lat": 40.3764879,
+    "lon": 71.7913193,
+    "iata": "FEG",
+    "country": "UZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Grand Fergana Hotel",
+    "type": "Hotel",
+    "city": "FERGANA",
+    "lat": 40.3764879,
+    "lon": 71.7913193
+  },
+  {
+    "name": "Geneva Airport",
+    "type": "Airport",
+    "city": "GENEVA",
+    "lat": 46.2378164,
+    "lon": 6.1081212,
+    "iata": "GVA",
+    "country": "CH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Zürich Airport",
+    "type": "Airport",
+    "city": "ZURICH",
+    "lat": 47.4633881,
+    "lon": 8.5533661,
+    "iata": "ZRH",
+    "country": "CH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Port Bouet Airport",
+    "type": "Airport",
+    "city": "ABIDJAN",
+    "lat": 5.2649283,
+    "lon": -3.9259573,
+    "iata": "ABJ",
+    "country": "CI",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "RADISSON BLU",
+    "type": "Hotel",
+    "city": "ABIDJAN",
+    "lat": 5.2589521,
+    "lon": -3.9364075
+  },
+  {
+    "name": "Douala International Airport",
+    "type": "Airport",
+    "city": "DOUALA",
+    "lat": 4.0129555,
+    "lon": 9.7161489,
+    "iata": "DLA",
+    "country": "CM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Krystal Palace Hotel",
+    "type": "Hotel",
+    "city": "DOUALA",
+    "lat": 4.0571427,
+    "lon": 9.699424
+  },
+  {
+    "name": "Yaoundé Nsimalen International Airport",
+    "type": "Airport",
+    "city": "YAOUNDE",
+    "lat": 3.8689867,
+    "lon": 11.5213344,
+    "iata": "NSI",
+    "country": "CM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "YAOUNDE HILTON HOTEL",
+    "type": "Hotel",
+    "city": "YAOUNDE",
+    "lat": 3.8645784,
+    "lon": 11.5156674
+  },
+  {
+    "name": "Beijing Capital International Airport",
+    "type": "Airport",
+    "city": "BEIJING",
+    "lat": 40.0791555,
+    "lon": 116.5942602,
+    "iata": "PEK",
+    "country": "CN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Grand Metropark Hote",
+    "type": "Hotel",
+    "city": "BEIJING",
+    "lat": 40.190632,
+    "lon": 116.412144
+  },
+  {
+    "name": "Guangzhou Baiyun International Airport",
+    "type": "Airport",
+    "city": "GUANGZHOU",
+    "lat": 23.3882376,
+    "lon": 113.3015568,
+    "iata": "CAN",
+    "country": "CN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "The Garden Hotel",
+    "type": "Hotel",
+    "city": "GUANGZHOU",
+    "lat": 23.0969817,
+    "lon": 113.3218377
+  },
+  {
+    "name": "Shanghai Pudong International Airport",
+    "type": "Airport",
+    "city": "SHANGHAI",
+    "lat": 31.1427359,
+    "lon": 121.8041131,
+    "iata": "PVG",
+    "country": "CN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Double Tree by Hilton Nortshore Conference Center",
+    "type": "Hotel",
+    "city": "SHANGHAI",
+    "lat": 31.2312707,
+    "lon": 121.4700152
+  },
+  {
+    "name": "Hong Kong International Airport",
+    "type": "Airport",
+    "city": "HONG KONG",
+    "lat": 22.3125986,
+    "lon": 113.9172999,
+    "iata": "HKG",
+    "country": "HK",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "FOUR POINTS by SHERATON HONGKONG",
+    "type": "Hotel",
+    "city": "HONG KONG",
+    "lat": 22.2950418,
+    "lon": 113.9464297
+  },
+  {
+    "name": "Taiwan Taoyuan International Airport",
+    "type": "Airport",
+    "city": "TAIPEI",
+    "lat": 25.0375198,
+    "lon": 121.5636796,
+    "iata": "TPE",
+    "country": "TW",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Sinban",
+    "type": "Hotel",
+    "city": "TAIPEI",
+    "lat": 25.0113872,
+    "lon": 121.4625357
+  },
+  {
+    "name": "XIAN XIANYANG AIRPORT",
+    "type": "Airport",
+    "city": "XIAN",
+    "lat": 34.4423643,
+    "lon": 108.7600313,
+    "iata": "XIY",
+    "country": "CN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "El Dorado International Airport",
+    "type": "Airport",
+    "city": "BOGOTA",
+    "lat": 4.7020946,
+    "lon": -74.1477132,
+    "iata": "BOG",
+    "country": "CO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Bogota Corferias",
+    "type": "Hotel",
+    "city": "BOGOTA",
+    "lat": 4.6533817,
+    "lon": -74.0836331
+  },
+  {
+    "name": "José Martí International Airport",
+    "type": "Airport",
+    "city": "HAVANA",
+    "lat": 22.9873849,
+    "lon": -82.4142531,
+    "iata": "HAV",
+    "country": "CU",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Melia Habana Hotel",
+    "type": "Hotel",
+    "city": "HAVANA",
+    "lat": 23.1091396,
+    "lon": -82.4424235
+  },
+  {
+    "name": "Ercan Airport",
+    "type": "Airport",
+    "city": "LEFKOSA",
+    "lat": 35.1517523,
+    "lon": 33.5035318,
+    "iata": "ECN",
+    "country": "CY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Concorde Lefkosa",
+    "type": "Hotel",
+    "city": "LEFKOSA",
+    "lat": 35.2087437,
+    "lon": 33.322482
+  },
+  {
+    "name": "Václav Havel Airport Prague",
+    "type": "Airport",
+    "city": "PRAGUE",
+    "lat": 50.1020451,
+    "lon": 14.2705663,
+    "iata": "PRG",
+    "country": "CZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Karlsruhe/Baden-Baden Airport",
+    "type": "Airport",
+    "city": "BADEN BADEN",
+    "lat": 48.7787136,
+    "lon": 8.0819713,
+    "iata": "FKB",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Berlin Tegel Airport",
+    "type": "Airport",
+    "city": "BERLIN",
+    "lat": 52.5173885,
+    "lon": 13.3951309,
+    "iata": "TXL",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Steigenberger Airport Hotel",
+    "type": "Hotel",
+    "city": "BERLIN",
+    "lat": 52.5173885,
+    "lon": 13.3951309
+  },
+  {
+    "name": "Bremen Airport",
+    "type": "Airport",
+    "city": "BREMEN",
+    "lat": 53.0453419,
+    "lon": 8.7896417,
+    "iata": "BRE",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Maritim Hotel",
+    "type": "Hotel",
+    "city": "BREMEN",
+    "lat": 53.0877077,
+    "lon": 8.8170921
+  },
+  {
+    "name": "Cologne Bonn Airport",
+    "type": "Airport",
+    "city": "COLOGNE",
+    "lat": 50.8677817,
+    "lon": 7.138961,
+    "iata": "CGN",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "DORINT HOTEL AM HEUMARKT KÖLN",
+    "type": "Hotel",
+    "city": "COLOGNE",
+    "lat": 50.9356902,
+    "lon": 6.9574731
+  },
+  {
+    "name": "Dusseldorf Internatıonal Airport",
+    "type": "Airport",
+    "city": "DUSSELDORF",
+    "lat": 51.2872305,
+    "lon": 6.7620625,
+    "iata": "DUS",
+    "country": "DE",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Holiday Inn Dusseldorf",
+    "type": "Hotel",
+    "city": "DUSSELDORF",
+    "lat": 51.2325402,
+    "lon": 6.7962201
+  },
+  {
+    "name": "Julius Nyerere International Airport",
+    "type": "Airport",
+    "city": "DAR ES SALAAM",
+    "lat": -6.8741937,
+    "lon": 39.207524,
+    "iata": "DAR",
+    "country": "TZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "RAMADA RESORT DAR EE SALAAM",
+    "type": "Hotel",
+    "city": "DAR ES SALAAM",
+    "lat": -6.8160837,
+    "lon": 39.2803583
+  },
+  {
+    "name": "SANTIAGO AIRPORT",
+    "type": "Airport",
+    "city": "SANTIAGO",
+    "lat": -29.2156385,
+    "lon": -54.8406006,
+    "iata": "SCL",
+    "country": "CL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Aleppo International Airport",
+    "type": "Airport",
+    "city": "ALEPPO",
+    "lat": 36.1810251,
+    "lon": 37.2242883,
+    "iata": "ALP",
+    "country": "SY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Damascus International Airport",
+    "type": "Airport",
+    "city": "DAMASCUS",
+    "lat": 33.4118633,
+    "lon": 36.512025,
+    "iata": "DAM",
+    "country": "SY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Suvarnabhumi Airport",
+    "type": "Airport",
+    "city": "BANGKOK",
+    "lat": 13.7227587,
+    "lon": 100.7272057,
+    "iata": "BKK",
+    "country": "TH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Centara Grand Ladprao Hotel",
+    "type": "Hotel",
+    "city": "BANGKOK",
+    "lat": 13.7524938,
+    "lon": 100.4935089
+  },
+  {
+    "name": "PHUKET",
+    "type": "Airport",
+    "city": "PHUKET",
+    "lat": 7.8847901,
+    "lon": 98.3891503,
+    "iata": "HKT",
+    "country": "TH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "NH Boat Lagoon Phuket Resort",
+    "type": "Hotel",
+    "city": "PHUKET",
+    "lat": 7.9366015,
+    "lon": 98.3529292
+  },
+  {
+    "name": "Blaise Diagne International Airport",
+    "type": "Airport",
+    "city": "DAKAR",
+    "lat": 14.693425,
+    "lon": -17.447938,
+    "iata": "DSS",
+    "country": "SN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Marriott Dakar Diamniadio",
+    "type": "Hotel",
+    "city": "DAKAR",
+    "lat": 14.7299987,
+    "lon": -17.2056547
+  },
+  {
+    "name": "Aden Adde International Airport",
+    "type": "Airport",
+    "city": "MOGADISHU",
+    "lat": 2.0140883,
+    "lon": 45.3040343,
+    "iata": "MGQ",
+    "country": "SO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Decale Hotel",
+    "type": "Hotel",
+    "city": "MOGADISHU",
+    "lat": 2.0349312,
+    "lon": 45.3419183
+  },
+  {
+    "name": "Hargeisa Airport",
+    "type": "Airport",
+    "city": "Hargeisa",
+    "lat": 9.5177527,
+    "lon": 44.0833977,
+    "iata": "HGA",
+    "country": "SO",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Dushanbe International Airport",
+    "type": "Airport",
+    "city": "DUSHANBE",
+    "lat": 38.5455742,
+    "lon": 68.823637,
+    "iata": "DYU",
+    "country": "TJ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hilton Hotel Dushanbe",
+    "type": "Hotel",
+    "city": "DUSHANBE",
+    "lat": 38.5856814,
+    "lon": 68.760331
+  },
+  {
+    "name": "Khujand International Airport",
+    "type": "Airport",
+    "city": "KHUJAND",
+    "lat": 40.2844189,
+    "lon": 69.6191669,
+    "iata": "LBD",
+    "country": "TJ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Ashgabat International Airport",
+    "type": "Airport",
+    "city": "ASHGABAT",
+    "lat": 37.9837541,
+    "lon": 58.3626706,
+    "iata": "ASB",
+    "country": "TM",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Tunis–Carthage Airport",
+    "type": "Airport",
+    "city": "TUNIS",
+    "lat": 36.8518485,
+    "lon": 10.2295044,
+    "iata": "TUN",
+    "country": "TN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "OSS",
+    "type": "Airport",
+    "city": "OSS",
+    "lat": 51.7696387,
+    "lon": 5.5253912,
+    "iata": "",
+    "country": "NL",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "BUHARA Uluslararası Havalimanı",
+    "type": "Airport",
+    "city": "BUHARA",
+    "lat": 39.7749313,
+    "lon": 64.4814309,
+    "iata": "BHK",
+    "country": "UZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Los Angeles International Airport",
+    "type": "Airport",
+    "city": "LOS ANGELES",
+    "lat": 33.9421675,
+    "lon": -118.4213591,
+    "iata": "LAX",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "DOUBLE TREE BY HILTON TORRANCE",
+    "type": "Hotel",
+    "city": "LOS ANGELES",
+    "lat": 34.0536909,
+    "lon": -118.242766
+  },
+  {
+    "name": "Hartsfield–Jackson Atlanta International Airport",
+    "type": "Airport",
+    "city": "ATLANTA",
+    "lat": 33.6374009,
+    "lon": -84.4298161,
+    "iata": "ATL",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Hyatt Centric Buckhead Atlanta",
+    "type": "Hotel",
+    "city": "ATLANTA",
+    "lat": 33.838230,
+    "lon": -84.377289
+  },
+  {
+    "name": "Mexico City International Airport",
+    "type": "Airport",
+    "city": "MEXICO CITY",
+    "lat": 19.4342349,
+    "lon": -99.0733121,
+    "iata": "MEX",
+    "country": "MX",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sheraton Maria Isabel Hotel",
+    "type": "Hotel",
+    "city": "MEXICO CITY",
+    "lat": 19.4281657,
+    "lon": -99.1670968
+  },
+  {
+    "name": "Cancun International Airport",
+    "type": "Airport",
+    "city": "Cancun",
+    "lat": 21.0406984,
+    "lon": -86.881759,
+    "iata": "CUN",
+    "country": "MX",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Canopy By Hilton Cancun La Isla",
+    "type": "Hotel",
+    "city": "Cancun",
+    "lat": 21.1527467,
+    "lon": -86.8425761
+  },
+  {
+    "name": "Tocumen International Airport",
+    "type": "Airport",
+    "city": "PANAMA CITY",
+    "lat": 30.1586518,
+    "lon": -85.6602936,
+    "iata": "PTY",
+    "country": "PA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Sortis Hotel",
+    "type": "Hotel",
+    "city": "PANAMA CITY",
+    "lat": 30.1586518,
+    "lon": -85.6602936
+  },
+  {
+    "name": "DENVER",
+    "type": "Airport",
+    "city": "DENVER",
+    "lat": 39.6766157,
+    "lon": -104.9623745,
+    "iata": "DEN",
+    "country": "US",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Element Denver Downtown East",
+    "type": "Hotel",
+    "city": "DENVER",
+    "lat": 39.7374921,
+    "lon": -104.9938078
+  },
+  {
+    "name": "Urmia Airport",
+    "type": "Airport",
+    "city": "URMIYE",
+    "lat": 37.6716605,
+    "lon": 45.0711952,
+    "iata": "OMH",
+    "country": "IR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Cape Town International Airport",
+    "type": "Airport",
+    "city": "CAPE TOWN",
+    "lat": -33.9718458,
+    "lon": 18.6021125,
+    "iata": "CPT",
+    "country": "ZA",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Century City Hotel Urban Square",
+    "type": "Hotel",
+    "city": "CAPE TOWN",
+    "lat": -33.9288301,
+    "lon": 18.4172197
+  },
+  {
+    "name": "Urgench International Airport",
+    "type": "Airport",
+    "city": "URGENCH",
+    "lat": 41.5811394,
+    "lon": 60.6449496,
+    "iata": "UGC",
+    "country": "UZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Turkistan International Airport",
+    "type": "Airport",
+    "city": "TURKISTAN",
+    "lat": 43.31553,
+    "lon": 68.5468983,
+    "iata": "HSA",
+    "country": "KZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Cebu International Airport",
+    "type": "Airport",
+    "city": "CEBU",
+    "lat": 10.47,
+    "lon": 123.83,
+    "iata": "CEB",
+    "country": "PH",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "BAI Hotel Cebu",
+    "type": "Hotel",
+    "city": "CEBU",
+    "lat": 10.47,
+    "lon": 123.83
+  },
+  {
+    "name": "Juba Uluslararası Havalimanı",
+    "type": "Airport",
+    "city": "JUBA",
+    "lat": 4.8459246,
+    "lon": 31.5959173,
+    "iata": "JUB",
+    "country": "SS",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Blu Juba",
+    "type": "Hotel",
+    "city": "JUBA",
+    "lat": 4.8418126,
+    "lon": 31.6145071
+  },
+  {
+    "name": "N'Djamena International Airport",
+    "type": "Airport",
+    "city": "N'DJAMENA",
+    "lat": 12.1360626,
+    "lon": 15.0348249,
+    "iata": "NDJ",
+    "country": "TD",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Radisson Blu",
+    "type": "Hotel",
+    "city": "N'DJAMENA",
+    "lat": 12.0894014,
+    "lon": 15.0712881
+  },
+  {
+    "name": "Conakry International Airport",
+    "type": "Airport",
+    "city": "CONAKRY",
+    "lat": 9.5765513,
+    "lon": -13.6130758,
+    "iata": "CKY",
+    "country": "GN",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "SHERATON GRAND HOTEL",
+    "type": "Hotel",
+    "city": "CONAKRY",
+    "lat": 9.5170602,
+    "lon": -13.6998434
+  },
+  {
+    "name": "Nouakchott–Oumtounsy International Airport",
+    "type": "Airport",
+    "city": "NOUAKCHOTT",
+    "lat": 18.099495,
+    "lon": -15.971696,
+    "iata": "NKC",
+    "country": "MR",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Fasq Hotel",
+    "type": "Hotel",
+    "city": "NOUAKCHOTT",
+    "lat": 18.0792379,
+    "lon": -15.9780071
+  },
+  {
+    "name": "Mitiga Uluslararası Havalimanı",
+    "type": "Airport",
+    "city": "TRIPOLI",
+    "lat": 32.896672,
+    "lon": 13.1777923,
+    "iata": "MJI",
+    "country": "LY",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Murtala Muhammed International Airport",
+    "type": "Airport",
+    "city": "LAGOS",
+    "lat": 6.4550575,
+    "lon": 3.3941795,
+    "iata": "LOS",
+    "country": "NG",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Legend Hotel Lagos Airport",
+    "type": "Hotel",
+    "city": "LAGOS",
+    "lat": 6.5730536,
+    "lon": 3.3242651
+  },
+  {
+    "name": "ABEID AMANI KARUME INTERNATIONAL AIRPORT",
+    "type": "Airport",
+    "city": "ZANZIBAR",
+    "lat": -6.224121,
+    "lon": 39.2240851,
+    "iata": "ZNZ",
+    "country": "TZ",
+    "czib": false,
+    "aliases": []
+  },
+  {
+    "name": "Verde Hotel",
+    "type": "Hotel",
+    "city": "ZANZIBAR",
+    "lat": -6.1361819,
+    "lon": 39.212626
+  }
+]

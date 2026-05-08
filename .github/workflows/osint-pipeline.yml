@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Seed anchor data
+        run: python db/seed_anchors.py --file db/anchors.json
+
       - name: Run Pipeline
         run: python -m src.pipeline.orchestrator
 
