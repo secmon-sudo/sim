@@ -30,7 +30,8 @@ Analyze the following news text and extract:
    political_event, civil_unrest, terrorism, african_terrorism, insurgency_attack, extremist_violence, jihadist_attack,
    mass_casualty_event, mass_shooting, mass_stabbing, suicide_bombing, vehicle_ramming,
    resort_attack, beach_attack, tourist_bus_attack, cruise_ship_attack,
-   other_aviation_related
+   other_aviation_related,
+   noise
 
 2. sub_type: More specific classification if applicable (same codes), or null
 3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text)
@@ -41,16 +42,26 @@ Analyze the following news text and extract:
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 
+REJECT RULES — classify as "noise" if ANY of these apply:
+- Hobby/enthusiast content: flight simulators, plane spotting, aviation photography, model aircraft, cockpit tours
+- Historical/retrospective: documentaries, "on this day", anniversaries, memorials, museum exhibits
+- Reviews: airline reviews, seat reviews, hotel reviews, trip reports, lounge reviews
+- Entertainment: movies, TV shows, video games, books about aviation
+- Non-incident posts: delivery flights, new liveries, airline route announcements, frequent flyer programs
+- Reddit-style discussion: "what is this plane", "spotted this aircraft", "cool photo", personal experiences with no security incident
+- Opinion/analysis: editorials, policy discussions, regulatory updates with no actual incident
+
 PRIORITY RULES — Apply these strictly:
 - Aviation personnel attacked (pilot, cabin crew, ground staff, baggage handler, TSA, security, check-in agent, air traffic controller) → HIGH priority, event_type: aviation_personnel_attack or sub_type
 - Drone attack on airport, military base, power plant, port, refinery → event_type: drone_attack_critical_infra or sub_type
 - Mass casualty: 3+ deaths OR 10+ injuries → event_type: mass_casualty_event or sub_type, severity is higher
 - African terrorism (Mali, Burkina Faso, Niger, Somalia, Nigeria, Sahel) → event_type: african_terrorism or sub_type
 - War escalation, ceasefire violation, civilian casualties in conflict zones → event_type: war_escalation, ceasefire_violation, civilian_casualties
-- Generic street crime (man stabbed, woman attacked, bar fight) with NO aviation/critical infrastructure link → LOW priority, use other_aviation_related
+- Generic street crime (man stabbed, woman attacked, bar fight) with NO aviation/critical infrastructure link → classify as noise
 - Resort, hotel, beach, cruise ship, tourist bus attacks → event_type: resort_attack or sub_type
 
 Respond ONLY with valid JSON. No markdown, no explanation."""
+
 
 
 class LLMParseError(Exception):
@@ -121,8 +132,34 @@ Text: {event.get('canonical_text', '')[:3000]}"""
             # Parse response
             parsed = validate_and_parse(result.get("content", ""))
 
-            # Validate event_type against active catalog
+            # If LLM classified as noise, archive it immediately and skip further processing
             event_type = parsed.get("event_type", "other_aviation_related")
+            if event_type == "noise":
+                db_conn.execute(
+                    """UPDATE events
+                       SET event_type = 'noise',
+                           llm_raw_output = %s,
+                           llm_parsed_output = %s,
+                           llm_provider = %s,
+                           llm_model = %s,
+                           status = 'archived',
+                           updated_at = NOW()
+                       WHERE id = %s""",
+                    (
+                        json.dumps(result.get("response", {})),
+                        json.dumps(parsed),
+                        result.get("provider"),
+                        result.get("model"),
+                        event_id,
+                    ),
+                )
+                db_conn.commit()
+                log_llm_telemetry(db_conn, result, router, success=True)
+                logger.info("Event %s classified as NOISE — archived", event_id[:8])
+                release_lock(db_conn, event_id, worker_id)
+                return parsed
+
+            # Validate event_type against active catalog
             active_check = db_conn.execute(
                 "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
                 (event_type,),

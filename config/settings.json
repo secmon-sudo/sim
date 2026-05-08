@@ -75,8 +75,17 @@
   },
   "sources": {
     "static_feeds": [
-      "https://www.reddit.com/r/worldnews/new/.rss",
-      "https://www.reddit.com/r/aviation/new/.rss"
+      "https://www.reddit.com/r/worldnews/new/.rss"
+    ],
+    "nitter_feeds": [
+      "https://nitter.net/ww3mediaa/rss",
+      "https://nitter.net/ConflictTR/rss",
+      "https://nitter.net/visegrad24/rss"
+    ],
+    "nitter_mirrors": [
+      "https://nitter.net",
+      "https://nitter.privacydev.net",
+      "https://nitter.poast.org"
     ]
   }
 }

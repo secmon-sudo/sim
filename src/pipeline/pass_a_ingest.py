@@ -509,6 +509,181 @@ def build_gdelt_queries() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Nitter (Twitter/X) RSS fetch with mirror fallback
+# ---------------------------------------------------------------------------
+
+def fetch_nitter_feeds(stats: dict | None = None) -> list[dict]:
+    """
+    Fetch RSS feeds from Nitter instances for Twitter/X accounts.
+    Uses 3 retries per mirror, with automatic fallback to alternative mirrors.
+    Returns list of parsed feed items.
+    """
+    nitter_feeds = SETTINGS.get("sources", {}).get("nitter_feeds", [])
+    mirrors = SETTINGS.get("sources", {}).get("nitter_mirrors", [
+        "https://nitter.net",
+        "https://nitter.privacydev.net",
+        "https://nitter.poast.org",
+    ])
+
+    if not nitter_feeds:
+        return []
+
+    all_items = []
+
+    for feed_url in nitter_feeds:
+        # Extract the account path (e.g., "/ww3mediaa/rss") from the original URL
+        from urllib.parse import urlparse
+        parsed = urlparse(feed_url)
+        account_path = parsed.path  # e.g., "/ww3mediaa/rss"
+
+        fetched = False
+        for mirror in mirrors:
+            mirror_url = f"{mirror.rstrip('/')}{account_path}"
+
+            # 3 retries per mirror
+            for attempt in range(3):
+                try:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                    }
+                    resp = httpx.get(mirror_url, headers=headers, timeout=12.0, follow_redirects=True)
+
+                    if resp.status_code == 429:
+                        wait = 3.0 * (attempt + 1)
+                        logger.warning("Nitter rate limit (429) on %s, retry %d/3 in %.0fs",
+                                       mirror_url[:60], attempt + 1, wait)
+                        time.sleep(wait)
+                        continue
+
+                    resp.raise_for_status()
+
+                    # Parse the RSS feed using the existing fetch_rss_feed logic
+                    items = _parse_rss_response(resp, mirror_url, stats)
+                    all_items.extend(items)
+                    fetched = True
+                    logger.info("Nitter: Fetched %d items from %s", len(items), mirror_url[:60])
+                    break  # Success — stop retrying this mirror
+
+                except Exception as e:
+                    logger.debug("Nitter attempt %d/3 failed for %s: %s",
+                                 attempt + 1, mirror_url[:60], str(e))
+                    if attempt < 2:
+                        time.sleep(2.0 * (attempt + 1))
+                    continue
+
+            if fetched:
+                break  # Got data from this mirror, move to next feed
+
+        if not fetched:
+            logger.warning("Nitter: All mirrors failed for %s", account_path)
+
+    return all_items
+
+
+def _parse_rss_response(resp, url: str, stats: dict | None = None) -> list[dict]:
+    """Parse an RSS/Atom HTTP response into item dicts. Shared by Nitter and regular RSS."""
+    import xml.etree.ElementTree as ET
+    import email.utils
+
+    items = []
+    now_utc = datetime.now(timezone.utc)
+    max_age = _MAX_ARTICLE_AGE_DAYS
+
+    try:
+        root = ET.fromstring(resp.text)
+        tag = root.tag.split("}")[-1] if "}" in root.tag else root.tag
+        is_atom = tag == "feed"
+
+        if is_atom:
+            entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+            if not entries:
+                entries = root.findall(".//entry")
+        else:
+            entries = root.findall(".//item")
+
+        for entry in entries:
+            title = ""
+            link = ""
+            pub_date_str = ""
+            description = ""
+
+            if is_atom:
+                title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
+                if title_elem is None:
+                    title_elem = entry.find("title")
+                title = (title_elem.text or "") if title_elem is not None else ""
+
+                link_elem = entry.find("{http://www.w3.org/2005/Atom}link")
+                if link_elem is None:
+                    link_elem = entry.find("link")
+                if link_elem is not None:
+                    link = link_elem.get("href", "")
+
+                pub_elem = entry.find("{http://www.w3.org/2005/Atom}published")
+                if pub_elem is None:
+                    pub_elem = entry.find("{http://www.w3.org/2005/Atom}updated")
+                if pub_elem is None:
+                    pub_elem = entry.find("published")
+                if pub_elem is None:
+                    pub_elem = entry.find("updated")
+                pub_date_str = (pub_elem.text or "") if pub_elem is not None else ""
+
+                content_elem = entry.find("{http://www.w3.org/2005/Atom}content")
+                if content_elem is None:
+                    content_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
+                if content_elem is None:
+                    content_elem = entry.find("content")
+                if content_elem is None:
+                    content_elem = entry.find("summary")
+                description = (content_elem.text or "") if content_elem is not None else ""
+            else:
+                title = entry.findtext("title", "")
+                link = entry.findtext("link", "")
+                pub_date_str = entry.findtext("pubDate", "")
+                description = entry.findtext("description", "")
+
+            # Nitter links may point to the nitter instance; keep them as-is
+            # (they'll be deduped by content, not URL)
+
+            # Parse date
+            pub_dt = None
+            if pub_date_str:
+                try:
+                    pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
+                except Exception:
+                    pass
+                if pub_dt is None:
+                    try:
+                        pub_dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+                    except Exception:
+                        pass
+
+            if pub_dt is None:
+                if stats is not None:
+                    stats["age_filtered"] += 1
+                continue
+
+            age_days = (now_utc - pub_dt).total_seconds() / 86400
+            if age_days > max_age:
+                if stats is not None:
+                    stats["age_filtered"] += 1
+                continue
+
+            items.append({
+                "title": title,
+                "link": link,
+                "pub_date": pub_date_str,
+                "pub_dt": pub_dt,
+                "description": description,
+            })
+    except Exception:
+        logger.exception("Nitter RSS parse error for: %s", url[:80])
+
+    return items
+
+
+# ---------------------------------------------------------------------------
 # RSS / Atom fetch
 # ---------------------------------------------------------------------------
 
@@ -764,11 +939,12 @@ def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, ca
 def check_domain_penalty(db_conn, domain: str) -> float:
     """Get penalty score for a domain. Returns 0.0 if not found."""
     try:
-        row = db_conn.execute(
-            "SELECT penalty_score FROM domain_penalties WHERE domain = %s",
-            (domain,),
-        ).fetchone()
-        return row[0] if row else 0.0
+        with db_conn.transaction():
+            row = db_conn.execute(
+                "SELECT penalty_score FROM domain_penalties WHERE domain = %s",
+                (domain,),
+            ).fetchone()
+            return row[0] if row else 0.0
     except Exception:
         return 0.0
 
@@ -819,6 +995,17 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
         all_items.extend(items)
         stats["queries_executed"] += 1
+
+    # Fetch from Nitter (Twitter/X) feeds — with mirror fallback & 3 retries
+    try:
+        nitter_items = fetch_nitter_feeds(stats=stats)
+        all_items.extend(nitter_items)
+        nitter_count = len(SETTINGS.get("sources", {}).get("nitter_feeds", []))
+        stats["queries_executed"] += nitter_count
+        if nitter_items:
+            logger.info("Nitter: Total %d items from %d accounts", len(nitter_items), nitter_count)
+    except Exception:
+        logger.warning("Nitter fetch skipped due to errors")
 
     # Fetch from GDELT — optional, with strict rate-limit handling.
     # GDELT has aggressive shared-IP rate limits on cloud runners.
@@ -910,33 +1097,32 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             stats["content_duplicates_skipped"] += 1
             continue
 
-        # Idempotent insert — NOT EXISTS guard
+        # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
         try:
-            result = db_conn.execute(
-                """INSERT INTO events (source_url, source_url_hash, source_domain,
-                                       source_title, raw_text, canonical_text, status)
-                   SELECT %s, %s, %s, %s, %s, %s, 'raw'
-                   WHERE NOT EXISTS (
-                       SELECT 1 FROM events WHERE source_url_hash = %s
-                   )""",
-                (url, url_hash, domain, item.get("title", ""),
-                 raw_text, canonical, url_hash),
-            )
-            if result.rowcount > 0:
-                inserted += 1
-                stats["events_inserted"] += 1
-                # Inline dedup: add to recent_events so later items in this run are compared against it
-                recent_events.insert(0, (item.get("title", ""), canonical))
-                if len(recent_events) > 2500:
-                    recent_events.pop()
-            else:
-                stats["duplicates_skipped"] += 1
+            with db_conn.transaction():
+                result = db_conn.execute(
+                    """INSERT INTO events (source_url, source_url_hash, source_domain,
+                                           source_title, raw_text, canonical_text, status)
+                       SELECT %s, %s, %s, %s, %s, %s, 'raw'
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM events WHERE source_url_hash = %s
+                       )""",
+                    (url, url_hash, domain, item.get("title", ""),
+                     raw_text, canonical, url_hash),
+                )
+                if result.rowcount > 0:
+                    inserted += 1
+                    stats["events_inserted"] += 1
+                    # Inline dedup: add to recent_events so later items in this run are compared against it
+                    recent_events.insert(0, (item.get("title", ""), canonical))
+                    if len(recent_events) > 2500:
+                        recent_events.pop()
+                else:
+                    stats["duplicates_skipped"] += 1
         except Exception:
             logger.exception("Insert error for URL: %s", url[:80])
-            db_conn.rollback()
             continue
 
-    db_conn.commit()
 
     # Log telemetry
     try:

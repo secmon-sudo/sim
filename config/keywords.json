@@ -121,7 +121,7 @@
     ]
   },
   "noise_filters": [
-    "flight simulator", "video game", "movie", "tv show", "book review",
+    "flight simulator", "simulator", "video game", "movie", "tv show", "book review",
     "historical", "documentary", "training exercise", "drill",
     "anniversary of", "years ago", "fictional", "stock market", "shares",
     "investment", "film", "novel", "game release", "years ago today",
@@ -145,6 +145,18 @@
     "season premiere", "episode review", "box office", "hollywood",
     "celebrity", "gossip", "rumour", "rumor", "speculation",
     "bitcoin", "crypto", "cryptocurrency", "nft", "blockchain",
-    "ipo", "earnings report", "stock price", "market rally"
+    "ipo", "earnings report", "stock price", "market rally",
+    "plane spotting", "planespotting", "aviation photography", "avgeek",
+    "cockpit view", "cockpit tour", "cabin tour", "livery", "repaint",
+    "model airplane", "model aircraft", "scale model", "diecast",
+    "flight sim", "msfs", "x-plane", "xplane", "prepar3d", "fsx",
+    "sim update", "addon", "scenery pack", "freeware",
+    "old aircraft", "vintage aircraft", "classic aircraft", "retro livery",
+    "museum", "air show", "airshow", "static display",
+    "first flight", "maiden voyage", "delivery flight",
+    "airline review", "seat review", "lounge review", "trip report",
+    "frequent flyer", "miles program", "loyalty program",
+    "plane crash documentary", "air crash investigation",
+    "what is this plane", "plane identification", "spotted this"
   ]
 }
