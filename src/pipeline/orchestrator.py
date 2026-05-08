@@ -8,9 +8,11 @@ Designed to run as a GitHub Actions job every 30 minutes.
 
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -27,12 +29,26 @@ from src.pipeline.pass_f_archive import run_pass_f
 from src.services.czib_client import sync_czib_to_db
 from src.services.supabase_client import close_pool, get_connection, put_connection
 
-# Configure logging
+# Ensure logs/ directory exists for GitHub Actions artifact upload
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+
+# Configure logging — console + file
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format=LOG_FORMAT,
+    datefmt=LOG_DATEFMT,
 )
+
+# Add file handler so logs are persisted for artifact upload
+_file_handler = logging.FileHandler(LOGS_DIR / "pipeline.log", encoding="utf-8")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+logging.getLogger().addHandler(_file_handler)
+
 logger = logging.getLogger("sim.orchestrator")
 
 
@@ -112,7 +128,14 @@ def run_pipeline():
     finally:
         results["duration_seconds"] = round(time.monotonic() - start_time, 2)
 
-        # Log pipeline run telemetry
+        # Persist telemetry JSON to logs/ for artifact upload
+        try:
+            with open(LOGS_DIR / "telemetry.json", "w", encoding="utf-8") as f:
+                json.dump(results, f, indent=2, default=str)
+        except Exception:
+            logger.exception("Failed to write telemetry JSON to logs/")
+
+        # Log pipeline run telemetry to database
         if db_conn:
             try:
                 db_conn.execute(
