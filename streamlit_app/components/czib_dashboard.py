@@ -25,14 +25,16 @@ def _status_color(status: str) -> str:
 
 def render_czib_dashboard(db_conn):
     """Render CZIB dashboard with zones list, stats, and sync button."""
-    from streamlit_app.services.cache import get_czib_stats, get_czib_zones
+    from services.cache import _conn_id, get_czib_stats, get_czib_zones
+
+    ck = _conn_id(db_conn)
 
     st.markdown("#### ⚠️ EASA Conflict Zone Information Bulletins")
     st.caption("Data sourced from [EASA CZIB](https://www.easa.europa.eu/en/domains/air-operations/czibs). Updated automatically.")
 
     # Stats row
     try:
-        stats = get_czib_stats(db_conn)
+        stats = get_czib_stats(ck, db_conn)
         s1, s2, s3 = st.columns(3)
         s1.metric("🟢 Active Zones", stats.get("active", 0))
         s2.metric("🟡 Suspended", stats.get("suspended", 0))
@@ -58,13 +60,14 @@ def render_czib_dashboard(db_conn):
                     from src.services.czib_client import sync_czib_to_db
                     result = sync_czib_to_db(db_conn)
                     st.success(f"Synced: {result['fetched']} fetched, {result['updated']} updated")
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Sync failed: {e}")
 
     # Load zones
     try:
-        zones = get_czib_zones(db_conn, only_active=False)
+        zones = get_czib_zones(ck, db_conn, only_active=False)
     except Exception:
         st.error("Could not load CZIB zones")
         return

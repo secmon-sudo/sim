@@ -29,6 +29,7 @@ from components.map_view import render_map
 from components.storyline_graph import render_storyline_graph
 from components.telemetry_dashboard import render_telemetry
 from services.cache import (
+    _conn_id,
     get_alert_events,
     get_czib_stats,
     get_czib_zones,
@@ -264,6 +265,9 @@ except Exception as e:
             "3. If using pooler, ensure port is 6543 (Transaction Mode).")
     st.stop()
 
+# Stable cache key for this connection
+ck = _conn_id(db_conn)
+
 # ── Sidebar ──
 with st.sidebar:
     # Brand
@@ -286,7 +290,7 @@ with st.sidebar:
     # Quick stats
     st.markdown("### 📊 Stats (24h)")
     try:
-        stats = get_pipeline_stats(db_conn)
+        stats = get_pipeline_stats(ck, db_conn)
         events_24h = stats.get("events_24h", 0)
         alert_counts = stats.get("alert_counts", {})
         last_run = stats.get("last_run_at", "—")
@@ -307,7 +311,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🛡️ EASA CZIB")
     try:
-        czib_stats = get_czib_stats(db_conn)
+        czib_stats = get_czib_stats(ck, db_conn)
         cz1, cz2, cz3 = st.columns(3)
         cz1.metric("🟢 Active", czib_stats.get("active", 0))
         cz2.metric("🟡 Susp.", czib_stats.get("suspended", 0))
@@ -319,7 +323,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🌍 Top Countries")
     try:
-        geo = get_geo_summary(db_conn)
+        geo = get_geo_summary(ck, db_conn)
         for g in geo[:5]:
             total = g["total"]
             crit = g.get("critical", 0)
@@ -359,6 +363,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+# ── Fetch data once, share across tabs ──
+events = get_recent_events(ck, db_conn, limit=evt_limit)
+
 # ── Main Tabs ──
 tab_events, tab_alerts, tab_map, tab_czib, tab_storylines, tab_telemetry, tab_anchors = st.tabs([
     "📋 Events",
@@ -373,7 +380,6 @@ tab_events, tab_alerts, tab_map, tab_czib, tab_storylines, tab_telemetry, tab_an
 # Tab 1: Events
 with tab_events:
     try:
-        events = get_recent_events(db_conn, limit=evt_limit)
         render_event_table(events)
     except Exception as e:
         st.error(f"Events error: {e}")
@@ -381,17 +387,16 @@ with tab_events:
 # Tab 2: Alerts
 with tab_alerts:
     try:
-        alerts = get_alert_events(db_conn)
+        alerts = get_alert_events(ck, db_conn)
         render_alert_feed(alerts)
     except Exception as e:
         st.error(f"Alert feed error: {e}")
 
-# Tab 3: Map
+# Tab 3: Map — show ALL geolocated events, not just critical
 with tab_map:
     try:
-        events = get_recent_events(db_conn, limit=evt_limit)
-        critical_events = [e for e in events if e.get("alert_tier") == "CRITICAL"]
-        render_map(critical_events, czib_data=None)
+        czib_zones = get_czib_zones(ck, db_conn, only_active=True)
+        render_map(events, czib_data=czib_zones)
     except Exception as e:
         st.error(f"Map error: {e}")
 
@@ -405,7 +410,7 @@ with tab_czib:
 # Tab 5: Storylines
 with tab_storylines:
     try:
-        graph_data = get_storyline_graph_data(db_conn)
+        graph_data = get_storyline_graph_data(ck, db_conn)
         render_storyline_graph(graph_data)
     except Exception as e:
         st.error(f"Storyline error: {e}")
@@ -413,7 +418,7 @@ with tab_storylines:
 # Tab 6: Telemetry
 with tab_telemetry:
     try:
-        stats = get_pipeline_stats(db_conn)
+        stats = get_pipeline_stats(ck, db_conn)
         render_telemetry(stats)
     except Exception as e:
         st.error(f"Telemetry error: {e}")
@@ -425,12 +430,15 @@ with tab_anchors:
     except Exception as e:
         st.error(f"Anchor lookup error: {e}")
 
-# ── Cleanup ──
+# ── Cleanup — always return connection to pool ──
 if db_conn is not None:
     try:
         db_conn.commit()
     except Exception:
-        pass
+        try:
+            db_conn.rollback()
+        except Exception:
+            pass
     try:
         put_connection(db_conn)
     except Exception:

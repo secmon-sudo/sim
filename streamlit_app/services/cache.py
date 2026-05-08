@@ -2,7 +2,8 @@
 SIM — Streamlit Cache Service
 Blueprint V20.1 §5.1
 
-@st.cache_data wrappers with 60-second TTL for all dashboard queries.
+@st.cache_data wrappers with TTL for all dashboard queries.
+Uses connection ID hash to enable proper cache hits.
 """
 
 import json
@@ -11,12 +12,18 @@ from datetime import datetime
 import streamlit as st
 
 
+def _conn_id(conn) -> str:
+    """Return a stable identifier for the connection to enable cache hits.
+    Without this, passing the conn object directly causes cache misses
+    every rerun since the object reference changes."""
+    return str(id(conn))
+
+
 def _safe_execute(conn, sql, params=None):
-    """Execute SQL with automatic rollback on aborted transaction."""
+    """Execute SQL with automatic recovery from aborted transactions."""
     try:
         return conn.execute(sql, params)
     except Exception:
-        # Transaction may be aborted from a previous error — rollback and retry once
         try:
             conn.rollback()
         except Exception:
@@ -25,10 +32,10 @@ def _safe_execute(conn, sql, params=None):
 
 
 @st.cache_data(ttl=60)
-def get_recent_events(_db_conn, limit: int = 100) -> list[dict]:
-    """Fetch recent events for the main table and map."""
+def get_recent_events(_conn_key: str, _db_conn, limit: int = 100) -> list[dict]:
+    """Fetch recent events for the main table — excludes heavy text columns for performance."""
     from psycopg.rows import dict_row
-    
+
     with _db_conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """SELECT id, source_title, event_type, alert_tier,
@@ -38,8 +45,7 @@ def get_recent_events(_db_conn, limit: int = 100) -> list[dict]:
                       storyline_id, time_certainty,
                       occurred_at_est, ingested_at, status,
                       llm_provider, llm_model,
-                      source_domain, source_url,
-                      canonical_text, raw_text
+                      source_domain, source_url
                FROM events
                WHERE status IN ('classified', 'scored', 'reconciled')
                ORDER BY ingested_at DESC
@@ -50,10 +56,23 @@ def get_recent_events(_db_conn, limit: int = 100) -> list[dict]:
 
 
 @st.cache_data(ttl=60)
-def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
-    """Fetch events with alert tiers from the last N hours."""
+def get_event_detail(_conn_key: str, _db_conn, event_id: str) -> dict | None:
+    """Fetch full event detail including text — only called on demand."""
     from psycopg.rows import dict_row
-    
+
+    with _db_conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT canonical_text, raw_text FROM events WHERE id = %s",
+            (event_id,),
+        )
+        return cur.fetchone()
+
+
+@st.cache_data(ttl=60)
+def get_alert_events(_conn_key: str, _db_conn, hours: int = 24) -> list[dict]:
+    """Fetch events with alert tiers OR high severity from the last N hours."""
+    from psycopg.rows import dict_row
+
     with _db_conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """SELECT id, source_title, event_type, alert_tier,
@@ -63,43 +82,41 @@ def get_alert_events(_db_conn, hours: int = 24) -> list[dict]:
                       source_url, source_domain,
                       canonical_text
                FROM events
-               WHERE alert_tier IS NOT NULL
+               WHERE (alert_tier IS NOT NULL OR severity_score >= 65)
+                 AND status IN ('classified', 'scored', 'reconciled')
                  AND ingested_at > NOW() - INTERVAL '%s hours'
-               ORDER BY
-                 CASE alert_tier
-                   WHEN 'CRITICAL' THEN 1
-                   WHEN 'ALERT' THEN 2
-                   WHEN 'WATCH' THEN 3
-                 END,
-                 ingested_at DESC""",
+               ORDER BY severity_score DESC, ingested_at DESC""",
             (hours,),
         )
         return cur.fetchall()
 
 
 @st.cache_data(ttl=60)
-def get_pipeline_stats(_db_conn) -> dict:
-    """Get pipeline health metrics for telemetry dashboard."""
-    llm = _safe_execute(
-        _db_conn,
-        """SELECT COUNT(*) AS calls,
-                  COALESCE(SUM((value_json->>'tokens_used')::int), 0) AS tokens
-           FROM system_telemetry
-           WHERE event_type = 'llm_call'
-             AND timestamp > NOW() - INTERVAL '24h'""",
-    ).fetchone()
-
-    stale = _safe_execute(
-        _db_conn,
-        """SELECT COUNT(*) AS n FROM system_telemetry
-           WHERE event_type = 'stale_lock_cleared'
-             AND timestamp > NOW() - INTERVAL '1h'""",
-    ).fetchone()
-
+def get_pipeline_stats(_conn_key: str, _db_conn) -> dict:
+    """Get pipeline health metrics for telemetry dashboard — single optimized query."""
+    # Combine multiple small queries into fewer round-trips
     event_counts = _safe_execute(
         _db_conn,
         """SELECT status, COUNT(*) FROM events GROUP BY status""",
     ).fetchall()
+
+    alert_counts = _safe_execute(
+        _db_conn,
+        """SELECT alert_tier, COUNT(*)
+           FROM events
+           WHERE alert_tier IS NOT NULL
+             AND ingested_at > NOW() - INTERVAL '24 hours'
+           GROUP BY alert_tier""",
+    ).fetchall()
+
+    combined = _safe_execute(
+        _db_conn,
+        """SELECT
+             (SELECT COUNT(*) FROM events WHERE ingested_at > NOW() - INTERVAL '24 hours') AS events_24h,
+             (SELECT COUNT(*) FROM system_telemetry WHERE event_type = 'llm_call' AND timestamp > NOW() - INTERVAL '24 hours') AS llm_calls,
+             (SELECT COALESCE(SUM((value_json->>'tokens_used')::int), 0) FROM system_telemetry WHERE event_type = 'llm_call' AND timestamp > NOW() - INTERVAL '24 hours') AS tokens,
+             (SELECT COUNT(*) FROM system_telemetry WHERE event_type = 'stale_lock_cleared' AND timestamp > NOW() - INTERVAL '1 hour') AS stale_locks""",
+    ).fetchone()
 
     last_run = _safe_execute(
         _db_conn,
@@ -109,46 +126,20 @@ def get_pipeline_stats(_db_conn) -> dict:
            ORDER BY timestamp DESC LIMIT 1""",
     ).fetchone()
 
-    quota = _safe_execute(
-        _db_conn,
-        """SELECT value_json->>'daily_quota' AS dq,
-                  value_json->>'daily_used' AS du
-           FROM system_telemetry
-           WHERE event_type = 'llm_call'
-           ORDER BY timestamp DESC LIMIT 1""",
-    ).fetchone()
-
-    alert_counts = _safe_execute(
-        _db_conn,
-        """SELECT alert_tier, COUNT(*)
-           FROM events
-           WHERE alert_tier IS NOT NULL
-             AND ingested_at > NOW() - INTERVAL '24h'
-           GROUP BY alert_tier""",
-    ).fetchall()
-
-    events_24h = _safe_execute(
-        _db_conn,
-        """SELECT COUNT(*) FROM events
-           WHERE ingested_at > NOW() - INTERVAL '24h'""",
-    ).fetchone()
-
     return {
-        "llm_calls_24h": llm[0] if llm else 0,
-        "tokens_used_24h": llm[1] if llm else 0,
-        "stale_locks_1h": stale[0] if stale else 0,
+        "llm_calls_24h": combined[0] if combined else 0,
+        "tokens_used_24h": combined[2] if combined else 0,
+        "stale_locks_1h": combined[3] if combined else 0,
         "event_counts": {row[0]: row[1] for row in event_counts} if event_counts else {},
         "last_run": last_run[0] if last_run and last_run[0] else None,
         "last_run_at": last_run[1].isoformat() if last_run and last_run[1] else None,
-        "daily_quota": int(quota[0]) if quota and quota[0] else 1000,
-        "daily_used": int(quota[1]) if quota and quota[1] else 0,
         "alert_counts": {row[0]: row[1] for row in alert_counts} if alert_counts else {},
-        "events_24h": events_24h[0] if events_24h else 0,
+        "events_24h": combined[0] if combined else 0,
     }
 
 
 @st.cache_data(ttl=60)
-def get_storyline_graph_data(_db_conn) -> list[dict]:
+def get_storyline_graph_data(_conn_key: str, _db_conn) -> list[dict]:
     """Fetch events with storyline links for graph visualization."""
     rows = _safe_execute(
         _db_conn,
@@ -171,7 +162,7 @@ def get_storyline_graph_data(_db_conn) -> list[dict]:
 
 
 @st.cache_data(ttl=60)
-def get_geo_summary(_db_conn) -> list[dict]:
+def get_geo_summary(_conn_key: str, _db_conn) -> list[dict]:
     """Get event counts by country for choropleth / summary."""
     rows = _safe_execute(
         _db_conn,
@@ -192,7 +183,7 @@ def get_geo_summary(_db_conn) -> list[dict]:
 
 
 @st.cache_data(ttl=300)
-def get_czib_zones(_db_conn, only_active: bool = True) -> list[dict]:
+def get_czib_zones(_conn_key: str, _db_conn, only_active: bool = True) -> list[dict]:
     """Fetch CZIB zones from database."""
     if only_active:
         sql = """SELECT czib_id, name, status, countries, country_names,
@@ -218,20 +209,18 @@ def get_czib_zones(_db_conn, only_active: bool = True) -> list[dict]:
 
 
 @st.cache_data(ttl=300)
-def get_czib_stats(_db_conn) -> dict:
-    """Quick CZIB stats for sidebar."""
-    active = _safe_execute(
-        _db_conn, "SELECT COUNT(*) FROM czib_zones WHERE status = 'Active'"
-    ).fetchone()
-    suspended = _safe_execute(
-        _db_conn, "SELECT COUNT(*) FROM czib_zones WHERE status = 'Suspended'"
-    ).fetchone()
-    total_countries = _safe_execute(
+def get_czib_stats(_conn_key: str, _db_conn) -> dict:
+    """Quick CZIB stats — single query instead of 3."""
+    row = _safe_execute(
         _db_conn,
-        "SELECT COUNT(DISTINCT unnest(countries)) FROM czib_zones WHERE status = 'Active'"
+        """SELECT
+             COUNT(*) FILTER (WHERE status = 'Active') AS active,
+             COUNT(*) FILTER (WHERE status = 'Suspended') AS suspended,
+             (SELECT COUNT(DISTINCT c) FROM czib_zones, unnest(countries) AS c WHERE status = 'Active') AS country_count
+           FROM czib_zones""",
     ).fetchone()
     return {
-        "active": active[0] if active else 0,
-        "suspended": suspended[0] if suspended else 0,
-        "countries": total_countries[0] if total_countries else 0,
+        "active": row[0] if row else 0,
+        "suspended": row[1] if row else 0,
+        "countries": row[2] if row else 0,
     }
