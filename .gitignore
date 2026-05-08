@@ -43,3 +43,10 @@ sim_archive_*.jsonl
 # Logs
 logs/
 *.log
+
+# Scratch / Debug scripts
+scratch/
+test_reload.py
+
+# AI tool artifacts
+.kilo/
