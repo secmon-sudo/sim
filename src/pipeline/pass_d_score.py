@@ -242,12 +242,16 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         event["system_confidence"] = system_conf
         event["alert_tier"] = alert_tier
 
-        # Send alert if tier is high enough and not suppressed
-        if alert_tier in ("CRITICAL", "ALERT", "WATCH"):
+        # Send Telegram alert for high-severity events (severity >= 80)
+        # Suppression key prevents duplicate notifications for the same storyline
+        if severity >= 80:
+            # Ensure alert_tier is set for the message formatting
+            if not alert_tier:
+                event["alert_tier"] = "ALERT"
             supp_key = build_suppression_key(event)
             if not is_suppressed(db_conn, supp_key):
                 if send_telegram_alert(event):
-                    record_suppression(db_conn, supp_key, alert_tier, event_id, ttl_hours=4)
+                    record_suppression(db_conn, supp_key, event["alert_tier"], event_id, ttl_hours=4)
 
         # 6. Update event — wrapped in savepoint for isolation
         with db_conn.transaction():

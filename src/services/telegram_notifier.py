@@ -32,9 +32,7 @@ def send_telegram_alert(event: dict) -> bool:
         logger.warning("Telegram alert skipped: missing TELEGRAM_BOT_TOKEN or TELEGRAM_ALERTS_CHAT_ID")
         return False
 
-    tier = event.get("alert_tier")
-    if not tier:
-        return False
+    tier = event.get("alert_tier") or "ALERT"
 
     emoji = TIER_EMOJIS.get(tier, "⚠️")
 
