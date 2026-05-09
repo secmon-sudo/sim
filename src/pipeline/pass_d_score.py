@@ -38,15 +38,25 @@ CASUALTY_INJURIES_THRESHOLD = _CASUALTY.get("injuries_threshold", 10)
 CASUALTY_BONUS_POINTS = _CASUALTY.get("bonus_points", 20)
 
 
+def _safe_int(value) -> int:
+    """Convert a value to int, returning 0 for non-numeric strings like 'multiple', 'several'."""
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return 0
+
+
 def _extract_casualties(llm_parsed: dict) -> dict:
     """Extract casualty counts from LLM parsed output."""
     casualties = llm_parsed.get("casualties") if isinstance(llm_parsed.get("casualties"), dict) else {}
     if casualties is None:
         casualties = {}
     return {
-        "deaths": int(casualties.get("deaths") or 0),
-        "injuries": int(casualties.get("injuries") or 0),
-        "missing": int(casualties.get("missing") or 0),
+        "deaths": _safe_int(casualties.get("deaths")),
+        "injuries": _safe_int(casualties.get("injuries")),
+        "missing": _safe_int(casualties.get("missing")),
     }
 
 

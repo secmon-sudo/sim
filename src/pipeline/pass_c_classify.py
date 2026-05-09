@@ -9,6 +9,7 @@ Uses HeartbeatWorker to keep locks alive during long calls.
 import json
 import logging
 import uuid
+from datetime import datetime as dt, timezone
 
 from src.core.heartbeat import HeartbeatWorker
 from src.core.llm_client import call_llm, log_llm_telemetry
@@ -90,6 +91,37 @@ It is better to let a borderline event through than to miss a real incident.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
 
+
+
+def _parse_occurred_at(raw: str | None):
+    """Safely parse LLM's occurred_at ISO 8601 string into a naive datetime.
+    Returns None if the value is missing, empty, or unparseable.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    # Try common ISO formats LLMs produce
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            parsed = dt.strptime(raw, fmt)
+            # Strip timezone info → naive timestamp (DB column is TIMESTAMP without tz)
+            return parsed.replace(tzinfo=None)
+        except ValueError:
+            continue
+    # Last resort: dateutil-style fallback
+    try:
+        # Handle "Z" suffix
+        cleaned = raw.replace("Z", "+00:00")
+        parsed = dt.fromisoformat(cleaned)
+        return parsed.replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return None
 
 
 class LLMParseError(Exception):
@@ -250,6 +282,15 @@ Text: {canonical_text[:3000]}"""
                 if not sub_check:
                     sub_type = None
 
+            # Sanitize country_iso: must be exactly 2 uppercase ASCII letters
+            raw_iso = parsed.get("country_iso") or ""
+            country_iso = raw_iso.strip().upper()[:2] if raw_iso else None
+            if country_iso and (len(country_iso) != 2 or not country_iso.isalpha()):
+                country_iso = None
+
+            # Parse occurred_at from LLM output into a timestamp
+            occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
+
             # Update event with classification — use json.dumps for JSONB columns
             db_conn.execute(
                 """UPDATE events
@@ -261,6 +302,7 @@ Text: {canonical_text[:3000]}"""
                        country_iso       = %s,
                        storyline_hint    = %s,
                        time_certainty    = %s,
+                       occurred_at_est   = COALESCE(%s, occurred_at_est),
                        llm_provider      = %s,
                        llm_model         = %s,
                        status            = 'classified',
@@ -272,9 +314,10 @@ Text: {canonical_text[:3000]}"""
                     event_type,
                     sub_type,
                     parsed.get("anchor_name"),
-                    parsed.get("country_iso"),
+                    country_iso,
                     parsed.get("storyline_hint"),
                     parsed.get("time_certainty", "unknown"),
+                    occurred_at_est,
                     result.get("provider"),
                     result.get("model"),
                     event_id,
