@@ -65,7 +65,7 @@
     "archive_endpoint": "",
     "retry_attempts": 3,
     "batch_size": 500,
-    "archive_null_occurred_after_days": 14
+    "archive_null_occurred_after_days": 60
   },
   "radius_mapping": {
     "airport": 5.0,
