@@ -192,6 +192,17 @@ def run_pass_f(db_conn) -> dict:
             }),),
         )
 
+        # Clear alert_suppression rows referencing these events (FK constraint)
+        db_conn.execute(
+            "DELETE FROM alert_suppression WHERE event_id = ANY(%s)",
+            (event_ids,)
+        )
+
+        # Purge expired suppression entries (housekeeping)
+        db_conn.execute(
+            "DELETE FROM alert_suppression WHERE expires_at < NOW()"
+        )
+
         # Then delete events
         db_conn.execute(
             "DELETE FROM events WHERE id = ANY(%s)",

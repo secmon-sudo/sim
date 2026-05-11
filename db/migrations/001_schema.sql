@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS alert_suppression (
     first_fired_at  TIMESTAMP    DEFAULT NOW(),
     expires_at      TIMESTAMP    NOT NULL,
     alert_tier      VARCHAR(10),
-    event_id        UUID REFERENCES events(id)
+    event_id        UUID REFERENCES events(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_suppression_expires ON alert_suppression(expires_at);
