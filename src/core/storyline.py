@@ -37,13 +37,15 @@ def jaccard_similarity(hint_a: str, hint_b: str) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
-def should_link_storyline(event_a: dict, event_b: dict, threshold: float = 0.4, max_days: int = 14) -> bool:
+def should_link_storyline(event_a: dict, event_b: dict, threshold: float = 0.15, max_days: int = 14) -> bool:
     """True only when ALL three conditions hold."""
     similarity = jaccard_similarity(
         event_a.get("storyline_hint") or "",
         event_b.get("storyline_hint") or "",
     )
-    same_country = event_a.get("country_iso") == event_b.get("country_iso")
+    iso_a = event_a.get("country_iso")
+    iso_b = event_b.get("country_iso")
+    same_country = (iso_a == iso_b) or not iso_a or not iso_b
 
     # Guard against None datetimes
     dt_a = event_a.get("occurred_at_est")
