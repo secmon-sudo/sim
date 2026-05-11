@@ -47,8 +47,8 @@ Extract the following fields:
    noise
 
 2. sub_type: More specific classification if applicable, or null
-3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text)
-4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO")
+3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text). If none, null.
+4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO"). If unknown, null.
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
 6. time_certainty: One of: same_day, previous_day, this_week, approximate, unknown
 7. storyline_hint: A short phrase describing the core event for grouping related articles

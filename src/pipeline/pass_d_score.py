@@ -194,7 +194,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, country_iso,
                       llm_parsed_output, storyline_hint, occurred_at_est,
-                      source_title, source_url
+                      source_title, source_url, ingested_at
                FROM events WHERE id = %s AND status = 'classified'""",
             (event_id,),
         ).fetchone()
@@ -209,6 +209,9 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         elif llm_parsed is None:
             llm_parsed = {}
 
+        # Fallback occurred_at_est to ingested_at if LLM couldn't determine a date
+        occurred_at_est = row[6] if row[6] else row[9]
+
         event = {
             "id": str(row[0]),
             "event_type": row[1],
@@ -216,7 +219,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "country_iso": row[3],
             "llm_parsed": llm_parsed,
             "storyline_hint": row[5],
-            "occurred_at_est": row[6],
+            "occurred_at_est": occurred_at_est,
             "source_title": row[7],
             "source_url": row[8],
         }
@@ -276,6 +279,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
                        system_confidence = %s,
                        alert_tier = %s,
                        storyline_id = %s,
+                       occurred_at_est = COALESCE(occurred_at_est, %s),
                        status = 'scored',
                        updated_at = NOW()
                    WHERE id = %s""",
@@ -289,6 +293,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
                     system_conf,
                     alert_tier,
                     storyline_id,
+                    occurred_at_est,
                     event_id,
                 ),
             )

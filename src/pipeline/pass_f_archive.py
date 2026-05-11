@@ -18,8 +18,16 @@ from pathlib import Path
 import httpx
 import boto3
 from botocore.config import Config
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 logger = logging.getLogger(__name__)
+
+def _is_retryable_http_error(exception) -> bool:
+    if isinstance(exception, httpx.HTTPStatusError):
+        return exception.response.status_code == 429 or exception.response.status_code >= 500
+    if isinstance(exception, httpx.RequestError):
+        return True
+    return False
 
 ARCHIVE_DAYS_THRESHOLD = 90
 BATCH_SIZE = 500
@@ -143,6 +151,17 @@ def upload_to_cloudflare_r2(content: bytes, filename: str) -> bool:
         return False
 
 
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=3, max=30),
+    retry=retry_if_exception(_is_retryable_http_error),
+    reraise=True
+)
+def _post_telegram_document(url: str, data: dict, files: dict) -> httpx.Response:
+    resp = httpx.post(url, data=data, files=files, timeout=60.0)
+    resp.raise_for_status()
+    return resp
+
 def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     """Uploads file to Telegram via Bot API."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -155,7 +174,7 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
 
     files = {
-        'document': (filename, BytesIO(content), 'application/jsonl')
+        'document': (filename, content, 'application/jsonl')
     }
     data = {
         'chat_id': chat_id,
@@ -163,8 +182,7 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     }
 
     try:
-        response = httpx.post(url, data=data, files=files, timeout=60.0)
-        response.raise_for_status()
+        response = _post_telegram_document(url, data=data, files=files)
         return response.json()
     except Exception:
         logger.exception("Telegram upload failed")

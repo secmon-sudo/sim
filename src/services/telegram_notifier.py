@@ -10,8 +10,27 @@ import logging
 import os
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 logger = logging.getLogger(__name__)
+
+def _is_retryable_http_error(exception) -> bool:
+    if isinstance(exception, httpx.HTTPStatusError):
+        return exception.response.status_code == 429 or exception.response.status_code >= 500
+    if isinstance(exception, httpx.RequestError):
+        return True
+    return False
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1.5, min=2, max=20),
+    retry=retry_if_exception(_is_retryable_http_error),
+    reraise=True
+)
+def _post_telegram(api_url: str, payload: dict) -> httpx.Response:
+    resp = httpx.post(api_url, json=payload, timeout=15.0)
+    resp.raise_for_status()
+    return resp
 
 TIER_EMOJIS = {
     "CRITICAL": "🔴",
@@ -65,17 +84,15 @@ def send_telegram_alert(event: dict) -> bool:
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     try:
-        resp = httpx.post(
+        _post_telegram(
             api_url,
-            json={
+            payload={
                 "chat_id": chat_id,
                 "text": message,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
-            },
-            timeout=10.0
+            }
         )
-        resp.raise_for_status()
         logger.info("Sent Telegram alert for event %s", event.get("id", ""))
         return True
     except httpx.HTTPError as e:

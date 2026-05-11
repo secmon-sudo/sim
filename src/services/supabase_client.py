@@ -67,9 +67,9 @@ def get_pool() -> ConnectionPool:
                 min_size=1,
                 max_size=20,
                 open=True,
-                kwargs={"prepare_threshold": 0},  # Disable prepared statements for Supabase pooler
+                kwargs={"prepare_threshold": None},  # Disable prepared statements for Supabase pooler
             )
-            logger.info("Database connection pool created (max_size=20, prepare_threshold=0)")
+            logger.info("Database connection pool created (max_size=20, prepare_threshold=None)")
         return _pool
 
 def _get_streamlit_pool():
@@ -89,9 +89,9 @@ def _get_streamlit_pool():
             min_size=1,
             max_size=20,
             open=True,
-            kwargs={"prepare_threshold": 0},  # Disable prepared statements for Supabase pooler
+            kwargs={"prepare_threshold": None},  # Disable prepared statements for Supabase pooler
         )
-        logger.info("Streamlit shared database pool created (max_size=20, prepare_threshold=0)")
+        logger.info("Streamlit shared database pool created (max_size=20, prepare_threshold=None)")
         return pool
         
     return _create_pool()
