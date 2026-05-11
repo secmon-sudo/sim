@@ -25,7 +25,7 @@ PAGE_SIZE = 20
 
 
 def _relative_time(dt: datetime | None) -> str:
-    if dt is None:
+    if pd.isna(dt):
         return "—"
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -43,7 +43,7 @@ def _relative_time(dt: datetime | None) -> str:
 
 
 def _format_datetime(dt: datetime | None) -> str:
-    if dt is None:
+    if pd.isna(dt):
         return "—"
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 

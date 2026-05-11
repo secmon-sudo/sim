@@ -6,6 +6,7 @@ EASA CZIB data viewer with status cards, country breakdown, and sync controls.
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 
@@ -100,7 +101,7 @@ def _render_zone_card_native(zone: dict):
     updated = zone.get("updated_at")
 
     issued_str = ""
-    if issued and isinstance(issued, datetime):
+    if issued and not pd.isna(issued) and isinstance(issued, datetime):
         issued_str = issued.strftime("%Y-%m-%d")
 
     status_color = _status_color(status)
@@ -132,5 +133,5 @@ def _render_zone_card_native(zone: dict):
             with d2:
                 st.write(f"**Status:** {status}")
                 st.write(f"**Valid Until:** {valid or '—'}")
-                if updated and isinstance(updated, datetime):
+                if updated and not pd.isna(updated) and isinstance(updated, datetime):
                     st.write(f"**Last Updated:** {updated.strftime('%Y-%m-%d %H:%M UTC')}")

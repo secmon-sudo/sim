@@ -11,6 +11,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 _UI_CONFIG = json.loads((Path(__file__).parent.parent / "config" / "ui_settings.json").read_text())
@@ -18,7 +19,7 @@ _TIER_CFG = _UI_CONFIG["tiers"]
 
 
 def _relative_time(dt: datetime | None) -> str:
-    if dt is None:
+    if pd.isna(dt):
         return "—"
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
