@@ -395,8 +395,7 @@ with tab_alerts:
 # Tab 3: Map — show ALL geolocated events, not just critical
 with tab_map:
     try:
-        czib_zones = get_czib_zones(ck, db_conn, only_active=True)
-        render_map(events, czib_data=czib_zones)
+        render_map(events)
     except Exception as e:
         st.error(f"Map error: {e}")
 
