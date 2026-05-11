@@ -18,6 +18,9 @@ env:
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
+  R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
 jobs:
   pipeline:

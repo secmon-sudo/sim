@@ -16,6 +16,8 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
+import boto3
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,39 @@ def generate_jsonl_and_hash(events: list[dict]) -> tuple[bytes, str]:
     return content, manifest_hash
 
 
+def upload_to_cloudflare_r2(content: bytes, filename: str) -> bool:
+    """Uploads file to Cloudflare R2 bucket via S3 compatible API."""
+    account_id = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+    bucket_name = os.environ.get("R2_BUCKET_NAME") or "sim-archive"
+
+    if not all([account_id, access_key, secret_key]):
+        logger.warning("Cloudflare R2 credentials missing, skipping R2 upload")
+        return False
+
+    try:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+        
+        s3.put_object(
+            Bucket=bucket_name,
+            Key=filename,
+            Body=content,
+            ContentType="application/jsonl"
+        )
+        return True
+    except Exception:
+        logger.exception("Cloudflare R2 upload failed")
+        return False
+
+
 def upload_to_telegram(content: bytes, filename: str) -> dict | None:
     """Uploads file to Telegram via Bot API."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -165,7 +200,16 @@ def run_pass_f(db_conn) -> dict:
     filename = f"sim_archive_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{len(events)}ev.jsonl"
     stats["manifest_hash"] = manifest_hash
 
-    # 3. Upload to Telegram
+    # 3. Upload to Archive Storages
+    # Cloudflare R2 Upload
+    r2_success = upload_to_cloudflare_r2(content, filename)
+    if r2_success:
+        logger.info("Pass F: Successfully uploaded %s to Cloudflare R2", filename)
+        stats["r2_uploaded"] = True
+    else:
+        stats["r2_uploaded"] = False
+
+    # Telegram Upload
     tg_response = upload_to_telegram(content, filename)
 
     if not tg_response or not tg_response.get("ok"):
@@ -187,7 +231,8 @@ def run_pass_f(db_conn) -> dict:
                 "manifest_hash": manifest_hash,
                 "event_count": len(events),
                 "filename": filename,
-                "telegram_message_id": stats["telegram_message_id"],
+                "r2_uploaded": stats.get("r2_uploaded", False),
+                "telegram_message_id": stats.get("telegram_message_id"),
                 "archived_event_ids": event_ids
             }),),
         )
