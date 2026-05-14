@@ -1,66 +1,25 @@
 """
-SIM — Storyline Graph Component
+SIM — Storyline Timeline Component
 Blueprint V20.1 §5.1
 
-NetworkX + streamlit-agraph visualization of linked incident storylines.
-Improved layout with tier-based node coloring and storyline hub styling.
+Chronological timeline visualization of linked incidents.
+Replaces the old hairball graph with an elegant, responsive vertical timeline.
 """
 
 import streamlit as st
+import html
+from datetime import datetime
 
-try:
-    from streamlit_agraph import Config, Edge, Node, agraph
-    _AGRAPH_AVAILABLE = True
-except ImportError:
-    _AGRAPH_AVAILABLE = False
-
-# Event type → color mapping (expanded)
-TYPE_COLORS = {
-    "bomb_threat":        "#EF4444",
-    "active_shooter":     "#B91C1C",
-    "hijacking":          "#7F1D1D",
-    "security_incident":  "#F97316",
-    "emergency_landing":  "#EAB308",
-    "runway_incursion":   "#D97706",
-    "fire_on_board":      "#EF4444",
-    "engine_failure":     "#FB923C",
-    "drone_incursion":    "#8B5CF6",
-    "suspicious_package": "#E11D48",
-    "evacuation":         "#F43F5E",
-    "unruly_passenger":   "#06B6D4",
-    "bird_strike":        "#10B981",
-    "laser_attack":       "#A855F7",
-    "depressurization":   "#EC4899",
-    "hotel_attack":       "#DC2626",
-    "hotel_bombing":      "#991B1B",
-    "resort_attack":      "#EA580C",
-    "drone_attack":       "#7C3AED",
-    "mass_shooting":      "#DC2626",
-    "mass_casualty":      "#B91C1C",
-    "suicide_bombing":    "#7F1D1D",
-    "missile_strike":     "#F59E0B",
-    "airstrike":          "#D97706",
-    "war_escalation":     "#EF4444",
-    "geopolitical":       "#3B82F6",
-}
-
-# Tier → node border color
-TIER_BORDER = {
+# Tier colors
+TIER_COLORS = {
     "CRITICAL": "#EF4444",
     "ALERT":    "#F97316",
     "WATCH":    "#EAB308",
-    None:       "#475569",
+    None:       "#64748B",
 }
 
-
 def render_storyline_graph(events: list[dict]):
-    """Render an interactive storyline graph using streamlit-agraph."""
-    if not _AGRAPH_AVAILABLE:
-        st.info("🔗 Storyline graph requires `streamlit-agraph`. Install with: `pip install streamlit-agraph`")
-        if events:
-            st.caption(f"{len(events)} storyline events available in database.")
-        return
-
+    """Render an interactive, chronological storyline timeline."""
     if not events:
         st.info("🔗 No storyline data available")
         return
@@ -74,117 +33,187 @@ def render_storyline_graph(events: list[dict]):
                 storylines[sid] = []
             storylines[sid].append(e)
 
-    if not storylines:
-        st.info("🔗 No linked storylines found")
-        return
-
     # Filter: only show storylines with 2+ events
     multi_event_sls = {sid: grp for sid, grp in storylines.items() if len(grp) >= 2}
     if not multi_event_sls:
         st.info("🔗 No multi-event storylines to display")
         return
 
-    # Build graph
-    nodes = []
-    edges = []
-    seen_nodes = set()
+    # Sort each group chronologically (oldest first)
+    for sid in multi_event_sls:
+        multi_event_sls[sid].sort(key=lambda x: x.get("occurred_at_est") or datetime.min)
 
-    for sid, group in multi_event_sls.items():
-        hub_id = f"story_{sid[:8]}"
+    # Sort storylines by their newest event (most recently active storyline first)
+    sorted_storylines = sorted(
+        multi_event_sls.items(),
+        key=lambda x: x[1][-1].get("occurred_at_est") or datetime.min,
+        reverse=True
+    )
+
+    st.markdown(f"**Found {len(sorted_storylines)} active storylines.**")
+
+    # CSS for the timeline
+    st.markdown("""
+    <style>
+    .storyline-card {
+        background: #151E32;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 24px;
+    }
+    .storyline-header {
+        font-size: 1.15em;
+        font-weight: 700;
+        color: #F8FAFC;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .storyline-meta {
+        font-size: 0.8em;
+        color: #94A3B8;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px dashed #334155;
+    }
+    .timeline {
+        position: relative;
+        padding-left: 30px;
+    }
+    .timeline::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 9px;
+        width: 2px;
+        background: #334155;
+    }
+    .timeline-item {
+        position: relative;
+        margin-bottom: 20px;
+    }
+    .timeline-item:last-child {
+        margin-bottom: 0;
+    }
+    .timeline-dot {
+        position: absolute;
+        left: -26px;
+        top: 4px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid #151E32;
+    }
+    .timeline-content {
+        background: #1E293B;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 12px;
+    }
+    .timeline-date {
+        font-size: 0.75em;
+        color: #64748B;
+        margin-bottom: 4px;
+        font-family: monospace;
+    }
+    .timeline-title {
+        font-size: 0.9em;
+        font-weight: 600;
+        color: #E2E8F0;
+        margin-bottom: 6px;
+        line-height: 1.4;
+    }
+    .timeline-tags {
+        font-size: 0.7em;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .tag {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #CBD5E1;
+    }
+    @keyframes pulse-dot {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+        70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .pulse-dot {
+        animation: pulse-dot 2s infinite;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    for sid, group in sorted_storylines:
         hint = group[0].get("storyline_hint", "")
         if not hint:
-            # Build hint from first event's type + country
             et = group[0].get("event_type", "incident").replace("_", " ").title()
             country = group[0].get("country_iso", "?")
             hint = f"{et} — {country}"
-
-        if hub_id not in seen_nodes:
-            nodes.append(Node(
-                id=hub_id,
-                label=hint[:35] if hint else f"Storyline {sid[:8]}",
-                size=35,
-                color="rgba(99,102,241,0.25)",
-                borderColor="#6366F1",
-                shape="diamond",
-                font={"color": "#94A3B8", "size": 11, "face": "Inter"},
-            ))
-            seen_nodes.add(hub_id)
+        
+        hint = html.escape(hint)
+        
+        countries = list(set([e.get("country_iso") for e in group if e.get("country_iso")]))
+        flags = []
+        for c in countries:
+            if isinstance(c, str) and len(c) == 2:
+                flags.append(chr(0x1F1E6 + ord(c[0].upper()) - 65) + chr(0x1F1E6 + ord(c[1].upper()) - 65))
+        
+        flag_str = "".join(flags)
+        
+        # Build HTML
+        html_content = f"""
+        <div class="storyline-card">
+            <div class="storyline-header">
+                {flag_str} {hint}
+            </div>
+            <div class="storyline-meta">
+                ID: {sid[:8]} &nbsp;|&nbsp; {len(group)} events
+            </div>
+            <div class="timeline">
+        """
 
         for e in group:
-            eid = str(e["id"])[:10]
-            if eid not in seen_nodes:
-                event_type = e.get("event_type", "other")
-                color = TYPE_COLORS.get(event_type, "#64748B")
-                tier = e.get("alert_tier")
-                border = TIER_BORDER.get(tier, "#475569")
-                severity = e.get("severity_score", 20)
-                # Use a more descriptive label, falling back to event_type if missing
-                title = e.get("source_title")
-                if title:
-                    # Shorten title intelligently
-                    label = title[:40] + ("..." if len(title) > 40 else "")
-                else:
-                    anchor = e.get("anchor_name_norm") or e.get("country_iso") or "Unknown"
-                    label = f"{anchor}\n{event_type.replace('_', ' ').title()}"
-
-                nodes.append(Node(
-                    id=eid,
-                    label=label,
-                    size=max(18, severity // 4),
-                    color=f"{color}40",
-                    borderColor=border,
-                    shape="dot",
-                    font={"color": "#F8FAFC", "size": 11, "face": "Inter"},
-                    title=f"Severity: {severity} | Tier: {tier or 'None'}" # Hover tooltip
-                ))
-                seen_nodes.add(eid)
-
-            edges.append(Edge(
-                source=hub_id,
-                target=eid,
-                color="#334155",
-                width=1.5,
-                dashes=False,
-            ))
-
-    st.caption(
-        f"📊 {len(multi_event_sls)} storylines, {len(nodes) - len(multi_event_sls)} events, "
-        f"{len(edges)} connections"
-    )
-
-    # Sidebar controls
-    with st.sidebar:
-        st.markdown("#### 🔗 Storyline Controls")
-        physics = st.toggle("Physics simulation", value=True, key="sg_physics")
-        hierarchical = st.toggle("Hierarchical layout", value=False, key="sg_hier")
-
-    config = Config(
-        width="100%",
-        height=650,
-        directed=True, # Arrows make more sense when directed
-        physics=physics,
-        hierarchical=hierarchical,
-        nodeHighlightBehavior=True,
-        highlightColor="#6366F1",
-        collapsible=True,
-        solver="forceAtlas2Based" if physics else "barnesHut",
-        stabilization=True,
-        linkLength=150 # Spread the nodes out more so they don't clump
-    )
-
-    agraph(nodes=nodes, edges=edges, config=config)
-
-    # Legend
-    st.markdown(
-        """
-        <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px;font-size:0.75em;color:#64748B;">
-          <span>◆ <b style="color:#6366F1;">Storyline Hub</b></span>
-          <span>● <b style="color:#EF4444;">Critical</b> border</span>
-          <span>● <b style="color:#F97316;">Alert</b> border</span>
-          <span>● <b style="color:#EAB308;">Watch</b> border</span>
-          <span>● <b style="color:#475569;">No Alert</b> border</span>
-          <span>Size ∝ Severity</span>
+            tier = e.get("alert_tier")
+            color = TIER_COLORS.get(tier, TIER_COLORS[None])
+            severity = e.get("severity_score", 0)
+            
+            pulse_class = "pulse-dot" if tier == "CRITICAL" else ""
+            
+            date_val = e.get("occurred_at_est")
+            date_str = date_val.strftime("%Y-%m-%d %H:%M") if hasattr(date_val, 'strftime') else str(date_val)[:16]
+            
+            title = e.get("source_title") or "Untitled Event"
+            title = html.escape(title[:120] + ("..." if len(title) > 120 else ""))
+            
+            event_type = (e.get("event_type") or "unknown").replace("_", " ").title()
+            anchor = e.get("anchor_name_norm") or e.get("country_iso") or "Unknown"
+            
+            html_content += f"""
+                <div class="timeline-item">
+                    <div class="timeline-dot {pulse_class}" style="background: {color};"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">{date_str}</div>
+                        <div class="timeline-title">{title}</div>
+                        <div class="timeline-tags">
+                            <span class="tag" style="color:{color}; border-color:{color}40;">Tier: {tier or 'None'}</span>
+                            <span class="tag">Sev: {severity}</span>
+                            <span class="tag">📍 {html.escape(anchor)}</span>
+                            <span class="tag">📌 {html.escape(event_type)}</span>
+                        </div>
+                    </div>
+                </div>
+            """
+            
+        html_content += """
+            </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+        
+        st.markdown(html_content, unsafe_allow_html=True)
