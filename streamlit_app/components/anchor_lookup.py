@@ -89,7 +89,7 @@ def render_anchor_lookup(db_conn):
                             try:
                                 db_conn.execute(
                                     """UPDATE anchor_master
-                                       SET aliases = aliases || %s::jsonb
+                                       SET aliases = COALESCE(aliases, '[]'::jsonb) || %s::jsonb
                                        WHERE iata_code = %s""",
                                     (json.dumps([new_alias.strip()]), iata),
                                 )

@@ -118,17 +118,24 @@ def render_storyline_graph(events: list[dict]):
                 tier = e.get("alert_tier")
                 border = TIER_BORDER.get(tier, "#475569")
                 severity = e.get("severity_score", 20)
-                anchor = e.get("anchor_name_norm") or "?"
+                # Use a more descriptive label, falling back to event_type if missing
+                title = e.get("source_title")
+                if title:
+                    # Shorten title intelligently
+                    label = title[:40] + ("..." if len(title) > 40 else "")
+                else:
+                    anchor = e.get("anchor_name_norm") or e.get("country_iso") or "Unknown"
+                    label = f"{anchor}\n{event_type.replace('_', ' ').title()}"
 
-                label = f"{anchor}\n{event_type.replace('_', ' ')[:16]}"
                 nodes.append(Node(
                     id=eid,
                     label=label,
                     size=max(18, severity // 4),
-                    color=f"{color}30",
+                    color=f"{color}40",
                     borderColor=border,
                     shape="dot",
-                    font={"color": "#F8FAFC", "size": 10, "face": "Inter"},
+                    font={"color": "#F8FAFC", "size": 11, "face": "Inter"},
+                    title=f"Severity: {severity} | Tier: {tier or 'None'}" # Hover tooltip
                 ))
                 seen_nodes.add(eid)
 
@@ -153,16 +160,16 @@ def render_storyline_graph(events: list[dict]):
 
     config = Config(
         width="100%",
-        height=550,
-        directed=False,
+        height=650,
+        directed=True, # Arrows make more sense when directed
         physics=physics,
         hierarchical=hierarchical,
         nodeHighlightBehavior=True,
         highlightColor="#6366F1",
         collapsible=True,
-        # Better physics params
         solver="forceAtlas2Based" if physics else "barnesHut",
         stabilization=True,
+        linkLength=150 # Spread the nodes out more so they don't clump
     )
 
     agraph(nodes=nodes, edges=edges, config=config)
