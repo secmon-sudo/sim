@@ -51,7 +51,7 @@ Extract the following fields:
 4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO"). If unknown, null.
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
 6. time_certainty: One of: same_day, previous_day, this_week, approximate, unknown
-7. storyline_hint: A short phrase describing the core event for grouping related articles
+7. storyline_hint: A highly specific 4-6 word phrase identifying the EXACT unique event for grouping related articles (e.g. "Delta DL54 emergency landing Atlanta" or "Polk County small plane crash"). NEVER use generic phrases like "emergency landing" or "bomb threat".
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1

@@ -8,10 +8,13 @@ Bigram-enhanced Jaccard similarity for linking related aviation events.
 import re
 from typing import Set
 
-# Context-independent words that dilute Jaccard signal in aviation text
+# Context-independent words and generic incident types that dilute Jaccard signal
 AVIATION_STOPWORDS = {
     "the", "a", "an", "at", "in", "on", "of", "to", "and", "or",
     "airport", "terminal", "flight", "gate", "apron",
+    "emergency", "landing", "bomb", "threat", "crash", "incident", 
+    "attack", "plane", "aircraft", "passenger", "crew", "pilot",
+    "drone", "laser", "evacuation", "security", "issue", "small"
 }
 
 
