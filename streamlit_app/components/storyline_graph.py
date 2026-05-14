@@ -8,6 +8,7 @@ Replaces the old hairball graph with an elegant, responsive vertical timeline.
 
 import streamlit as st
 import html
+import textwrap
 from datetime import datetime
 
 # Tier colors
@@ -168,7 +169,7 @@ def render_storyline_graph(events: list[dict]):
         flag_str = "".join(flags)
         
         # Build HTML
-        html_content = f"""
+        html_content = textwrap.dedent(f"""
         <div class="storyline-card">
             <div class="storyline-header">
                 {flag_str} {hint}
@@ -177,7 +178,7 @@ def render_storyline_graph(events: list[dict]):
                 ID: {sid[:8]} &nbsp;|&nbsp; {len(group)} events
             </div>
             <div class="timeline">
-        """
+        """)
 
         for e in group:
             tier = e.get("alert_tier")
@@ -195,7 +196,7 @@ def render_storyline_graph(events: list[dict]):
             event_type = (e.get("event_type") or "unknown").replace("_", " ").title()
             anchor = e.get("anchor_name_norm") or e.get("country_iso") or "Unknown"
             
-            html_content += f"""
+            html_content += textwrap.dedent(f"""
                 <div class="timeline-item">
                     <div class="timeline-dot {pulse_class}" style="background: {color};"></div>
                     <div class="timeline-content">
@@ -209,11 +210,11 @@ def render_storyline_graph(events: list[dict]):
                         </div>
                     </div>
                 </div>
-            """
+            """)
             
-        html_content += """
+        html_content += textwrap.dedent("""
             </div>
         </div>
-        """
+        """)
         
         st.markdown(html_content, unsafe_allow_html=True)
