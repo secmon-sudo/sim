@@ -7,15 +7,15 @@
     "heartbeat_max_consecutive_errors": 5
   },
   "ingestion": {
-    "max_article_age_days": 3,
+    "max_article_age_days": 1,
     "fetch_full_text": false,
     "query_language": "en"
   },
   "dedup": {
     "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
-    "content_similarity_threshold": 0.70,
-    "title_similarity_threshold": 0.75
+    "content_similarity_threshold": 0.55,
+    "title_similarity_threshold": 0.60
   },
   "scoring": {
     "proximity_bonus": 30,
