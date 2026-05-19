@@ -162,9 +162,9 @@ def _gdelt_articles_from_raw(
         resp = _http_get_with_retry(
             GDELT_DOC_API,
             headers={"User-Agent": "SIM-OSINT-Bot/1.0"},
-            timeout=30.0,
-            max_retries=3,
-            backoff_base=5.0,
+            timeout=8.0,       # fail fast — cloud IPs often get 429
+            max_retries=1,     # single attempt, no long backoff loops
+            backoff_base=2.0,
             params=params,
         )
         if resp is None:
@@ -428,8 +428,45 @@ def build_search_queries() -> list[dict]:
         '"artillery shelling"',
         '"troop buildup"',
         '"border clash"',
+        '"India Pakistan"',
+        '"Kashmir attack"',
+        '"Houthi attack"',
+        '"Red Sea attack"',
+        '"drone swarm"',
     ]
     for q in geo:
+        _add(q)
+
+    # ── Tier 5: Maritime / rail / mass-transit security ──
+    transport = [
+        '"train station attack"',
+        '"train station bombing"',
+        '"metro attack"',
+        '"subway attack"',
+        '"bus terminal attack"',
+        '"port attack"',
+        '"piracy attack"',
+        '"tanker hijack"',
+        '"ship hijacked"',
+        '"maritime security incident"',
+    ]
+    for q in transport:
+        _add(q)
+
+    # ── Tier 6: Tourist-specific threats ──
+    tourist = [
+        '"tourists killed"',
+        '"tourist attack"',
+        '"tourist kidnapped"',
+        '"travelers warned"',
+        '"travel advisory" raised',
+        '"travel warning" issued',
+        '"do not travel" warning',
+        '"embassy attack"',
+        '"consulate attack"',
+        '"tourist area bombing"',
+    ]
+    for q in tourist:
         _add(q)
 
     return queries
@@ -506,6 +543,157 @@ def build_gdelt_queries() -> list[dict]:
             "countries": ["KP", "KR", "JP", "CN", "TW", "MN", "PH", "VN", "ID", "MY", "SG", "TH", "AU", "NZ", "PG"],
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# Travel Advisory fetch (US State Dept)
+# ---------------------------------------------------------------------------
+
+_LEVEL_RE = re.compile(r"Level\s+(\d)", re.IGNORECASE)
+_ADVISORY_NO_CHANGE_RE = re.compile(
+    r"no changes?\s+to\s+the\s+advisory\s+level",
+    re.IGNORECASE,
+)
+_ADVISORY_DOWNGRADE_RE = re.compile(
+    r"\b(downgraded?|lowered?|decreased?|reduced?)\b",
+    re.IGNORECASE,
+)
+_ADVISORY_UPGRADE_RE = re.compile(
+    r"\b(upgraded?|raised?|elevated?|increased?\s+to\s+level|changed?\s+to\s+level\s+[3-4])\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_advisory_level(title: str) -> int:
+    """Extract numeric advisory level from title (e.g. 'Level 3'). Returns 0 if not found."""
+    m = _LEVEL_RE.search(title)
+    return int(m.group(1)) if m else 0
+
+
+def _is_advisory_worth_ingesting(title: str, description: str) -> bool:
+    """
+    Return True only if this advisory is a level INCREASE or a high-risk Level 3/4 entry.
+
+    Rules:
+      1. 'No changes to the advisory level' → skip.
+      2. Downgrade keywords in description → skip.
+      3. Level >= 3 (Do Not Travel / Reconsider) without downgrade → ingest.
+      4. Level < 3 with explicit upgrade keywords → ingest.
+      5. Otherwise → skip (conservative).
+    """
+    desc_plain = re.sub(r"<[^>]+>", " ", description)  # strip HTML
+    # Rule 1: no level change
+    if _ADVISORY_NO_CHANGE_RE.search(desc_plain):
+        return False
+    # Rule 2: downgrade
+    if _ADVISORY_DOWNGRADE_RE.search(desc_plain):
+        return False
+    level = _parse_advisory_level(title)
+    # Rule 3: high-risk level
+    if level >= 3:
+        return True
+    # Rule 4: explicit upgrade for lower levels
+    if _ADVISORY_UPGRADE_RE.search(desc_plain):
+        return True
+    return False
+
+
+def fetch_travel_advisories(stats: dict | None = None) -> list[dict]:
+    """
+    Fetch official travel advisory RSS feeds.
+    Only ingests items where the advisory level has INCREASED or is Level 3/4.
+    Items are tagged with source='travel_advisory' to bypass noise filters.
+    """
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate
+
+    advisory_feeds = SETTINGS.get("sources", {}).get("travel_advisory_feeds", [])
+    if not advisory_feeds:
+        return []
+
+    all_items: list[dict] = []
+    now_utc = datetime.now(timezone.utc)
+
+    for feed_url in advisory_feeds:
+        try:
+            resp = _http_get_with_retry(
+                feed_url,
+                headers={"User-Agent": "SIM-OSINT-Bot/1.0", "Accept": "application/rss+xml, */*"},
+                timeout=20.0,
+                max_retries=2,
+                backoff_base=3.0,
+            )
+            if resp is None:
+                logger.warning("Travel advisory feed unreachable: %s", feed_url)
+                continue
+
+            root = ET.fromstring(resp.text)
+            for item in root.findall(".//item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub_date_str = (item.findtext("pubDate") or "").strip()
+                description = (item.findtext("description") or "").strip()
+
+                if not title or not link:
+                    continue
+
+                # Only ingest level increases / high-risk entries
+                if not _is_advisory_worth_ingesting(title, description):
+                    continue
+
+                # Parse date — advisory feed uses date-only "Mon, 19 May 2026"
+                pub_dt: datetime | None = None
+                if pub_date_str:
+                    try:
+                        pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
+                    except Exception:
+                        pass
+                    if pub_dt is None:
+                        try:
+                            t = parsedate(pub_date_str)
+                            if t:
+                                pub_dt = datetime(*t[:6], tzinfo=timezone.utc)
+                        except Exception:
+                            pass
+                    # Fallback: try strptime for date-only format "Day, DD Mon YYYY"
+                    if pub_dt is None:
+                        for fmt in ("%a, %d %b %Y", "%d %b %Y", "%Y-%m-%d"):
+                            try:
+                                pub_dt = datetime.strptime(pub_date_str.strip(), fmt).replace(tzinfo=timezone.utc)
+                                break
+                            except ValueError:
+                                continue
+                if pub_dt is None:
+                    # Cannot determine date — skip rather than assume today
+                    continue
+
+                age_days = (now_utc - pub_dt).total_seconds() / 86400
+                # Advisories update less often than news — use 7-day window
+                if age_days > 7:
+                    if stats is not None:
+                        stats["age_filtered"] += 1
+                    continue
+
+                # Strip HTML from description for canonical text
+                desc_plain = re.sub(r"<[^>]+>", " ", description)
+                desc_plain = re.sub(r"\s+", " ", desc_plain).strip()
+
+                all_items.append({
+                    "title": title,
+                    "link": link,
+                    "pub_date": pub_date_str,
+                    "pub_dt": pub_dt,
+                    "description": desc_plain,
+                    "source": "travel_advisory",
+                    "_skip_noise_filter": True,  # official gov source, bypass noise check
+                })
+
+        except Exception:
+            logger.exception("Error fetching travel advisory feed: %s", feed_url)
+
+    if all_items:
+        logger.info("Travel advisories: %d increase/high-risk items fetched", len(all_items))
+    return all_items
 
 
 # ---------------------------------------------------------------------------
@@ -1007,32 +1195,38 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     except Exception:
         logger.warning("Nitter fetch skipped due to errors")
 
-    # Fetch from GDELT — optional, with strict rate-limit handling.
-    # GDELT has aggressive shared-IP rate limits on cloud runners.
-    # We rotate queries per-run and skip silently on repeated 429s.
+    # Fetch from GDELT — non-blocking, fire-and-forget.
+    # GDELT rate-limits cloud IPs aggressively (429).
+    # Strategy: single query, tight timeout, no initial delay.
+    # If it works → bonus data. If not → silently skip.
     try:
         gdelt_queries = build_gdelt_queries()
-        # Rotate: pick 2 queries based on minute-of-hour for distribution
+        # Pick 1 random query per run to minimize rate-limit exposure
         random.seed(datetime.now().minute)
-        selected = random.sample(gdelt_queries, min(2, len(gdelt_queries)))
+        selected = random.choice(gdelt_queries)
 
-        # Initial delay — GDELT often rejects the very first request on a fresh IP
-        time.sleep(8.0)
-
-        for idx, gdelt_spec in enumerate(selected):
-            if idx > 0:
-                time.sleep(6.0)
-            items = fetch_gdelt_articles(
-                query=gdelt_spec["query"],
-                max_age_days=_MAX_ARTICLE_AGE_DAYS,
-                tone=gdelt_spec.get("tone"),
-                source_countries=gdelt_spec.get("countries"),
-            )
+        items = fetch_gdelt_articles(
+            query=selected["query"],
+            max_age_days=_MAX_ARTICLE_AGE_DAYS,
+            tone=selected.get("tone"),
+            source_countries=selected.get("countries"),
+        )
+        if items:
             all_items.extend(items)
             stats["queries_executed"] += 1
+            logger.info("GDELT: Got %d articles (bonus)", len(items))
     except Exception:
-        logger.warning("GDELT fetch skipped due to rate-limit or network issues")
+        # GDELT failure is expected on cloud IPs — never block pipeline
         pass
+
+    # Fetch US State Dept travel advisories — level increases and Level 3/4 only
+    try:
+        advisory_items = fetch_travel_advisories(stats=stats)
+        all_items.extend(advisory_items)
+        if advisory_items:
+            stats["queries_executed"] += 1
+    except Exception:
+        logger.warning("Travel advisory fetch skipped due to errors")
 
     stats["items_fetched"] = len(all_items)
     logger.info("Pass A: Fetched %d items from %d sources/queries", len(all_items), stats["queries_executed"])
@@ -1069,8 +1263,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         raw_text = f"{item.get('title', '')} {item.get('description', '')}"
         canonical = canonicalize_text(raw_text)
 
-        # Noise filter
-        if is_noise(canonical):
+        # Noise filter — skip for official travel advisory items
+        if not item.get("_skip_noise_filter") and is_noise(canonical):
             stats["noise_filtered"] += 1
             continue
 

@@ -7,15 +7,15 @@
     "heartbeat_max_consecutive_errors": 5
   },
   "ingestion": {
-    "max_article_age_days": 1,
+    "max_article_age_days": 2,
     "fetch_full_text": false,
     "query_language": "en"
   },
   "dedup": {
     "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
-    "content_similarity_threshold": 0.55,
-    "title_similarity_threshold": 0.60
+    "content_similarity_threshold": 0.60,
+    "title_similarity_threshold": 0.65
   },
   "scoring": {
     "proximity_bonus": 30,
@@ -86,6 +86,9 @@
       "https://nitter.net",
       "https://nitter.privacydev.net",
       "https://nitter.poast.org"
+    ],
+    "travel_advisory_feeds": [
+      "https://travel.state.gov/_res/rss/TAsTWs.xml"
     ]
   }
 }
