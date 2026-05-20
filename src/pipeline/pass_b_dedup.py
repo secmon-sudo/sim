@@ -8,6 +8,7 @@ URL-hash deduplication, and lock acquisition for LLM classification.
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,9 @@ with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
     _SETTINGS = json.load(f)
 
 STALE_LOCK_THRESHOLD_MINUTES = _SETTINGS["pipeline"].get("stale_lock_threshold_minutes", 15)
-MATURATION_WINDOW_HOURS = _SETTINGS["dedup"].get("maturation_window_hours", 2)
+# Allow env-var override so CI/CD can set SIM_MATURATION_WINDOW_HOURS=0
+_default_maturation = _SETTINGS["dedup"].get("maturation_window_hours", 2)
+MATURATION_WINDOW_HOURS = int(os.environ.get("SIM_MATURATION_WINDOW_HOURS", _default_maturation))
 
 
 def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
