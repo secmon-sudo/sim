@@ -1053,7 +1053,9 @@ def compute_url_hash(url: str) -> str:
 
 def canonicalize_text(raw_text: str) -> str:
     """Clean and normalize raw article text."""
-    text = re.sub(r"<[^>]+>", " ", raw_text)
+    # Strip HTML tags — require tag to start with letter or '/' to avoid
+    # false positives on math expressions like "3 < 5 > 2"
+    text = re.sub(r"</?[a-zA-Z][^>]*>", " ", raw_text)
     text = PROMPT_INJECTION_PATTERNS.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text

@@ -17,7 +17,7 @@ class TestTokenBucket:
         """Basic token acquisition should succeed."""
         bucket = TokenBucket(rate_per_minute=10, daily_limit=100)
         assert bucket.acquire(timeout=1) is True
-        assert bucket._daily_used == 1
+        assert bucket.daily_used == 1
 
     def test_acquire_exhausts_rpm(self):
         """Should raise TimeoutError when RPM is exhausted."""
@@ -56,7 +56,7 @@ class TestTokenBucket:
         bucket._current_day = datetime.date.today() - datetime.timedelta(days=1)
         # Should succeed — day reset
         assert bucket.acquire(timeout=1) is True
-        assert bucket._daily_used == 1
+        assert bucket.daily_used == 1
 
     def test_remaining_daily(self):
         bucket = TokenBucket(rate_per_minute=10, daily_limit=100)
@@ -72,8 +72,9 @@ class TestTokenBucket:
         assert bucket.utilization_pct == 10.0
 
     def test_unlimited_daily(self):
-        """None daily_limit should allow unlimited usage."""
+        """None daily_limit should allow unlimited usage and return None for remaining."""
         bucket = TokenBucket(rate_per_minute=100, daily_limit=None)
         for _ in range(50):
             bucket.acquire(timeout=0)
-        assert bucket.remaining_daily == 999_999
+        assert bucket.remaining_daily is None
+        assert bucket.daily_used == 50

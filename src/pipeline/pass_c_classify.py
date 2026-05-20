@@ -235,8 +235,8 @@ Text: {canonical_text[:3000]}"""
                        WHERE id = %s""",
                     (
                         archive_type,
-                        json.dumps(result.get("response", {})),
-                        json.dumps(parsed),
+                        result.get("response", {}),
+                        parsed,
                         result.get("provider"),
                         result.get("model"),
                         event_id,
@@ -291,7 +291,7 @@ Text: {canonical_text[:3000]}"""
             # Parse occurred_at from LLM output into a timestamp
             occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
 
-            # Update event with classification — use json.dumps for JSONB columns
+            # Update event with classification — psycopg 3 writes dicts to JSONB natively
             db_conn.execute(
                 """UPDATE events
                    SET llm_raw_output    = %s,
@@ -309,8 +309,8 @@ Text: {canonical_text[:3000]}"""
                        updated_at        = NOW()
                    WHERE id = %s AND lock_owner = %s""",
                 (
-                    json.dumps(result.get("response", {})),
-                    json.dumps(parsed),
+                    result.get("response", {}),
+                    parsed,
                     event_type,
                     sub_type,
                     parsed.get("anchor_name"),

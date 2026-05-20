@@ -78,10 +78,15 @@ class TokenBucket:
             self._current_day = today
 
     @property
-    def remaining_daily(self) -> int:
-        """Remaining daily requests."""
+    def daily_used(self) -> int:
+        """Number of requests used today."""
+        return self._daily_used
+
+    @property
+    def remaining_daily(self) -> int | None:
+        """Remaining daily requests. None if unlimited."""
         if self.daily_limit is None:
-            return 999_999
+            return None
         return max(0, self.daily_limit - self._daily_used)
 
     @property

@@ -14,4 +14,5 @@ trafilatura>=1.6
 gdeltdoc>=1.6
 pytest>=8.0
 pytest-mock>=3.0
+responses>=0.25
 boto3>=1.34

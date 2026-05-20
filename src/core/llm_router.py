@@ -72,7 +72,7 @@ class LLMRouter:
     @property
     def total_daily_used(self) -> int:
         """Sum of all account daily usage."""
-        return sum(a.bucket._daily_used for a in self._accounts)
+        return sum(a.bucket.daily_used for a in self._accounts)
 
     @property
     def accounts(self) -> list[LLMAccount]:
@@ -138,7 +138,7 @@ class LLMRouter:
         return {
             acct.display_name: {
                 "status": acct.status.value,
-                "daily_used": acct.bucket._daily_used,
+                "daily_used": acct.bucket.daily_used,
                 "daily_limit": acct.rpd,
                 "errors": acct.daily_errors,
             }
@@ -200,6 +200,7 @@ def build_llm_router() -> LLMRouter:
             rpm=20, rpd=200,
             bucket=TokenBucket(rate_per_minute=20, daily_limit=200),
         ),
+        # ⑦ Reserved for future model slot (Blueprint V20.1 §4.5.2)
         # ⑧ Groq Bulk Fallback — son çare, 14.4K RPD
         LLMAccount(
             provider="groq", account_id="A",

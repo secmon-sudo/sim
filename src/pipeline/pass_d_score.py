@@ -111,6 +111,40 @@ def compute_confidence(llm_confidence: float, anchor_confidence: float, diversit
     return max(0.0, min(1.0, round(raw, 3)))
 
 
+def compute_diversity_score(db_conn, storyline_id: str | None) -> float:
+    """Compute source diversity score based on unique domains covering this storyline.
+
+    Returns a value between 0.0 and 1.0:
+      - 1 source  → 0.3 (single report, low corroboration)
+      - 2 sources → 0.5 (baseline corroboration)
+      - 3 sources → 0.7 (good corroboration)
+      - 4+ sources → 0.9+ (strong multi-source confirmation)
+    """
+    if not storyline_id:
+        return 0.3  # Single event with no storyline peers
+    try:
+        row = db_conn.execute(
+            """SELECT COUNT(DISTINCT source_domain)
+               FROM events
+               WHERE storyline_id = %s AND source_domain IS NOT NULL""",
+            (storyline_id,),
+        ).fetchone()
+        unique_domains = row[0] if row else 1
+    except Exception:
+        return 0.5
+    # Map domain count to 0.0–1.0 range with diminishing returns
+    if unique_domains <= 1:
+        return 0.3
+    elif unique_domains == 2:
+        return 0.5
+    elif unique_domains == 3:
+        return 0.7
+    elif unique_domains == 4:
+        return 0.85
+    else:
+        return min(1.0, 0.85 + (unique_domains - 4) * 0.03)
+
+
 def resolve_anchor_for_event(db_conn, event: dict) -> dict:
     """Resolve anchor for a single event and return anchor data."""
     raw_anchor = event.get("anchor_name_raw")
@@ -230,11 +264,17 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         # 2. Compute severity (with casualty bonus)
         severity = compute_severity(event["event_type"], anchor, db_conn, llm_parsed)
 
-        # 3. Compute confidence
-        llm_conf = event["llm_parsed"].get("confidence", 0.5)
-        system_conf = compute_confidence(llm_conf, anchor["confidence"])
+        # 3. Try storyline linking first (needed for diversity score)
+        storyline_id = link_storylines(event, recent_events)
+        if not storyline_id:
+            storyline_id = str(uuid.uuid4())
 
-        # 4. Evaluate alert tier
+        # 4. Compute confidence (with real source diversity)
+        llm_conf = event["llm_parsed"].get("confidence", 0.5)
+        diversity = compute_diversity_score(db_conn, storyline_id)
+        system_conf = compute_confidence(llm_conf, anchor["confidence"], diversity)
+
+        # 5. Evaluate alert tier
         alert_data = {
             "severity_score": severity,
             "system_confidence": system_conf,
@@ -242,11 +282,6 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "time_certainty": event["llm_parsed"].get("time_certainty", "unknown"),
         }
         alert_tier = evaluate_alert_tier(alert_data)
-
-        # 5. Try storyline linking (using pre-fetched recent events)
-        storyline_id = link_storylines(event, recent_events)
-        if not storyline_id:
-            storyline_id = str(uuid.uuid4())
 
         # Prepare event dict for suppression & notification
         event["storyline_id"] = storyline_id
