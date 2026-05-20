@@ -235,8 +235,8 @@ Text: {canonical_text[:3000]}"""
                        WHERE id = %s""",
                     (
                         archive_type,
-                        result.get("response", {}),
-                        parsed,
+                        json.dumps(result.get("response", {})),
+                        json.dumps(parsed),
                         result.get("provider"),
                         result.get("model"),
                         event_id,
@@ -309,8 +309,8 @@ Text: {canonical_text[:3000]}"""
                        updated_at        = NOW()
                    WHERE id = %s AND lock_owner = %s""",
                 (
-                    result.get("response", {}),
-                    parsed,
+                    json.dumps(result.get("response", {})),
+                    json.dumps(parsed),
                     event_type,
                     sub_type,
                     parsed.get("anchor_name"),
