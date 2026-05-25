@@ -88,3 +88,22 @@ class TestTitleSimilarity:
     def test_different_titles(self):
         sim = title_similarity("Bird strike at Heathrow", "Runway incursion at LAX")
         assert sim < 0.5
+
+
+class TestStaticFeeds:
+    def test_static_feeds_loaded_from_settings(self):
+        from src.pipeline.pass_a_ingest import SETTINGS
+        static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
+        
+        # Check that the 4 new feeds are in the static_feeds list
+        expected_feeds = [
+            "https://www.reddit.com/r/worldnews/new/.rss",
+            "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
+            "https://www.aljazeera.com/xml/rss/all.xml",
+            "https://feeds.reuters.com/Reuters/worldNews",
+            "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml"
+        ]
+        
+        for feed in expected_feeds:
+            assert feed in static_feeds
+

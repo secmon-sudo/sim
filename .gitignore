@@ -50,3 +50,7 @@ test_reload.py
 
 # AI tool artifacts
 .kilo/
+
+# Data Sources Metadata (Never Commit)
+IRONSIGHT_DATA_SOURCES.md
+
