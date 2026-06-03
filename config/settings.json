@@ -79,7 +79,8 @@
       "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
       "https://www.aljazeera.com/xml/rss/all.xml",
       "https://feeds.reuters.com/Reuters/worldNews",
-      "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml"
+      "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml",
+      "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf"
     ],
     "nitter_feeds": [
       "https://nitter.net/ww3mediaa/rss",
