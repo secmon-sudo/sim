@@ -469,6 +469,50 @@ def build_search_queries() -> list[dict]:
     for q in tourist:
         _add(q)
 
+    # ── Tier 7: Protest & Civil Unrest ──
+    protest = [
+        '"mass protest"',
+        '"violent protest"',
+        '"anti-government protest"',
+        '"protest crackdown"',
+        '"riot police" protest',
+        '"tear gas" protest',
+        '"general strike"',
+        '"nationwide strike"',
+        '"demonstration violence"',
+        '"protesters killed"',
+        '"protesters shot"',
+        '"protest shooting"',
+        '"coup attempt"',
+        '"political unrest"',
+        '"state of emergency" protest',
+        '"curfew imposed"',
+        '"martial law"',
+        '"protest" clashes',
+        '"uprising"',
+        '"civil unrest"',
+    ]
+    for q in protest:
+        _add(q)
+
+    # ── Tier 8: Travel Advisory / Travel Warning ──
+    advisory = [
+        '"travel advisory" country',
+        '"travel warning" country',
+        '"do not travel" advisory',
+        '"travel ban"',
+        '"embassy closed"',
+        '"consulate closed"',
+        '"evacuate citizens"',
+        '"security alert" embassy',
+        '"Level 4" travel advisory',
+        '"Level 3" travel advisory',
+        '"reconsider travel"',
+        '"travel restriction"',
+    ]
+    for q in advisory:
+        _add(q)
+
     return queries
 
 

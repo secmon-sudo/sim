@@ -32,7 +32,15 @@
       "check-in agent attacked", "ramp agent injured",
       "air traffic controller threat", "ground handling attacked",
       "resort bombing", "beach attack", "tourist bus attack",
-      "cruise ship attack", "tourist area attack"
+      "cruise ship attack", "tourist area attack",
+      "mass protest", "violent protest", "anti-government protest",
+      "protest crackdown", "riot", "riot police", "tear gas",
+      "general strike", "nationwide strike", "coup attempt",
+      "travel advisory", "travel ban", "do not travel",
+      "embassy closure", "consulate closure", "protesters killed",
+      "protesters shot", "demonstration violence", "civil unrest",
+      "state of emergency", "curfew imposed", "martial law",
+      "political unrest", "uprising"
     ],
     "ar": [
       "تهديد بقنبلة", "إطلاق نار", "اختطاف", "اقتحام مدرج",
@@ -54,13 +62,24 @@
       "toplu saldırı", "çok sayıda ölü", "intihar saldırısı",
       "personel bıçaklandı", "personel öldürüldü",
       "yer hizmetleri personeli saldırı", "kabin görevlisi saldırı",
-      "bagaj görevlisi saldırı", "pilot bıçaklandı"
+      "bagaj görevlisi saldırı", "pilot bıçaklandı",
+      "kitlesel protesto", "şiddetli protesto", "hükümet karşıtı protesto",
+      "protesto baskını", "isyan", "çevik kuvvet", "biber gazı",
+      "genel grev", "ülke çapında grev", "darbe girişimi",
+      "seyahat uyarısı", "seyahat yasağı", "büyükelçilik kapatma",
+      "konsolosluk kapatma", "göstericiler öldürüldü",
+      "olağanüstü hal", "sokağa çıkma yasağı", "sıkıyönetim",
+      "siyasi huzursuzluk", "ayaklanma"
     ],
     "fr": [
       "alerte à la bombe", "tireur actif", "détournement",
       "incursion sur piste", "atterrissage d'urgence", "évacuation",
       "attaque de drone", "attaque de masse", "attaque aéroport",
-      "personnel aéroportuaire agressé", "attaque d'hôtel"
+      "personnel aéroportuaire agressé", "attaque d'hôtel",
+      "manifestation violente", "émeute", "grève générale",
+      "tentative de coup d'état", "avis de voyage", "interdiction de voyage",
+      "fermeture d'ambassade", "manifestants tués",
+      "état d'urgence", "couvre-feu", "loi martiale"
     ]
   },
   "geopolitical_keywords": {
@@ -78,7 +97,12 @@
       "JNIM", "Wagner Africa", "African terrorism",
       "extremist violence", "insurgency attack", "terror cell",
       "suicide bomber", "improvised explosive device",
-      "IED attack", "car bomb", "truck bomb", "VBIED"
+      "IED attack", "car bomb", "truck bomb", "VBIED",
+      "mass protest", "protest crackdown", "riot", "uprising",
+      "general strike", "political unrest", "coup attempt",
+      "state of emergency", "martial law", "curfew",
+      "travel advisory", "travel ban", "do not travel",
+      "embassy closed", "consulate closed"
     ],
     "tr": [
       "füze saldırısı", "askeri harekat", "hava saldırısı", "işgal",
@@ -127,7 +151,7 @@
     "investment", "film", "novel", "game release", "years ago today",
     "remembering the", "memorial", "commemoration", "drill exercise",
     "simulation", "new security system", "security upgrade",
-    "security technology", "strike action", "labor dispute", "walkout",
+    "security technology", "labor strike action", "labor dispute", "airport walkout",
     "pay dispute", "delayed flight", "cancelled flight", "weather delay",
     "hotel review", "hotel rating", "star hotel", "tourism record",
     "travel tips", "booking", "reservation", "renovation", "grand opening",

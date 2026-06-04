@@ -40,9 +40,11 @@ Extract the following fields:
    laser_attack, suspicious_package, evacuation,
    security_incident, aviation_personnel_attack, pilot_attacked, cabin_crew_attacked, ground_staff_attacked,
    geopolitical_conflict, military_action, missile_strike, war_escalation, ceasefire_violation, civilian_casualties,
-   political_event, civil_unrest, terrorism, african_terrorism, insurgency_attack, extremist_violence, jihadist_attack,
+   political_event, civil_unrest, protest, mass_demonstration, riot, general_strike, coup_attempt,
+   terrorism, african_terrorism, insurgency_attack, extremist_violence, jihadist_attack,
    mass_casualty_event, mass_shooting, mass_stabbing, suicide_bombing, vehicle_ramming,
    resort_attack, beach_attack, tourist_bus_attack, cruise_ship_attack,
+   travel_advisory, travel_ban, embassy_closure,
    other_aviation_related,
    noise
 
@@ -76,6 +78,13 @@ WHEN TO CLASSIFY (relevance >= 30, even if borderline):
 - Personnel attacks at airports, airlines, hotels
 - Active threats, bomb scares, evacuations
 - Civil unrest that threatens critical infrastructure
+- Mass protests, demonstrations, or riots that threaten stability or cause casualties
+- Government crackdowns on protesters with violence
+- General strikes affecting transportation, airports, or critical infrastructure
+- Coup attempts or martial law declarations
+- Country travel advisories (Level 3/4), travel bans, or "do not travel" warnings
+- Embassy or consulate closures due to security threats
+- State of emergency declarations related to security
 
 PRIORITY RULES:
 - Aviation personnel attacked → event_type: aviation_personnel_attack, HIGH priority
@@ -84,6 +93,13 @@ PRIORITY RULES:
 - African terrorism (Sahel, Horn of Africa) → event_type: african_terrorism
 - War escalation, ceasefire violations → event_type: war_escalation or ceasefire_violation
 - Resort/hotel/beach attacks → event_type: resort_attack
+- Protest with violence or casualties → event_type: riot, HIGH priority
+- Mass demonstration (10K+ participants or nationwide) → event_type: mass_demonstration
+- Peaceful protest (significant, large-scale) → event_type: protest
+- General/nationwide strike → event_type: general_strike
+- Coup attempt or martial law → event_type: coup_attempt, CRITICAL priority
+- Country travel advisory Level 3-4 or "do not travel" → event_type: travel_advisory or travel_ban
+- Embassy/consulate closure due to security → event_type: embassy_closure
 
 IMPORTANT: When in doubt, classify the event rather than marking as noise.
 It is better to let a borderline event through than to miss a real incident.
