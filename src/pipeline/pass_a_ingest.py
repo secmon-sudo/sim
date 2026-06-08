@@ -307,6 +307,22 @@ def is_noise(text: str) -> bool:
     return False
 
 
+def _matches_security_keywords(title: str, description: str) -> bool:
+    """Check if article title/description contains at least one security keyword.
+
+    Used as a post-filter for general RSS feeds (reddit, aljazeera, reuters)
+    that aren't pre-filtered by search query.
+    """
+    text = f"{title} {description}".lower()
+    for kw in KEYWORDS_CONFIG.get("emergency_keywords", {}).get("en", []):
+        if kw.lower() in text:
+            return True
+    for kw in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).get("en", []):
+        if kw.lower() in text:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Query builders
 # ---------------------------------------------------------------------------
@@ -404,35 +420,22 @@ def build_search_queries() -> list[dict]:
     for q in tier3:
         _add(q)
 
-    # ── Tier 4: Geopolitical / African terrorism (broad, high-value only) ──
+    # ── Tier 4: Geopolitical / African terrorism (narrowed to infrastructure-relevant) ──
     geo = [
-        '"missile strike"',
-        '"airstrike"',
-        '"war escalation"',
-        '"ceasefire broken"',
-        '"Iran Israel"',
-        '"Ukraine Russia"',
-        '"nuclear threat"',
-        '"military coup"',
-        '"Boko Haram"',
-        '"Al-Shabaab"',
+        '"missile strike" airport OR airspace',
+        '"airstrike" civilian airport OR infrastructure',
+        '"war escalation" airspace OR NOTAM',
+        '"Iran Israel" military strike',
+        '"Ukraine Russia" drone attack infrastructure',
+        '"Boko Haram" attack',
+        '"Al-Shabaab" attack',
         '"jihadist attack"',
-        '"ISIS Africa"',
-        '"Sahel crisis"',
-        '"Mali attack"',
-        '"Burkina Faso attack"',
-        '"Niger coup"',
-        '"Somalia bombing"',
-        '"Wagner Africa"',
-        '"civilian casualties"',
-        '"artillery shelling"',
-        '"troop buildup"',
-        '"border clash"',
-        '"India Pakistan"',
-        '"Kashmir attack"',
-        '"Houthi attack"',
-        '"Red Sea attack"',
-        '"drone swarm"',
+        '"ISIS Africa" attack',
+        '"Sahel crisis" attack',
+        '"civilian casualties" airstrike',
+        '"Houthi attack" ship OR Red Sea',
+        '"drone swarm" attack',
+        '"India Pakistan" military',
     ]
     for q in geo:
         _add(q)
@@ -810,6 +813,16 @@ def fetch_nitter_feeds(stats: dict | None = None) -> list[dict]:
         if not fetched:
             logger.warning("Nitter: All mirrors failed for %s", account_path)
 
+    # Sort by date descending (newest first) and limit per account
+    all_items.sort(
+        key=lambda x: x.get("pub_dt", datetime.min.replace(tzinfo=timezone.utc)),
+        reverse=True,
+    )
+    max_nitter_per_account = 5
+    nitter_account_count = len(nitter_feeds) or 1
+    max_nitter_total = max_nitter_per_account * nitter_account_count
+    all_items = all_items[:max_nitter_total]
+
     return all_items
 
 
@@ -908,6 +921,8 @@ def _parse_rss_response(resp, url: str, stats: dict | None = None) -> list[dict]
                 "pub_date": pub_date_str,
                 "pub_dt": pub_dt,
                 "description": description,
+                "source": "nitter",
+                "domain": "twitter.com",
             })
     except Exception:
         logger.exception("Nitter RSS parse error for: %s", url[:80])
@@ -1223,11 +1238,19 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         all_items.extend(items)
         stats["queries_executed"] += 1
 
-    # Fetch from static hardcoded feeds (Reddit)
+    # Fetch from static hardcoded feeds with keyword post-filter
     static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
     for feed_url in static_feeds:
         items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
-        all_items.extend(items)
+        # Apply keyword filter: only keep items matching security keywords
+        filtered_items = []
+        for it in items:
+            if _matches_security_keywords(it.get("title", ""), it.get("description", "")):
+                filtered_items.append(it)
+            else:
+                if stats is not None:
+                    stats["noise_filtered"] = stats.get("noise_filtered", 0) + 1
+        all_items.extend(filtered_items)
         stats["queries_executed"] += 1
 
     # Fetch from Nitter (Twitter/X) feeds — with mirror fallback & 3 retries
@@ -1318,7 +1341,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         url_hash = compute_url_hash(url)
 
         # Domain extraction and penalty check
-        domain = extract_domain(url)
+        # For travel advisory items, preserve the real domain
+        if item.get("source") == "travel_advisory":
+            domain = "travel.state.gov"
+        elif item.get("domain"):
+            domain = item["domain"]
+        else:
+            domain = extract_domain(url)
         penalty = check_domain_penalty(db_conn, domain)
         if penalty > 0.8:
             stats["domain_penalized"] += 1

@@ -10,11 +10,18 @@ from typing import Set
 
 # Context-independent words and generic incident types that dilute Jaccard signal
 AVIATION_STOPWORDS = {
+    # Common English stopwords
     "the", "a", "an", "at", "in", "on", "of", "to", "and", "or",
+    # Aviation generic terms
     "airport", "terminal", "flight", "gate", "apron",
-    "emergency", "landing", "bomb", "threat", "crash", "incident", 
+    "emergency", "landing", "bomb", "threat", "crash", "incident",
     "attack", "plane", "aircraft", "passenger", "crew", "pilot",
-    "drone", "laser", "evacuation", "security", "issue", "small"
+    "drone", "laser", "evacuation", "security", "issue", "small",
+    # News/media generic terms that dilute similarity signal
+    "report", "reports", "breaking", "news", "update", "source",
+    "military", "strike", "killed", "dead", "injured",
+    "new", "latest", "just", "now", "says", "official",
+    "according", "confirmed", "reported", "sources",
 }
 
 
@@ -40,7 +47,7 @@ def jaccard_similarity(hint_a: str, hint_b: str) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
-def should_link_storyline(event_a: dict, event_b: dict, threshold: float = 0.15, max_days: int = 14) -> bool:
+def should_link_storyline(event_a: dict, event_b: dict, threshold: float = 0.35, max_days: int = 14) -> bool:
     """True only when ALL three conditions hold."""
     similarity = jaccard_similarity(
         event_a.get("storyline_hint") or "",

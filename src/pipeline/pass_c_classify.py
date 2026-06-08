@@ -22,12 +22,15 @@ CLASSIFICATION_SYSTEM_PROMPT = """You are a global security and geopolitical inc
 Your job is to analyze news reports and determine if they describe REAL security incidents, conflicts, or threats.
 
 STEP 1 — RELEVANCE CHECK:
-Score the relevance of this text to security monitoring (0-100):
+Score the relevance of this text to security monitoring (0-100).
+IMPORTANT: Score ONLY based on DIRECT, ACTIONABLE security threats.
+Generic geopolitical analysis, opinion pieces, commentary, or distant regional news
+without a specific incident should score below 30.
 - 90-100: Active security incident, attack, or military conflict with confirmed details
 - 70-89: Credible threat, escalation, or developing security situation
 - 50-69: Related security event but limited details, or indirect impact
 - 30-49: Tangentially related — mentions security topics but is NOT an incident (policy, opinion, analysis)
-- 10-29: Mostly irrelevant — hobby content, entertainment, historical, reviews
+- 10-29: Mostly irrelevant — hobby content, entertainment, historical, reviews, generic commentary
 - 0-9: Completely irrelevant — no security connection whatsoever
 
 STEP 2 — CLASSIFICATION (if relevance >= 30):
@@ -53,7 +56,21 @@ Extract the following fields:
 4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO"). If unknown, null.
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
 6. time_certainty: One of: same_day, previous_day, this_week, approximate, unknown
-7. storyline_hint: A highly specific 4-6 word phrase identifying the EXACT unique event for grouping related articles (e.g. "Delta DL54 emergency landing Atlanta" or "Polk County small plane crash"). NEVER use generic phrases like "emergency landing" or "bomb threat".
+7. storyline_hint: A STRICTLY ENGLISH, structured 4-6 word identifier for grouping related articles about the EXACT same event.
+   Format: "[LOCATION] [ACTOR/ENTITY] [ACTION] [DATE-HINT]"
+   Examples:
+   - "Istanbul Ataturk bomb threat Jun8"
+   - "Delta DL54 emergency Atlanta Jun7"
+   - "Sahel JNIM convoy ambush Jun6"
+   - "Tehran drone strike refinery Jun8"
+   - "Somalia Shabaab base attack Jun5"
+   Rules:
+   - ALWAYS in English regardless of source language
+   - MUST include location name (city/airport/base)
+   - MUST include the specific actor, flight number, or entity if known
+   - MUST include a short date hint (MonDD format, e.g. Jun8, May15)
+   - NEVER use generic phrases like "emergency landing" or "bomb threat" alone
+   - Two articles about the SAME event MUST produce the SAME hint
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1
@@ -107,6 +124,21 @@ It is better to let a borderline event through than to miss a real incident.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
 
+
+
+def _normalize_storyline_hint(hint: str | None) -> str | None:
+    """Normalize storyline hint for consistent Jaccard matching.
+
+    - Lowercases
+    - Strips punctuation (except hyphens)
+    - Collapses whitespace
+    """
+    if not hint or not isinstance(hint, str):
+        return None
+    import re as _re
+    hint = _re.sub(r'\s+', ' ', hint.strip().lower())
+    hint = _re.sub(r'[^\w\s-]', '', hint)
+    return hint if hint else None
 
 
 def _parse_occurred_at(raw: str | None):
@@ -213,11 +245,17 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
             source_domain = event.get('source_domain', 'unknown') or 'unknown'
             canonical_text = event.get('canonical_text', '') or ''
             
+            # Detect travel advisory sources for special handling
+            is_travel_advisory = source_domain in ('travel.state.gov', 'gov.uk', 'smartraveller.gov.au')
+
             prompt = f"""Classify this news report:
 
 Headline: {source_title[:500]}
 Source: {source_domain}
 Text: {canonical_text[:3000]}"""
+
+            if is_travel_advisory:
+                prompt += "\n\nIMPORTANT: This is an official government Travel Advisory. Classify as travel_advisory, travel_ban, or embassy_closure as appropriate."
 
             # Call LLM through multi-provider router
             result = call_llm(
@@ -237,7 +275,7 @@ Text: {canonical_text[:3000]}"""
             # Tier 1: Clear noise (relevance < 20) → archive immediately
             # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'
             # The original LLM classification is preserved in llm_parsed_output for auditing
-            if relevance < 20 or (event_type == "noise" and relevance < 30):
+            if relevance < 30 or (event_type == "noise" and relevance < 40):
                 archive_type = "other_aviation_related"  # FK-safe fallback
                 db_conn.execute(
                     """UPDATE events
@@ -269,7 +307,7 @@ Text: {canonical_text[:3000]}"""
 
             # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
             # These events proceed through the pipeline but with reduced priority
-            if relevance < 40 or event_type == "noise":
+            if relevance < 50 or event_type == "noise":
                 # Re-classify noise with some relevance as other_aviation_related
                 # so it still flows through scoring but won't get high priority
                 if event_type == "noise":
@@ -331,7 +369,7 @@ Text: {canonical_text[:3000]}"""
                     sub_type,
                     parsed.get("anchor_name"),
                     country_iso,
-                    parsed.get("storyline_hint"),
+                    _normalize_storyline_hint(parsed.get("storyline_hint")),
                     parsed.get("time_certainty", "unknown"),
                     occurred_at_est,
                     result.get("provider"),
