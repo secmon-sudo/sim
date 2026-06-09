@@ -161,7 +161,7 @@ def _gdelt_articles_from_raw(
     try:
         resp = _http_get_with_retry(
             GDELT_DOC_API,
-            headers={"User-Agent": "SIM-OSINT-Bot/1.0"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
             timeout=8.0,       # fail fast — cloud IPs often get 429
             max_retries=1,     # single attempt, no long backoff loops
             backoff_base=2.0,
@@ -711,7 +711,7 @@ def fetch_travel_advisories(stats: dict | None = None) -> list[dict]:
         try:
             resp = _http_get_with_retry(
                 feed_url,
-                headers={"User-Agent": "SIM-OSINT-Bot/1.0", "Accept": "application/rss+xml, */*"},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/rss+xml, */*"},
                 timeout=20.0,
                 max_retries=2,
                 backoff_base=3.0,
@@ -991,7 +991,7 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
     try:
         headers = {
-            "User-Agent": "python:sim-osint:v20.1 (by /u/sim_osint_bot)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         resp = _http_get_with_retry(url, headers=headers, timeout=15.0, max_retries=2, backoff_base=2.0)
         if resp is None:
