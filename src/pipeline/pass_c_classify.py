@@ -223,6 +223,24 @@ def validate_and_parse(content: str) -> dict:
 
     return parsed
 
+def update_domain_penalty(db_conn, domain: str, is_noise: int):
+    """Update penalty stats for a domain in the database."""
+    if not domain or domain == "unknown":
+        return
+    try:
+        db_conn.execute(
+            """INSERT INTO domain_penalties (domain, total_events, false_positives, penalty_score, last_seen)
+               VALUES (%s, 1, %s, %s, NOW())
+               ON CONFLICT (domain) DO UPDATE SET
+                   total_events = domain_penalties.total_events + 1,
+                   false_positives = domain_penalties.false_positives + EXCLUDED.false_positives,
+                   last_seen = NOW(),
+                   penalty_score = (domain_penalties.false_positives + EXCLUDED.false_positives)::float / (domain_penalties.total_events + 1)
+            """,
+            (domain, is_noise, float(is_noise))
+        )
+    except Exception:
+        logger.exception("Error updating domain penalty for: %s", domain)
 
 
 def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uuid.UUID) -> dict | None:
@@ -277,6 +295,7 @@ Text: {canonical_text[:3000]}"""
             # The original LLM classification is preserved in llm_parsed_output for auditing
             if relevance < 30 or (event_type == "noise" and relevance < 40):
                 archive_type = "other_aviation_related"  # FK-safe fallback
+                update_domain_penalty(db_conn, source_domain, 1)
                 db_conn.execute(
                     """UPDATE events
                        SET event_type = %s,
@@ -317,6 +336,7 @@ Text: {canonical_text[:3000]}"""
                             event_id[:8], relevance, event_type)
 
             # Tier 3: Relevant (40+) → proceed normally with classification
+            update_domain_penalty(db_conn, source_domain, 0)
 
             # Validate event_type against active catalog
             active_check = db_conn.execute(

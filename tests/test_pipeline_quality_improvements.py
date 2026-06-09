@@ -1,0 +1,123 @@
+import pytest
+import os
+from datetime import datetime, timezone, timedelta
+from unittest.mock import MagicMock, patch
+
+from src.services.telegram_notifier import send_telegram_alert
+from src.pipeline.pass_a_ingest import (
+    translate_to_english_if_needed,
+    google_translate,
+    build_search_queries,
+    check_domain_penalty
+)
+
+# 1. Test translation helpers
+def test_translate_to_english_if_needed_no_translation():
+    text = "Airplane crash reported at airport."
+    assert translate_to_english_if_needed(text) == text
+
+@patch("src.pipeline.pass_a_ingest.google_translate")
+def test_translate_to_english_if_needed_arabic(mock_translate):
+    mock_translate.return_value = "Red Sea blockade"
+    text = "حصار البحر الأحمر"
+    res = translate_to_english_if_needed(text)
+    assert res == "Red Sea blockade"
+    mock_translate.assert_called_once_with(text, target="en")
+
+@patch("src.pipeline.pass_a_ingest.google_translate")
+def test_translate_to_english_if_needed_hebrew(mock_translate):
+    mock_translate.return_value = "Attack at airport"
+    text = "פיגוע בשדה התעופה"
+    res = translate_to_english_if_needed(text)
+    assert res == "Attack at airport"
+    mock_translate.assert_called_once_with(text, target="en")
+
+
+# 2. Test check_domain_penalty whitelist and minimum events
+def test_check_domain_penalty_whitelist():
+    # Whitelisted domain should return 0.0 penalty
+    db = MagicMock()
+    assert check_domain_penalty(db, "reuters.com") == 0.0
+    # No SQL queries should have been run for whitelisted domain
+    db.execute.assert_not_called()
+
+def test_check_domain_penalty_under_5_events():
+    db = MagicMock()
+    # Mock return: penalty_score=0.9, total_events=4 (less than 5 threshold)
+    db.execute().fetchone.return_value = (0.9, 4)
+    
+    assert check_domain_penalty(db, "unreliable-blog.com") == 0.0
+
+def test_check_domain_penalty_over_5_events():
+    db = MagicMock()
+    # Mock return: penalty_score=0.9, total_events=5 (reaches threshold)
+    db.execute().fetchone.return_value = (0.9, 5)
+    
+    assert check_domain_penalty(db, "unreliable-blog.com") == 0.9
+
+
+# 3. Test build_search_queries with active storylines (sliding activity window)
+def test_build_search_queries_with_active_storylines():
+    db = MagicMock()
+    now = datetime.now(timezone.utc)
+    
+    # Mock db return rows: (storyline_hint, last_update, max_severity)
+    db.execute().fetchall.return_value = [
+        # 1. Critical event (severity=85) updated 5 days ago (window=7d) -> INCLUDED
+        ("Red Sea Strike Jun8", now - timedelta(days=5), 85),
+        # 2. Alert event (severity=65) updated 2 days ago (window=3d) -> INCLUDED
+        ("Tel Aviv Drone Jun9", now - timedelta(days=2), 65),
+        # 3. Watch event (severity=45) updated 40 hours ago (window=36h) -> EXCLUDED
+        ("Cairo Airport Riot Jun9", now - timedelta(hours=40), 45),
+        # 4. Critical event updated 8 days ago -> EXCLUDED
+        ("London Security Breach Jun1", now - timedelta(days=8), 90)
+    ]
+    
+    queries = build_search_queries(db)
+    query_texts = [q["query"] for q in queries]
+    
+    # Cleaned hints should be present: date suffix " JunX" stripped
+    assert "Red Sea Strike" in query_texts
+    assert "Tel Aviv Drone" in query_texts
+    
+    # Excluded ones should not be present
+    assert "Cairo Airport Riot" not in query_texts
+    assert "London Security Breach" not in query_texts
+
+
+# 4. Test Telegram notifier formatting
+@patch("src.services.telegram_notifier._post_telegram")
+@patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "mock_token", "TELEGRAM_ALERTS_CHAT_ID": "mock_chat"})
+def test_telegram_notifier_premium_formatting(mock_post):
+    mock_post.return_value = MagicMock()
+    
+    event = {
+        "id": "event_123",
+        "severity_score": 85,
+        "event_type": "mass_casualty",
+        "alert_tier": "CRITICAL",
+        "anchor_name_norm": "JFK Airport",
+        "country_iso": "US",
+        "source_title": "Active Shooter at JFK Airport Terminal 4",
+        "source_url": "https://reuters.com/jfk-shooter",
+        "occurred_at_est": datetime(2026, 6, 9, 14, 30, tzinfo=timezone.utc),
+        "storyline_hint": "JFK Airport Shooting Jun9"
+    }
+    
+    res = send_telegram_alert(event)
+    assert res is True
+    
+    # Verify mock call parameters
+    mock_post.assert_called_once()
+    args, kwargs = mock_post.call_args
+    payload = kwargs["payload"]
+    text = payload["text"]
+    
+    # Check premium layout elements
+    assert "CRITICAL" in text
+    assert "JFK Airport" in text
+    assert "mass_casualty" in text
+    assert "2026-06-09 14:30" in text
+    assert "━━━━━━━━━━━━━━━━━━━━━" in text
+    assert "<code>" in text
+    assert "🔴" in text

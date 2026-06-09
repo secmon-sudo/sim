@@ -23,6 +23,32 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
     _SETTINGS = json.load(f)
 
+SOURCE_CREDIBILITY = {
+    "reuters.com": 1.0,
+    "bbc.co.uk": 0.95,
+    "defense.gov": 0.95,
+    "timesofisrael.com": 0.95,
+    "jpost.com": 0.95,
+    "haaretz.com": 0.95,
+    "ynetnews.com": 0.95,
+    "breakingdefense.com": 0.90,
+    "militarytimes.com": 0.90,
+    "warontherocks.com": 0.90,
+    "longwarjournal.org": 0.90,
+    "centcom.mil": 0.95,
+    "cnn.com": 0.90,
+    "foxnews.com": 0.90,
+    "wsj.com": 0.95,
+    "nytimes.com": 0.95,
+    "dropsitenews.com": 0.85,
+    "presstv.ir": 0.85,
+    "nitter.net": 0.80,
+    "nitter.privacydev.net": 0.80,
+    "nitter.poast.org": 0.80,
+    "reddit.com": 0.50,
+    "aljazeera.com": 0.90
+}
+
 _SCORING = _SETTINGS.get("scoring", {})
 PROXIMITY_BONUS = _SCORING.get("proximity_bonus", 30)
 CZIB_BONUS = _SCORING.get("czib_bonus", 20)
@@ -228,7 +254,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, country_iso,
                       llm_parsed_output, storyline_hint, occurred_at_est,
-                      source_title, source_url, ingested_at
+                      source_title, source_url, ingested_at, source_domain
                FROM events WHERE id = %s AND status = 'classified'""",
             (event_id,),
         ).fetchone()
@@ -256,6 +282,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "occurred_at_est": occurred_at_est,
             "source_title": row[7],
             "source_url": row[8],
+            "source_domain": row[10],
         }
 
         # 1. Resolve anchor
@@ -269,10 +296,24 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         if not storyline_id:
             storyline_id = str(uuid.uuid4())
 
-        # 4. Compute confidence (with real source diversity)
+        # 4. Compute confidence (with real source diversity and credibility multiplier)
         llm_conf = event["llm_parsed"].get("confidence", 0.5)
         diversity = compute_diversity_score(db_conn, storyline_id)
         system_conf = compute_confidence(llm_conf, anchor["confidence"], diversity)
+
+        # Apply source credibility weighting
+        credibility_multiplier = 1.0
+        domain = event.get("source_domain")
+        if domain:
+            domain = domain.lower()
+            if domain in SOURCE_CREDIBILITY:
+                credibility_multiplier = SOURCE_CREDIBILITY[domain]
+            else:
+                for parent_domain, score in SOURCE_CREDIBILITY.items():
+                    if domain.endswith("." + parent_domain):
+                        credibility_multiplier = score
+                        break
+        system_conf = float(system_conf * credibility_multiplier)
 
         # 5. Evaluate alert tier
         alert_data = {

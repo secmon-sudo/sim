@@ -327,7 +327,7 @@ def _matches_security_keywords(title: str, description: str) -> bool:
 # Query builders
 # ---------------------------------------------------------------------------
 
-def build_search_queries() -> list[dict]:
+def build_search_queries(db_conn=None) -> list[dict]:
     """Build focused search queries.  ONLY aviation / hotel / tourism / mass-casualty security.
 
     Strategy:
@@ -338,6 +338,48 @@ def build_search_queries() -> list[dict]:
         Complex boolean with many negative keywords breaks or returns 0 results.
     4.  Remaining noise is caught by `is_noise()` post-filter.
     """
+    active_queries = []
+    if db_conn is not None:
+        try:
+            # Query recent storylines from last 14 days
+            with db_conn.transaction():
+                rows = db_conn.execute(
+                    """SELECT storyline_hint, MAX(occurred_at_est) as last_update, MAX(severity_score) as max_severity
+                       FROM events
+                       WHERE status IN ('scored', 'reconciled')
+                         AND storyline_hint IS NOT NULL
+                         AND occurred_at_est > NOW() - INTERVAL '14 days'
+                       GROUP BY storyline_id, storyline_hint"""
+                ).fetchall()
+
+            now = datetime.now(timezone.utc)
+            for row in rows:
+                hint = row[0]
+                last_update = row[1]
+                max_severity = row[2] or 0
+
+                # Ensure last_update is timezone-aware for math comparison
+                if last_update.tzinfo is None:
+                    last_update = last_update.replace(tzinfo=timezone.utc)
+
+                age_hours = (now - last_update).total_seconds() / 3600
+
+                # Determine tracking window based on severity
+                if max_severity >= 80:
+                    window = 168  # 7 days
+                elif max_severity >= 60:
+                    window = 72   # 3 days
+                else:
+                    window = 36   # 36 hours
+
+                if age_hours <= window:
+                    # Clean the hint (strip the date hint from the end, e.g. " Jun9")
+                    clean_query = re.sub(r'\s+[A-Z][a-z]{2}\d{1,2}$', '', hint)
+                    if clean_query:
+                        active_queries.append(clean_query)
+        except Exception:
+            logger.exception("Error building dynamic search queries from active storylines")
+
     queries = []
     seen = set()
 
@@ -345,6 +387,10 @@ def build_search_queries() -> list[dict]:
         if q.lower() not in seen:
             seen.add(q.lower())
             queries.append({"query": q, "broad": False})
+
+    # Add active dynamic queries FIRST so they are run with highest priority
+    for q in active_queries:
+        _add(q)
 
     # ── Tier 1: Unambiguous aviation / airport security phrases ──
     tier1 = [
@@ -1185,15 +1231,68 @@ def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, ca
     return False
 
 
+def google_translate(text: str, target: str = "en") -> str:
+    """Translate text using public Google Translate endpoint (no credentials needed)."""
+    if not text or not text.strip():
+        return text
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": target,
+            "dt": "t",
+            "q": text
+        }
+        resp = httpx.get(url, params=params, timeout=10.0)
+        resp.raise_for_status()
+        # The response is a nested JSON list: [[[translated_text, original_text, ...]]]
+        data = resp.json()
+        if data and len(data) > 0 and data[0]:
+            translated_segments = [seg[0] for seg in data[0] if seg and seg[0]]
+            return "".join(translated_segments)
+    except Exception:
+        logger.exception("Failed to translate text: %s", text[:80])
+    return text
+
+
+def translate_to_english_if_needed(text: str) -> str:
+    """Check if text contains Non-Latin characters (Arabic, Hebrew, Farsi, Cyrillic) and translate if so."""
+    if not text:
+        return text
+    # Unicode ranges:
+    # \u0590-\u05FF: Hebrew
+    # \u0600-\u06FF: Arabic/Farsi
+    # \u0400-\u04FF: Cyrillic (Russian, etc.)
+    if re.search(r'[\u0590-\u05FF\u0600-\u06FF\u0400-\u04FF]', text):
+        return google_translate(text, target="en")
+    return text
+
+
 def check_domain_penalty(db_conn, domain: str) -> float:
-    """Get penalty score for a domain. Returns 0.0 if not found."""
+    """Get penalty score for a domain. Returns 0.0 if not found, if total_events < 5, or if whitelisted."""
+    TRUSTED_DOMAINS = {
+        "reuters.com", "bbc.co.uk", "travel.state.gov", "defense.gov",
+        "timesofisrael.com", "aljazeera.com", "jpost.com", "haaretz.com",
+        "ynetnews.com", "breakingdefense.com", "militarytimes.com",
+        "warontherocks.com", "longwarjournal.org", "centcom.mil",
+        "cnn.com", "foxnews.com", "wsj.com", "nytimes.com", "dropsitenews.com",
+        "presstv.ir"
+    }
+    if domain in TRUSTED_DOMAINS:
+        return 0.0
+
     try:
         with db_conn.transaction():
             row = db_conn.execute(
-                "SELECT penalty_score FROM domain_penalties WHERE domain = %s",
+                "SELECT penalty_score, total_events FROM domain_penalties WHERE domain = %s",
                 (domain,),
             ).fetchone()
-            return row[0] if row else 0.0
+            if row:
+                penalty, total = row[0], row[1]
+                if total >= 5:
+                    return penalty
+            return 0.0
     except Exception:
         return 0.0
 
@@ -1229,7 +1328,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "full_text_fetched": 0,
     }
 
-    queries = build_search_queries()
+    queries = build_search_queries(db_conn)
     all_items = []
 
     # Execute global queries
@@ -1328,6 +1427,14 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         if not url:
             continue
 
+        # Auto-translate title and description if needed
+        title = item.get("title", "")
+        description = item.get("description", "")
+        if title:
+            item["title"] = translate_to_english_if_needed(title)
+        if description:
+            item["description"] = translate_to_english_if_needed(description)
+
         # Canonicalize
         raw_text = f"{item.get('title', '')} {item.get('description', '')}"
         canonical = canonicalize_text(raw_text)
@@ -1366,18 +1473,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             stats["content_duplicates_skipped"] += 1
             continue
 
+        # Get published_at date
+        pub_dt = item.get("pub_dt")
+
         # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
         try:
             with db_conn.transaction():
                 result = db_conn.execute(
                     """INSERT INTO events (source_url, source_url_hash, source_domain,
-                                           source_title, raw_text, canonical_text, status)
-                       SELECT %s, %s, %s, %s, %s, %s, 'raw'
+                                           source_title, raw_text, canonical_text, status, published_at)
+                       SELECT %s, %s, %s, %s, %s, %s, 'raw', %s
                        WHERE NOT EXISTS (
                            SELECT 1 FROM events WHERE source_url_hash = %s
                        )""",
                     (url, url_hash, domain, item.get("title", ""),
-                     raw_text, canonical, url_hash),
+                     raw_text, canonical, pub_dt, url_hash),
                 )
                 if result.rowcount > 0:
                     inserted += 1

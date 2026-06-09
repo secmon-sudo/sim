@@ -67,19 +67,30 @@ def send_telegram_alert(event: dict) -> bool:
     severity = event.get("severity_score", 0)
     confidence = event.get("system_confidence", 0.0)
 
+    # Format occurred_at_est
+    occurred_at = event.get("occurred_at_est")
+    if occurred_at:
+        if hasattr(occurred_at, "strftime"):
+            safe_time = occurred_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            safe_time = str(occurred_at)
+    else:
+        safe_time = "Unknown"
+
     # Format message with HTML
-    message = f"<b>{emoji} {html.escape(tier)} ALERT</b>\n\n"
-    message += f"<b>Title:</b> {safe_title}\n"
-    message += f"<b>Type:</b> {safe_type}\n"
-    message += f"<b>Location:</b> {location}\n"
-    message += f"<b>Severity:</b> {severity}/100\n"
-    message += f"<b>Confidence:</b> {confidence:.2f}\n"
-
+    message = f"<b>{emoji} {html.escape(tier)} ALERT</b>\n"
+    message += "━━━━━━━━━━━━━━━━━━━━━\n"
+    message += f"📰 <b>Headline:</b> {safe_title}\n\n"
+    message += f"📍 <b>Location:</b> <code>{location}</code>\n"
+    message += f"📂 <b>Event Type:</b> <code>{safe_type}</code>\n"
+    message += f"⚡ <b>Severity:</b> <code>{severity}/100</code>\n"
+    message += f"🛡️ <b>Confidence:</b> <code>{confidence:.2f}</code>\n"
+    message += f"🕰️ <b>Incident Time:</b> <code>{safe_time} (EST)</code>\n"
     if safe_hint:
-        message += f"\n<b>Hint:</b> <i>{safe_hint}</i>\n"
-
+        message += f"🧵 <b>Storyline Hint:</b> <code>#{safe_hint}</code>\n"
+    message += "━━━━━━━━━━━━━━━━━━━━━\n"
     if safe_url:
-        message += f"\n🔗 <a href='{safe_url}'>Read Source</a>"
+        message += f"🔗 <a href='{safe_url}'>Read Full Report</a>"
 
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
