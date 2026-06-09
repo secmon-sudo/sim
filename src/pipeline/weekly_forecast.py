@@ -14,6 +14,7 @@ Coordinates weekly report generation:
 
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
