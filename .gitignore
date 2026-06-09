@@ -54,3 +54,6 @@ test_reload.py
 # Data Sources Metadata (Never Commit)
 IRONSIGHT_DATA_SOURCES.md
 
+# Weekly Forecast Spec (Never Commit)
+forecast.md
+

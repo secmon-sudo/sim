@@ -162,8 +162,27 @@ def run_pipeline():
     logger.info("=" * 60)
 
     return results
-
-
 if __name__ == "__main__":
-    result = run_pipeline()
-    sys.exit(0 if result.get("success") else 1)
+    if "--weekly" in sys.argv:
+        logger.info("Weekly forecast execution triggered via CLI parameter.")
+        db_conn = None
+        success = False
+        try:
+            db_conn = get_connection()
+            router = build_llm_router()
+            from src.pipeline.weekly_forecast import run_weekly_forecast
+            weekly_result = run_weekly_forecast(db_conn, router)
+            success = weekly_result.get("success", False)
+        except Exception:
+            logger.exception("CLI weekly forecast run failed")
+        finally:
+            if db_conn:
+                try:
+                    put_connection(db_conn)
+                except Exception:
+                    pass
+                close_pool()
+        sys.exit(0 if success else 1)
+    else:
+        result = run_pipeline()
+        sys.exit(0 if result.get("success") else 1)
