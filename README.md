@@ -109,7 +109,8 @@ Automatically dispatches immediate **Flash Alerts** if:
 
 ```
 sim/
-├── .github/workflows/osint-pipeline.yml   # GitHub Actions pipeline
+├── .github/workflows/osint-pipeline.yml   # Regular 2-hour pipeline
+├── .github/workflows/weekly-forecast.yml  # [NEW] Weekly strategic forecast
 ├── config/
 │   ├── keywords.json                      # Search queries & noise filters
 │   └── settings.json                      # Pipeline configuration
