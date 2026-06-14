@@ -8,6 +8,7 @@ pydeck>=0.9
 streamlit-agraph>=0.0.45
 tldextract>=5.1
 python-dotenv>=1.0
+pydantic>=2.0
 pandas>=2.0
 networkx>=3.0
 trafilatura>=1.6
