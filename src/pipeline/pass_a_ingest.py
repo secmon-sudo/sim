@@ -294,10 +294,32 @@ _SPORTS_ENT_BLOCKERS = [
     re.compile(r"\b(bitcoin|crypto|nft|blockchain|stock\s+market|shares\s+rise|shares\s+fall|ipo|earnings)\b", re.IGNORECASE),
 ]
 
+# Military/security context patterns — if any of these match, the article
+# should NOT be discarded by noise filters even if a noise keyword is present.
+# e.g. "military training exercise near border" is real news, not noise.
+_MILITARY_CONTEXT_BYPASS = re.compile(
+    r"\b(military|army|troops|soldiers|combat|battlefield|frontline|"
+    r"war zone|airbase|naval|marines|special forces|regiment|battalion|"
+    r"armed forces|defense ministry|ministry of defence|pentagon|"
+    r"NATO|Wagner|militia|insurgent|guerrilla|paramilitary|"
+    r"airstrike|missile|bombing|shelling|casualties|killed in|"
+    r"drone strike|offensive|ceasefire|blockade|siege|ambush)\b",
+    re.IGNORECASE,
+)
+
 
 def is_noise(text: str) -> bool:
-    """Check if text matches known noise patterns using word boundaries."""
+    """Check if text matches known noise patterns using word boundaries.
+
+    Military/security context overrides noise filters — an article about
+    'military training exercise near border' is real news, not simulator noise.
+    """
     text_lower = text.lower()
+
+    # If the text has clear military/security context, never treat as noise
+    if _MILITARY_CONTEXT_BYPASS.search(text_lower):
+        return False
+
     for pattern in NOISE_PATTERNS:
         if pattern.search(text_lower):
             return True
@@ -307,19 +329,64 @@ def is_noise(text: str) -> bool:
     return False
 
 
+# Standalone high-signal terms that should ALWAYS match from static feeds,
+# even without compound context like "airport attack" or "hotel bombing".
+# These are words/phrases that almost always indicate a real security event.
+_HIGH_SIGNAL_TERMS = {
+    "explosion", "explosions", "bombing", "bombings", "shelling",
+    "airstrike", "airstrikes", "air strike", "air strikes",
+    "missile", "missiles", "missile strike", "missile attack",
+    "gunfire", "gunshots", "shooting",
+    "assassination", "assassinated", "massacre", "massacred",
+    "invasion", "invaded", "coup", "overthrow", "overthrown",
+    "ceasefire", "blockade", "siege", "ambush", "offensive",
+    "casualties", "fatalities", "killed", "wounded", "dead",
+    "artillery", "mortar", "rocket", "rockets",
+    "drone attack", "drone strike", "drone strikes",
+    "war", "warfare", "conflict", "clashes",
+    "evacuated", "evacuation",
+    "military operation", "ground offensive",
+    "nuclear", "chemical weapon", "biological weapon",
+    "terror attack", "terrorist attack", "terrorist",
+    "hostage", "hostages", "kidnapped", "abducted",
+    "insurgent", "insurgents", "insurgency",
+    "militia", "paramilitary",
+    "sanctions", "embargo",
+    "refugee", "refugees", "displaced",
+    "humanitarian crisis", "famine",
+    "large-scale attack", "major attack", "massive attack",
+    "suicide bomb", "suicide bomber", "car bomb", "truck bomb",
+    "IED", "improvised explosive",
+    "incursion", "retaliation", "retaliatory",
+}
+
+
 def _matches_security_keywords(title: str, description: str) -> bool:
     """Check if article title/description contains at least one security keyword.
 
     Used as a post-filter for general RSS feeds (reddit, aljazeera, reuters)
     that aren't pre-filtered by search query.
+
+    Three-tier matching:
+      1. High-signal standalone terms (fast, catches major breaking news)
+      2. Emergency keywords from config (all languages)
+      3. Geopolitical keywords from config (all languages)
     """
     text = f"{title} {description}".lower()
-    for kw in KEYWORDS_CONFIG.get("emergency_keywords", {}).get("en", []):
-        if kw.lower() in text:
+
+    # Tier 1: High-signal standalone terms — catches big stories fast
+    for term in _HIGH_SIGNAL_TERMS:
+        if term in text:
             return True
-    for kw in KEYWORDS_CONFIG.get("geopolitical_keywords", {}).get("en", []):
-        if kw.lower() in text:
-            return True
+
+    # Tier 2+3: Config-based keywords across ALL languages (en, ar, tr, fr)
+    for keyword_group in ("emergency_keywords", "geopolitical_keywords"):
+        lang_dict = KEYWORDS_CONFIG.get(keyword_group, {})
+        for _lang, keywords in lang_dict.items():
+            for kw in keywords:
+                if kw.lower() in text:
+                    return True
+
     return False
 
 
@@ -1277,7 +1344,8 @@ def check_domain_penalty(db_conn, domain: str) -> float:
         "ynetnews.com", "breakingdefense.com", "militarytimes.com",
         "warontherocks.com", "longwarjournal.org", "centcom.mil",
         "cnn.com", "foxnews.com", "wsj.com", "nytimes.com", "dropsitenews.com",
-        "presstv.ir"
+        "presstv.ir", "france24.com", "theguardian.com", "ukrinform.net",
+        "kyivindependent.com",
     }
     if domain in TRUSTED_DOMAINS:
         return 0.0
