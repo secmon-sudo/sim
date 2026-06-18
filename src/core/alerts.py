@@ -78,7 +78,7 @@ def record_suppression(db_conn, suppression_key: str, tier: str, event_id: str, 
     """Record a suppression entry so future duplicates are muted."""
     db_conn.execute(
         """INSERT INTO alert_suppression (suppression_key, alert_tier, event_id, expires_at)
-           VALUES (%s, %s, %s, NOW() + INTERVAL '%s hours')
+           VALUES (%s, %s, %s, NOW() + (%s * INTERVAL '1 hour'))
            ON CONFLICT (suppression_key) DO UPDATE SET expires_at = EXCLUDED.expires_at""",
         (suppression_key, tier, event_id, ttl_hours),
     )

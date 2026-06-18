@@ -41,7 +41,7 @@ def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
                       classification_lock
                FROM events
                WHERE classification_lock = TRUE
-                 AND last_heartbeat_at < NOW() - INTERVAL '%s minutes'""",
+                 AND last_heartbeat_at < NOW() - (%s * INTERVAL '1 minute')""",
             (STALE_LOCK_THRESHOLD_MINUTES,),
         ).fetchall()
 
@@ -150,7 +150,7 @@ def get_events_for_classification(db_conn, limit: int = 50) -> list[dict]:
                FROM events
                WHERE status = 'deduped'
                  AND classification_lock = FALSE
-                 AND ingested_at < NOW() - INTERVAL '%s hours'
+                 AND ingested_at < NOW() - (%s * INTERVAL '1 hour')
                ORDER BY ingested_at ASC
                LIMIT %s""",
             (MATURATION_WINDOW_HOURS, limit),

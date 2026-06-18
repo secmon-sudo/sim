@@ -1268,7 +1268,7 @@ def _fetch_recent_events_for_dedup(db_conn) -> list[tuple[str, str]]:
         rows = db_conn.execute(
             """SELECT source_title, canonical_text
                FROM events
-               WHERE ingested_at > NOW() - INTERVAL '%s days'
+               WHERE ingested_at > NOW() - (%s * INTERVAL '1 day')
                ORDER BY ingested_at DESC
                LIMIT 2000""",
             (_MAX_ARTICLE_AGE_DAYS,),

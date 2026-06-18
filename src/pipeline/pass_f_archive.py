@@ -55,19 +55,19 @@ def get_archivable_events(db_conn) -> list[dict]:
               -- Case 1: Normal aging — occurred_at_est exists and is old
               (
                   e.occurred_at_est IS NOT NULL
-                  AND e.occurred_at_est < NOW() - INTERVAL '%s days'
+                  AND e.occurred_at_est < NOW() - (%s * INTERVAL '1 day')
                   AND NOT EXISTS (
                       SELECT 1 FROM events sibling
                       WHERE sibling.storyline_id = e.storyline_id
                         AND sibling.storyline_id IS NOT NULL
-                        AND sibling.occurred_at_est >= NOW() - INTERVAL '%s days'
+                        AND sibling.occurred_at_est >= NOW() - (%s * INTERVAL '1 day')
                   )
               )
               OR
               -- Case 2: NULL occurred_at_est — archive after fallback days
               (
                   e.occurred_at_est IS NULL
-                  AND e.ingested_at < NOW() - INTERVAL '%s days'
+                  AND e.ingested_at < NOW() - (%s * INTERVAL '1 day')
               )
           )
         ORDER BY e.occurred_at_est ASC NULLS LAST
