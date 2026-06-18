@@ -327,9 +327,48 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         # Prepare event dict for suppression & notification
         event["storyline_id"] = storyline_id
         event["anchor_name_norm"] = anchor["norm"]
+        event["country_iso"] = anchor.get("country_iso") or event.get("country_iso")
         event["severity_score"] = severity
         event["system_confidence"] = system_conf
         event["alert_tier"] = alert_tier
+
+        # Check quiet hours (last 24 hours) for country/location
+        country_quiet = False
+        location_quiet = False
+        if occurred_at_est:
+            try:
+                resolved_country = event["country_iso"]
+                if resolved_country:
+                    row_country = db_conn.execute(
+                        """SELECT COUNT(*) FROM events
+                           WHERE country_iso = %s
+                             AND status IN ('scored', 'reconciled', 'archived')
+                             AND occurred_at_est >= %s - INTERVAL '24 hours'
+                             AND occurred_at_est <= %s
+                             AND id != %s""",
+                        (resolved_country, occurred_at_est, occurred_at_est, event["id"])
+                    ).fetchone()
+                    if row_country and row_country[0] == 0:
+                        country_quiet = True
+
+                resolved_anchor_norm = event["anchor_name_norm"]
+                if resolved_anchor_norm:
+                    row_location = db_conn.execute(
+                        """SELECT COUNT(*) FROM events
+                           WHERE anchor_name_norm = %s
+                             AND status IN ('scored', 'reconciled', 'archived')
+                             AND occurred_at_est >= %s - INTERVAL '24 hours'
+                             AND occurred_at_est <= %s
+                             AND id != %s""",
+                        (resolved_anchor_norm, occurred_at_est, occurred_at_est, event["id"])
+                    ).fetchone()
+                    if row_location and row_location[0] == 0:
+                        location_quiet = True
+            except Exception:
+                logger.exception("Failed to query quiet hours for event %s", event["id"])
+
+        event["country_quiet_24h"] = country_quiet
+        event["location_quiet_24h"] = location_quiet
 
         # Send Telegram alert for high-severity events (severity >= 80)
         # Suppression key prevents duplicate notifications for the same storyline

@@ -77,10 +77,26 @@ def send_telegram_alert(event: dict) -> bool:
     else:
         safe_time = "Unknown"
 
+    # Check quiet hours (last 24 hours) for country/location flags
+    header_suffix = ""
+    headline_prefix = ""
+    is_new_location = event.get("location_quiet_24h", False)
+    is_new_country = event.get("country_quiet_24h", False)
+
+    if is_new_location and is_new_country:
+        header_suffix = " — 🚨 NEW LOCATION & COUNTRY"
+        headline_prefix = "⚠️ <b>[NEW LOCATION & COUNTRY]</b> "
+    elif is_new_location:
+        header_suffix = " — 📍 NEW LOCATION"
+        headline_prefix = "⚠️ <b>[NEW LOCATION]</b> "
+    elif is_new_country:
+        header_suffix = " — 🌍 NEW COUNTRY ACTIVITY"
+        headline_prefix = "⚠️ <b>[NEW COUNTRY ACTIVITY]</b> "
+
     # Format message with HTML
-    message = f"<b>{emoji} {html.escape(tier)} ALERT</b>\n"
+    message = f"<b>{emoji} {html.escape(tier)} ALERT{header_suffix}</b>\n"
     message += "━━━━━━━━━━━━━━━━━━━━━\n"
-    message += f"📰 <b>Headline:</b> {safe_title}\n\n"
+    message += f"📰 <b>Headline:</b> {headline_prefix}{safe_title}\n\n"
     message += f"📍 <b>Location:</b> <code>{location}</code>\n"
     message += f"📂 <b>Event Type:</b> <code>{safe_type}</code>\n"
     message += f"⚡ <b>Severity:</b> <code>{severity}/100</code>\n"
