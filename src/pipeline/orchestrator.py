@@ -25,7 +25,7 @@ from src.pipeline.pass_b_dedup import run_pass_b
 from src.pipeline.pass_c_classify import run_pass_c
 from src.pipeline.pass_d_score import run_pass_d
 from src.pipeline.pass_e_reconcile import run_pass_e
-from src.pipeline.pass_f_archive import run_pass_f
+from src.pipeline.pass_f_archive import run_pass_f, run_run_snapshot
 from src.services.czib_client import sync_czib_to_db
 from src.services.supabase_client import close_pool, get_connection, put_connection
 
@@ -58,7 +58,8 @@ def run_pipeline():
     Each pass logs its own telemetry and handles errors independently.
     """
     start_time = time.monotonic()
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    run_started_at = datetime.now(timezone.utc)
+    run_id = run_started_at.strftime("%Y%m%dT%H%M%S")
 
     logger.info("=" * 60)
     logger.info("SIM Pipeline Run %s — Starting", run_id)
@@ -72,6 +73,7 @@ def run_pipeline():
         "pass_c": None,
         "pass_d": None,
         "pass_e": None,
+        "run_snapshot": None,
         "pass_f": None,
         "success": False,
         "duration_seconds": 0,
@@ -128,6 +130,10 @@ def run_pipeline():
                 results["narratives"] = run_storyline_narratives(db_conn, build_bulk_router())
         except Exception:
             logger.exception("Storyline narration failed, continuing")
+
+        # Per-run JSONL snapshot → Telegram + R2 (does not delete events).
+        logger.info("--- RUN SNAPSHOT ---")
+        results["run_snapshot"] = run_run_snapshot(db_conn, run_started_at)
 
         # Pass F: Cold Storage & Archive
         logger.info("--- PASS F: Archive ---")

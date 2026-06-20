@@ -32,6 +32,34 @@ def _is_retryable_http_error(exception) -> bool:
 ARCHIVE_DAYS_THRESHOLD = 90
 BATCH_SIZE = 500
 
+# Column set shared by the cold-storage archive and the per-run snapshot export.
+_EVENT_COLUMNS = [
+    "id", "source_url", "source_title", "canonical_text", "event_type",
+    "alert_tier", "severity_score", "anchor_name_norm", "country_iso",
+    "occurred_at_est", "ingested_at", "llm_parsed_output", "storyline_id",
+]
+
+
+def _rows_to_event_dicts(rows) -> list[dict]:
+    """Serialize DB rows (in _EVENT_COLUMNS order) into JSONL-ready dicts."""
+    events = []
+    for row in rows:
+        event = dict(zip(_EVENT_COLUMNS, row))
+        event["occurred_at_est"] = event["occurred_at_est"].isoformat() if event["occurred_at_est"] else None
+        event["ingested_at"] = event["ingested_at"].isoformat() if event["ingested_at"] else None
+        event["id"] = str(event["id"])
+        if event["storyline_id"]:
+            event["storyline_id"] = str(event["storyline_id"])
+        if isinstance(event["llm_parsed_output"], str):
+            try:
+                event["llm_parsed_output"] = json.loads(event["llm_parsed_output"] or "{}")
+            except Exception:
+                event["llm_parsed_output"] = {}
+        elif event["llm_parsed_output"] is None:
+            event["llm_parsed_output"] = {}
+        events.append(event)
+    return events
+
 # Load settings
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
@@ -79,32 +107,7 @@ def get_archivable_events(db_conn) -> list[dict]:
             (ARCHIVE_DAYS_THRESHOLD, ARCHIVE_DAYS_THRESHOLD, _ARCHIVE_NULL_AFTER_DAYS, BATCH_SIZE),
         ).fetchall()
 
-        columns = [
-            "id", "source_url", "source_title", "canonical_text", "event_type",
-            "alert_tier", "severity_score", "anchor_name_norm", "country_iso",
-            "occurred_at_est", "ingested_at", "llm_parsed_output", "storyline_id"
-        ]
-
-        events = []
-        for row in rows:
-            event = dict(zip(columns, row))
-            # Serialize datetimes and jsonb for JSONL
-            event["occurred_at_est"] = event["occurred_at_est"].isoformat() if event["occurred_at_est"] else None
-            event["ingested_at"] = event["ingested_at"].isoformat() if event["ingested_at"] else None
-            event["id"] = str(event["id"])
-            if event["storyline_id"]:
-                event["storyline_id"] = str(event["storyline_id"])
-            # Ensure llm_parsed_output is a dict for JSON serialization
-            if isinstance(event["llm_parsed_output"], str):
-                try:
-                    event["llm_parsed_output"] = json.loads(event["llm_parsed_output"] or "{}")
-                except Exception:
-                    event["llm_parsed_output"] = {}
-            elif event["llm_parsed_output"] is None:
-                event["llm_parsed_output"] = {}
-            events.append(event)
-
-        return events
+        return _rows_to_event_dicts(rows)
     except Exception:
         logger.exception("Failed to fetch archivable events")
         return []
@@ -285,5 +288,57 @@ def run_pass_f(db_conn) -> dict:
         db_conn.rollback()
         stats["error"] = f"DB Delete/Manifest error: {e}"
         logger.exception("Pass F DB Error")
+
+    return stats
+
+
+def get_run_events(db_conn, run_started_at: datetime) -> list[dict]:
+    """Select events ingested during this pipeline run (newest first)."""
+    query = """
+        SELECT id, source_url, source_title, canonical_text, event_type,
+               alert_tier, severity_score, anchor_name_norm, country_iso,
+               occurred_at_est, ingested_at, llm_parsed_output, storyline_id
+        FROM events
+        WHERE ingested_at >= %s
+        ORDER BY severity_score DESC NULLS LAST, ingested_at DESC
+        LIMIT %s
+    """
+    try:
+        rows = db_conn.execute(query, (run_started_at, BATCH_SIZE)).fetchall()
+        return _rows_to_event_dicts(rows)
+    except Exception:
+        logger.exception("Failed to fetch run events for snapshot")
+        return []
+
+
+def run_run_snapshot(db_conn, run_started_at: datetime) -> dict:
+    """Export this run's events as JSONL to R2 + Telegram (does NOT delete).
+
+    Restores the per-run snapshot that ships alongside the alerts. Unlike Pass F
+    (cold storage of >90-day events) this keeps the events in the DB.
+    """
+    stats = {"events": 0, "r2_uploaded": False, "telegram_message_id": None, "error": None}
+
+    events = get_run_events(db_conn, run_started_at)
+    if not events:
+        logger.info("Run snapshot: no events ingested this run, skipping.")
+        return stats
+
+    content, manifest_hash = generate_jsonl_and_hash(events)
+    filename = f"sim_archive_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{len(events)}ev.jsonl"
+    stats["events"] = len(events)
+    stats["manifest_hash"] = manifest_hash
+
+    stats["r2_uploaded"] = upload_to_cloudflare_r2(content, filename)
+    if stats["r2_uploaded"]:
+        logger.info("Run snapshot: uploaded %s to Cloudflare R2", filename)
+
+    tg_response = upload_to_telegram(content, filename)
+    if tg_response and tg_response.get("ok"):
+        stats["telegram_message_id"] = tg_response.get("result", {}).get("message_id")
+        logger.info("Run snapshot: uploaded to Telegram message_id=%s", stats["telegram_message_id"])
+    elif tg_response is not None:
+        stats["error"] = "Telegram snapshot upload failed"
+        logger.error("Run snapshot Telegram upload failed: %s", tg_response)
 
     return stats

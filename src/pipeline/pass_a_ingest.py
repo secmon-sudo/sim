@@ -1102,6 +1102,44 @@ def _parse_rss_response(resp, url: str, stats: dict | None = None) -> list[dict]
 # RSS / Atom fetch
 # ---------------------------------------------------------------------------
 
+def _parse_feed_lenient(text: str, now_utc: datetime, max_age: float, stats: dict | None) -> list[dict]:
+    """Fallback parser for malformed feeds (e.g. raw HTML embedded as markup).
+
+    Uses feedparser, which is far more tolerant than the stdlib XML parser.
+    Returns items in the same shape as fetch_rss_feed.
+    """
+    import feedparser
+
+    items: list[dict] = []
+    parsed = feedparser.parse(text)
+    for entry in parsed.entries:
+        pub_dt = None
+        if getattr(entry, "published_parsed", None):
+            pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+        elif getattr(entry, "updated_parsed", None):
+            pub_dt = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
+
+        if pub_dt is None:
+            if stats is not None:
+                stats["age_filtered"] += 1
+            continue
+
+        age_days = (now_utc - pub_dt).total_seconds() / 86400
+        if age_days > max_age:
+            if stats is not None:
+                stats["age_filtered"] += 1
+            continue
+
+        items.append({
+            "title": entry.get("title", ""),
+            "link": entry.get("link", ""),
+            "pub_date": entry.get("published", entry.get("updated", "")),
+            "pub_dt": pub_dt,
+            "description": entry.get("summary", ""),
+        })
+    return items
+
+
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | None = None) -> list[dict]:
     """Fetch and parse an RSS or Atom feed. Returns items with parsed pub_date."""
     import xml.etree.ElementTree as ET
@@ -1113,7 +1151,11 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            # Several feeds (e.g. breakingdefense, crisisgroup, al-monitor) reject
+            # requests without an explicit feed Accept header (403 / 415).
+            "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         }
         resp = _http_get_with_retry(url, headers=headers, timeout=15.0, max_retries=2, backoff_base=2.0)
         if resp is None:
@@ -1128,7 +1170,13 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
     max_age = _MAX_ARTICLE_AGE_DAYS
 
     try:
-        root = ET.fromstring(resp.text)
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError:
+            # Some feeds embed raw HTML as markup or contain unescaped tokens that
+            # the strict stdlib parser rejects (e.g. warsawinstitute). Fall back to
+            # feedparser, which is far more tolerant.
+            return _parse_feed_lenient(resp.text, now_utc, max_age, stats)
         tag = root.tag.split("}")[-1] if "}" in root.tag else root.tag
 
         # Detect Atom vs RSS by root tag
