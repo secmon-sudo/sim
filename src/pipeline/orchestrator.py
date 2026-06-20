@@ -115,6 +115,20 @@ def run_pipeline():
         logger.info("--- PASS E: Reconciliation ---")
         results["pass_e"] = run_pass_e(db_conn)
 
+        # Storyline narratives ("story so far") — budgeted, bulk-router, cache-aware.
+        # Isolated failure must never break the pipeline.
+        try:
+            from src.core.llm_router import build_bulk_router
+            from src.services.storyline_narrator import (
+                NARRATIVE_ENABLED,
+                run_storyline_narratives,
+            )
+            if NARRATIVE_ENABLED:
+                logger.info("--- STORYLINE NARRATIVES ---")
+                results["narratives"] = run_storyline_narratives(db_conn, build_bulk_router())
+        except Exception:
+            logger.exception("Storyline narration failed, continuing")
+
         # Pass F: Cold Storage & Archive
         logger.info("--- PASS F: Archive ---")
         results["pass_f"] = run_pass_f(db_conn)

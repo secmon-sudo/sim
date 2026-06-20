@@ -37,6 +37,8 @@ _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
 _CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.72)
 _TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.78)
+_TITLE_TOKEN_THRESHOLD = _DEDUP.get("title_token_jaccard_threshold", 0.72)
+_CONTENT_SHINGLE_THRESHOLD = _DEDUP.get("content_shingle_threshold", 0.40)
 
 # Prompt injection patterns to strip before LLM classification
 PROMPT_INJECTION_PATTERNS = re.compile(
@@ -307,17 +309,57 @@ _MILITARY_CONTEXT_BYPASS = re.compile(
     re.IGNORECASE,
 )
 
+# Bypass cancellers — even with military vocabulary, these markers indicate the
+# article is ANALYSIS/RECAP/MEDIA about conflict, not a live incident. They cancel
+# the military bypass so the normal noise filters apply (e.g. "documentary about the
+# missile strike", "investigation into the bombing", "opinion: why the war drags on").
+_BYPASS_CANCEL_PATTERN = re.compile(
+    r"\b(documentary|docuseries|investigation into|investigates|"
+    r"opinion|op-?ed|editorial|analysis|explainer|explained|"
+    r"what we know|here's what|the story of|how the|why the|"
+    r"podcast|book review|new book|film about|movie about|"
+    r"retrospective|in pictures|in photos|photo essay|timeline of)\b",
+    re.IGNORECASE,
+)
+
+
+# Retrospective / anniversary patterns — these indicate an article ABOUT a past
+# event (recap, memorial, "N years ago"), not a current incident. They override the
+# military-context bypass: "10th anniversary of the airstrike" is stale news, not a
+# live event, even though it mentions "airstrike".
+_RETROSPECTIVE_PATTERN = re.compile(
+    r"\b\d+\s*(?:st|nd|rd|th)?\s*anniversary\b"
+    r"|\banniversary of\b"
+    r"|\b\d+\s+years?\s+(?:ago|since|on)\b"
+    r"|\bon this day\b"
+    r"|\byears ago today\b"
+    r"|\blooking back\b"
+    r"|\bremember(?:ing|ed)?\s+the\b"
+    r"|\bthrowback\b"
+    r"|\b(?:a\s+)?(?:decade|decades)\s+(?:ago|since)\b"
+    r"|\bback in (?:19|20)\d\d\b"
+    r"|\bmarks?\s+\d+\s+years\b",
+    re.IGNORECASE,
+)
+
 
 def is_noise(text: str) -> bool:
     """Check if text matches known noise patterns using word boundaries.
 
     Military/security context overrides noise filters — an article about
     'military training exercise near border' is real news, not simulator noise.
+    EXCEPTION: retrospective/anniversary content is always noise (it describes a
+    past event, not a current incident) and overrides the military bypass.
     """
     text_lower = text.lower()
 
-    # If the text has clear military/security context, never treat as noise
-    if _MILITARY_CONTEXT_BYPASS.search(text_lower):
+    # Retrospectives are stale by definition — filtered even with military context
+    if _RETROSPECTIVE_PATTERN.search(text_lower):
+        return True
+
+    # Military/security context normally overrides noise filters — but NOT when the
+    # article is analysis/recap/media about conflict rather than a live incident.
+    if _MILITARY_CONTEXT_BYPASS.search(text_lower) and not _BYPASS_CANCEL_PATTERN.search(text_lower):
         return False
 
     for pattern in NOISE_PATTERNS:
@@ -361,33 +403,46 @@ _HIGH_SIGNAL_TERMS = {
 }
 
 
+def _compile_security_keyword_pattern() -> re.Pattern:
+    """Compile high-signal terms + all config keywords into one word-boundary regex.
+
+    Word boundaries (\\b) prevent substring false positives that plain
+    `keyword in text` produced — e.g. "war" matching "Warsaw"/"forward",
+    "coup" matching "couple", "riot" matching "patriot", "dead" matching
+    "deadline". \\b uses Unicode \\w, so it also works for Arabic/Hebrew/Cyrillic
+    keywords (boundaries between word chars and spaces/punctuation).
+    """
+    terms: set[str] = set(_HIGH_SIGNAL_TERMS)
+    for keyword_group in ("emergency_keywords", "geopolitical_keywords"):
+        for keywords in KEYWORDS_CONFIG.get(keyword_group, {}).values():
+            terms.update(kw.lower() for kw in keywords)
+
+    parts = []
+    for term in terms:
+        term = term.strip()
+        if not term:
+            continue
+        try:
+            re.compile(rf"\b{re.escape(term)}\b")
+            parts.append(rf"\b{re.escape(term)}\b")
+        except re.error:
+            parts.append(re.escape(term))
+    return re.compile("|".join(parts), re.IGNORECASE)
+
+
+_SECURITY_KEYWORD_PATTERN = _compile_security_keyword_pattern()
+
+
 def _matches_security_keywords(title: str, description: str) -> bool:
     """Check if article title/description contains at least one security keyword.
 
     Used as a post-filter for general RSS feeds (reddit, aljazeera, reuters)
-    that aren't pre-filtered by search query.
-
-    Three-tier matching:
-      1. High-signal standalone terms (fast, catches major breaking news)
-      2. Emergency keywords from config (all languages)
-      3. Geopolitical keywords from config (all languages)
+    that aren't pre-filtered by search query. Matches on word boundaries to
+    avoid substring false positives. Covers high-signal standalone terms plus
+    config emergency/geopolitical keywords across all languages (en, ar, tr, fr).
     """
-    text = f"{title} {description}".lower()
-
-    # Tier 1: High-signal standalone terms — catches big stories fast
-    for term in _HIGH_SIGNAL_TERMS:
-        if term in text:
-            return True
-
-    # Tier 2+3: Config-based keywords across ALL languages (en, ar, tr, fr)
-    for keyword_group in ("emergency_keywords", "geopolitical_keywords"):
-        lang_dict = KEYWORDS_CONFIG.get(keyword_group, {})
-        for _lang, keywords in lang_dict.items():
-            for kw in keywords:
-                if kw.lower() in text:
-                    return True
-
-    return False
+    text = f"{title} {description}"
+    return bool(_SECURITY_KEYWORD_PATTERN.search(text))
 
 
 # ---------------------------------------------------------------------------
@@ -1258,6 +1313,35 @@ def title_similarity(title_a: str, title_b: str) -> float:
     return difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
 
 
+def _word_set(text: str) -> set[str]:
+    """Normalized word set of a title (lowercased, punctuation-stripped)."""
+    return set(normalize_title(text).split())
+
+
+def _shingles(text: str, n: int = 4) -> set[str]:
+    """Word n-grams (shingles) of canonical text — robust to reordering/truncation."""
+    words = normalize_title(text).split()
+    if len(words) < n:
+        return set(words)
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def title_token_similarity(title_a: str, title_b: str) -> float:
+    """Word-set Jaccard of two titles.
+
+    Catches cross-source rephrasing that SequenceMatcher misses (reordered words,
+    different source suffixes, inserted words) — e.g. two outlets covering the same
+    incident with differently worded headlines.
+    """
+    return _jaccard(_word_set(title_a), _word_set(title_b))
+
+
 # ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
@@ -1282,18 +1366,29 @@ def _fetch_recent_events_for_dedup(db_conn) -> list[tuple[str, str]]:
 def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, canonical_text: str) -> bool:
     """
     Check if a similar article exists in the provided list of recent events.
-    Uses title similarity AND canonical text similarity.
+
+    Three complementary signals (any one triggers a dedup):
+      1. Title SequenceMatcher  — near-identical headlines (incl. source suffix).
+      2. Title word-set Jaccard — cross-source rephrasing / reordered headlines
+         that SequenceMatcher's char-ratio misses.
+      3. Content word-shingle Jaccard — same body reported by different outlets;
+         replaces the old O(N*M) full-text SequenceMatcher (faster, truncation-robust).
     """
+    title_tokens = _word_set(title)
+    text_shingles = _shingles(canonical_text) if len(canonical_text) > 100 else None
+
     for existing_title, existing_text in recent_events:
-        # Title similarity (primary signal)
-        sim = title_similarity(title, existing_title)
-        if sim >= _TITLE_SIM_THRESHOLD:
+        # Signal 1: char-ratio title similarity (primary)
+        if title_similarity(title, existing_title) >= _TITLE_SIM_THRESHOLD:
             return True
 
-        # Content similarity for longer texts
-        if len(canonical_text) > 100 and len(existing_text) > 100:
-            text_sim = difflib.SequenceMatcher(None, canonical_text, existing_text).ratio()
-            if text_sim >= _CONTENT_SIM_THRESHOLD:
+        # Signal 2: token-set title similarity (cross-source rephrasing)
+        if _jaccard(title_tokens, _word_set(existing_title)) >= _TITLE_TOKEN_THRESHOLD:
+            return True
+
+        # Signal 3: content shingle similarity for longer texts
+        if text_shingles is not None and len(existing_text) > 100:
+            if _jaccard(text_shingles, _shingles(existing_text)) >= _CONTENT_SHINGLE_THRESHOLD:
                 return True
     return False
 
@@ -1345,7 +1440,10 @@ def check_domain_penalty(db_conn, domain: str) -> float:
         "warontherocks.com", "longwarjournal.org", "centcom.mil",
         "cnn.com", "foxnews.com", "wsj.com", "nytimes.com", "dropsitenews.com",
         "presstv.ir", "france24.com", "theguardian.com", "ukrinform.net",
-        "kyivindependent.com",
+        "kyivindependent.com", "crisisgroup.org", "bellingcat.com",
+        "thecipherbrief.com", "foreignpolicy.com", "defenseone.com",
+        "twz.com", "defensenews.com", "al-monitor.com", "themoscowtimes.com",
+        "meduza.io", "warsawinstitute.org", "un.org",
     }
     if domain in TRUSTED_DOMAINS:
         return 0.0

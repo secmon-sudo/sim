@@ -8,12 +8,13 @@ Optimized to fetch recent events once (batch) instead of N+1 per event.
 
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 
 from src.core.alerts import build_suppression_key, evaluate_alert_tier, is_suppressed, record_suppression
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
-from src.core.storyline import should_link_storyline
+from src.core.storyline import jaccard_similarity, should_link_storyline
 from src.services.telegram_notifier import send_telegram_alert
 
 logger = logging.getLogger(__name__)
@@ -46,13 +47,38 @@ SOURCE_CREDIBILITY = {
     "nitter.privacydev.net": 0.80,
     "nitter.poast.org": 0.80,
     "reddit.com": 0.50,
-    "aljazeera.com": 0.90
+    "aljazeera.com": 0.90,
+    "crisisgroup.org": 0.92,
+    "bellingcat.com": 0.90,
+    "thecipherbrief.com": 0.88,
+    "foreignpolicy.com": 0.90,
+    "defenseone.com": 0.90,
+    "twz.com": 0.85,
+    "defensenews.com": 0.90,
+    "al-monitor.com": 0.85,
+    "themoscowtimes.com": 0.85,
+    "meduza.io": 0.85,
+    "warsawinstitute.org": 0.82,
+    "un.org": 0.95
 }
 
 _SCORING = _SETTINGS.get("scoring", {})
 PROXIMITY_BONUS = _SCORING.get("proximity_bonus", 30)
 CZIB_BONUS = _SCORING.get("czib_bonus", 20)
 MAX_SEVERITY = _SCORING.get("max_severity", 100)
+AVIATION_NEXUS_BONUS = _SCORING.get("aviation_nexus_bonus", 15)
+ALERT_SUPPRESSION_TTL_HOURS = _SETTINGS.get("alert", {}).get("suppression_ttl_hours", 4)
+ALERT_SEVERITY_MIN = 80
+NEW_ACTIVITY_WINDOW_HOURS = _SETTINGS.get("alert", {}).get("new_activity_window_hours", 24)
+
+# Accidental (safety/emniyet) event types — kept for coverage but de-prioritized,
+# because the platform's mission is SECURITY (hostile/intentional) events. A
+# genuinely intentional incident would be classified as a security type by the LLM.
+SAFETY_EVENT_TYPES = {
+    "bird_strike", "engine_failure", "emergency_landing", "depressurization",
+}
+SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
+SAFETY_LIFT_ON_MASS_CASUALTY = _SCORING.get("safety_lift_cap_on_mass_casualty", True)
 LLM_CONF_WEIGHT = _SCORING.get("llm_confidence_weight", 0.4)
 ANCHOR_CONF_WEIGHT = _SCORING.get("anchor_confidence_weight", 0.3)
 DIVERSITY_WEIGHT = _SCORING.get("diversity_weight", 0.3)
@@ -62,6 +88,14 @@ _CASUALTY = _SCORING.get("casualty_bonus", {})
 CASUALTY_DEATHS_THRESHOLD = _CASUALTY.get("deaths_threshold", 3)
 CASUALTY_INJURIES_THRESHOLD = _CASUALTY.get("injuries_threshold", 10)
 CASUALTY_BONUS_POINTS = _CASUALTY.get("bonus_points", 20)
+
+# Storyline linking config (previously hardcoded 0.35/14 and ignored these keys)
+_STORYLINE = _SETTINGS.get("storyline", {})
+STORYLINE_JACCARD_THRESHOLD = _STORYLINE.get("jaccard_threshold", 0.4)
+STORYLINE_TIME_WINDOW_DAYS = _STORYLINE.get("time_window_days", 14)
+STORYLINE_COUNTRY_MATCH_REQUIRED = _STORYLINE.get("country_match_required", True)
+STORYLINE_ANCHOR_ASSIST_THRESHOLD = _STORYLINE.get("anchor_assist_threshold", 0.2)
+STORYLINE_ANCHOR_ASSIST_MAX_HOURS = _STORYLINE.get("anchor_assist_max_hours", 72)
 
 
 def _safe_int(value) -> int:
@@ -95,6 +129,72 @@ def compute_casualty_bonus(llm_parsed: dict) -> int:
     if deaths >= CASUALTY_DEATHS_THRESHOLD or injuries >= CASUALTY_INJURIES_THRESHOLD:
         return CASUALTY_BONUS_POINTS
     return 0
+
+
+# Event types that are inherently aviation-related (security + safety).
+AVIATION_EVENT_TYPES = {
+    "bomb_threat", "active_shooter", "hijacking", "runway_incursion",
+    "emergency_landing", "bird_strike", "engine_failure", "fire_on_board",
+    "depressurization", "unruly_passenger", "drone_incursion",
+    "drone_attack_critical_infra", "drone_airport_attack", "laser_attack",
+    "suspicious_package", "evacuation", "aviation_personnel_attack",
+    "pilot_attacked", "cabin_crew_attacked", "ground_staff_attacked",
+    "air_traffic_controller_threat",
+}
+
+# Word-boundary aviation vocabulary — used to detect an aviation nexus on events
+# whose type is generic (e.g. a bombing/protest/military action that nonetheless
+# threatens an airport, aircraft, or airspace).
+_AVIATION_TERMS = re.compile(
+    r"\b(airport|airfield|aerodrome|aircraft|airplane|airliner|airline|aviation|"
+    r"runway|taxiway|tarmac|airspace|terminal|jetway|cockpit|cabin crew|"
+    r"air traffic|flight|jet|notam|departures|arrivals|boarding gate)\b",
+    re.IGNORECASE,
+)
+
+
+def compute_aviation_bonus(event: dict, anchor_data: dict | None) -> int:
+    """Bonus for events with a genuine aviation nexus (keeps aviation 'front of mind'
+    without narrowing coverage — geopolitical events simply don't earn it).
+
+    Triggers on: an aviation event_type, an aviation/airport keyword in the title or
+    anchor text, or an LLM-flagged direct aviation impact. Returns AVIATION_NEXUS_BONUS
+    or 0.
+    """
+    if not AVIATION_NEXUS_BONUS:
+        return 0
+    if event.get("event_type") in AVIATION_EVENT_TYPES:
+        return AVIATION_NEXUS_BONUS
+
+    llm_parsed = event.get("llm_parsed") or {}
+    if str(llm_parsed.get("aviation_impact", "")).lower() == "direct":
+        return AVIATION_NEXUS_BONUS
+
+    blob = " ".join(str(x) for x in (
+        event.get("source_title") or "",
+        event.get("anchor_name_raw") or "",
+        llm_parsed.get("anchor_name") or "",
+        event.get("storyline_hint") or "",
+    ))
+    if _AVIATION_TERMS.search(blob):
+        return AVIATION_NEXUS_BONUS
+
+    return 0
+
+
+def apply_safety_downrank(event_type: str, severity: int, llm_parsed: dict | None) -> tuple[int, bool]:
+    """De-prioritize accidental safety events (returns (severity, is_safety)).
+
+    Routine safety events are capped below the alert threshold so they stay in the
+    feed without raising security alerts. Mass-casualty safety events (e.g. a fatal
+    crash) are tagged safety but NOT capped, so genuinely major incidents still
+    surface — balancing "security focus" with "don't miss big events".
+    """
+    if event_type not in SAFETY_EVENT_TYPES:
+        return severity, False
+    if SAFETY_LIFT_ON_MASS_CASUALTY and compute_casualty_bonus(llm_parsed or {}) > 0:
+        return severity, True
+    return min(severity, SAFETY_SEVERITY_CAP), True
 
 
 def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_parsed: dict | None = None) -> int:
@@ -210,22 +310,86 @@ def resolve_anchor_for_event(db_conn, event: dict) -> dict:
 
 
 def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
-    """Try to link this event to an existing storyline."""
+    """Link this event to the BEST-matching existing storyline.
+
+    Uses config-driven thresholds (settings.json -> storyline.*) and picks the
+    candidate with the highest Jaccard similarity among those that pass
+    should_link_storyline — not merely the first match (which was order-dependent).
+    """
     # Guard: skip storyline linking if occurred_at_est is missing
     if event.get("occurred_at_est") is None:
         return None
 
+    event_hint = event.get("storyline_hint") or ""
+    best_id: str | None = None
+    best_sim = -1.0
+
     for existing in recent_events:
-        if should_link_storyline(event, existing):
-            return existing.get("storyline_id")
-    return None
+        if not should_link_storyline(
+            event,
+            existing,
+            threshold=STORYLINE_JACCARD_THRESHOLD,
+            max_days=STORYLINE_TIME_WINDOW_DAYS,
+            country_match_required=STORYLINE_COUNTRY_MATCH_REQUIRED,
+            anchor_assist_threshold=STORYLINE_ANCHOR_ASSIST_THRESHOLD,
+            anchor_assist_max_hours=STORYLINE_ANCHOR_ASSIST_MAX_HOURS,
+        ):
+            continue
+        sim = jaccard_similarity(event_hint, existing.get("storyline_hint") or "")
+        if sim > best_sim:
+            best_sim = sim
+            best_id = existing.get("storyline_id")
+
+    return best_id
+
+
+def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
+    """Outbox-ordered Telegram alert dispatch.
+
+    Correctness fix: the suppression record is committed BEFORE the alert is sent,
+    so a crash between sending and recording can never produce a duplicate alert.
+    If the send fails outright, the suppression claim is released so a sibling event
+    in the same storyline can retry.
+
+    Returns one of: 'skipped' (below threshold), 'suppressed' (already alerted),
+    'sent', or 'failed'.
+    """
+    if event.get("severity_score", 0) < ALERT_SEVERITY_MIN:
+        return "skipped"
+
+    if not event.get("alert_tier"):
+        event["alert_tier"] = "ALERT"
+
+    supp_key = build_suppression_key(event)
+    if is_suppressed(db_conn, supp_key):
+        return "suppressed"
+
+    # Durably claim the alert slot first (record_suppression commits internally).
+    record_suppression(db_conn, supp_key, event["alert_tier"], event_id,
+                        ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
+
+    if send_telegram_alert(event):
+        return "sent"
+
+    # Send failed — release the claim so a sibling event can retry next time.
+    logger.warning("Telegram alert send failed for %s; releasing suppression", event_id[:8])
+    try:
+        db_conn.execute(
+            "DELETE FROM alert_suppression WHERE suppression_key = %s", (supp_key,)
+        )
+        db_conn.commit()
+    except Exception:
+        db_conn.rollback()
+        logger.exception("Failed to release suppression for %s", event_id[:8])
+    return "failed"
 
 
 def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
     """Fetch recent scored/reconciled events once for storyline linking."""
     try:
         rows = db_conn.execute(
-            """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est
+            """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est,
+                      anchor_name_norm
                FROM events
                WHERE status IN ('scored', 'reconciled')
                  AND storyline_hint IS NOT NULL
@@ -240,6 +404,7 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
                 "storyline_hint": r[2],
                 "country_iso": r[3],
                 "occurred_at_est": r[4],
+                "anchor_name_norm": r[5],
             }
             for r in rows
         ]
@@ -287,9 +452,15 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
 
         # 1. Resolve anchor
         anchor = resolve_anchor_for_event(db_conn, event)
+        # Expose normalized anchor for the hybrid storyline linker (anchor-assist)
+        event["anchor_name_norm"] = anchor.get("norm")
 
-        # 2. Compute severity (with casualty bonus)
+        # 2. Compute severity (with casualty bonus), then apply aviation-nexus bonus
+        #    so aviation-threatening events rank ahead of equivalent generic ones.
         severity = compute_severity(event["event_type"], anchor, db_conn, llm_parsed)
+        severity = min(severity + compute_aviation_bonus(event, anchor), MAX_SEVERITY)
+        # De-prioritize accidental safety events (kept for coverage, tagged is_safety).
+        severity, is_safety = apply_safety_downrank(event["event_type"], severity, llm_parsed)
 
         # 3. Try storyline linking first (needed for diversity score)
         storyline_id = link_storylines(event, recent_events)
@@ -332,54 +503,43 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
         event["system_confidence"] = system_conf
         event["alert_tier"] = alert_tier
 
-        # Check quiet hours (last 24 hours) for country/location
+        # Detect "new activity" — the first GENUINE SECURITY event for this country/
+        # location within the lookback window (drives the NEW LOCATION/COUNTRY labels).
+        # Excludes archived (noise/aged-out) and is_safety events so that prior noise or
+        # accidental safety incidents don't mask a real new threat. Single scan (no N+1).
         country_quiet = False
         location_quiet = False
-        if occurred_at_est:
+        resolved_country = event["country_iso"]
+        resolved_anchor_norm = event["anchor_name_norm"]
+        if occurred_at_est and (resolved_country or resolved_anchor_norm):
             try:
-                resolved_country = event["country_iso"]
-                if resolved_country:
-                    row_country = db_conn.execute(
-                        """SELECT COUNT(*) FROM events
-                           WHERE country_iso = %s
-                             AND status IN ('scored', 'reconciled', 'archived')
-                             AND occurred_at_est >= %s - INTERVAL '24 hours'
-                             AND occurred_at_est <= %s
-                             AND id != %s""",
-                        (resolved_country, occurred_at_est, occurred_at_est, event["id"])
-                    ).fetchone()
-                    if row_country and row_country[0] == 0:
+                row = db_conn.execute(
+                    """SELECT
+                           COUNT(*) FILTER (WHERE country_iso = %s)        AS country_cnt,
+                           COUNT(*) FILTER (WHERE anchor_name_norm = %s)   AS location_cnt
+                       FROM events
+                       WHERE status IN ('scored', 'reconciled')
+                         AND COALESCE(is_safety, FALSE) = FALSE
+                         AND occurred_at_est >= %s - make_interval(hours => %s)
+                         AND occurred_at_est <= %s
+                         AND id != %s""",
+                    (resolved_country, resolved_anchor_norm, occurred_at_est,
+                     NEW_ACTIVITY_WINDOW_HOURS, occurred_at_est, event["id"]),
+                ).fetchone()
+                if row:
+                    if resolved_country and row[0] == 0:
                         country_quiet = True
-
-                resolved_anchor_norm = event["anchor_name_norm"]
-                if resolved_anchor_norm:
-                    row_location = db_conn.execute(
-                        """SELECT COUNT(*) FROM events
-                           WHERE anchor_name_norm = %s
-                             AND status IN ('scored', 'reconciled', 'archived')
-                             AND occurred_at_est >= %s - INTERVAL '24 hours'
-                             AND occurred_at_est <= %s
-                             AND id != %s""",
-                        (resolved_anchor_norm, occurred_at_est, occurred_at_est, event["id"])
-                    ).fetchone()
-                    if row_location and row_location[0] == 0:
+                    if resolved_anchor_norm and row[1] == 0:
                         location_quiet = True
             except Exception:
-                logger.exception("Failed to query quiet hours for event %s", event["id"])
+                logger.exception("Failed to query new-activity window for event %s", event["id"])
 
         event["country_quiet_24h"] = country_quiet
         event["location_quiet_24h"] = location_quiet
 
-        # Send Telegram alert for high-severity events (severity >= 80)
-        # Suppression key prevents duplicate notifications for the same storyline
-        if severity >= 80:
-            # Ensure alert_tier is set for the message formatting
-            if not alert_tier:
-                event["alert_tier"] = "ALERT"
-            supp_key = build_suppression_key(event)
-            if not is_suppressed(db_conn, supp_key):
-                if send_telegram_alert(event):
-                    record_suppression(db_conn, supp_key, event["alert_tier"], event_id, ttl_hours=4)
+        # Send Telegram alert for high-severity events (suppression-claim BEFORE
+        # send to prevent duplicate notifications; see dispatch_alert).
+        dispatch_alert(db_conn, event, event_id)
 
         # 6. Update event — wrapped in savepoint for isolation
         with db_conn.transaction():
@@ -394,6 +554,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
                        system_confidence = %s,
                        alert_tier = %s,
                        storyline_id = %s,
+                       is_safety = %s,
                        occurred_at_est = COALESCE(occurred_at_est, %s),
                        status = 'scored',
                        updated_at = NOW()
@@ -408,6 +569,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
                     system_conf,
                     alert_tier,
                     storyline_id,
+                    is_safety,
                     occurred_at_est,
                     event_id,
                 ),

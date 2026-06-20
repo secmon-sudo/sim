@@ -10,7 +10,7 @@ import json
 import logging
 
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
-from src.pipeline.pass_d_score import compute_confidence, compute_severity
+from src.pipeline.pass_d_score import apply_safety_downrank, compute_confidence, compute_severity
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,10 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 except Exception:
                     pass
 
-                # Recalculate severity
+                # Recalculate severity (keep safety de-prioritization consistent)
                 anchor_data = {"confidence": new_conf, "czib_flag": czib}
                 new_severity = compute_severity(event_type, anchor_data, db_conn)
+                new_severity, is_safety = apply_safety_downrank(event_type, new_severity, llm_parsed)
 
                 # Recalculate confidence
                 llm_conf = llm_parsed.get("confidence", 0.5)
@@ -108,11 +109,12 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                                country_iso = COALESCE(%s, country_iso),
                                severity_score = %s,
                                system_confidence = %s,
+                               is_safety = %s,
                                status = 'reconciled',
                                updated_at = NOW()
                            WHERE id = %s""",
                         (new_norm, new_level, lat, lon, country,
-                         new_severity, new_system_conf, event_id),
+                         new_severity, new_system_conf, is_safety, event_id),
                     )
                 db_conn.commit()
                 return True

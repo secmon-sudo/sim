@@ -8,15 +8,87 @@ Uses HeartbeatWorker to keep locks alive during long calls.
 
 import json
 import logging
+import re
 import uuid
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt, timedelta, timezone
+from pathlib import Path
 
 from src.core.heartbeat import HeartbeatWorker
 from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
+from src.pipeline.pass_a_ingest import (
+    _HIGH_SIGNAL_TERMS,
+    _SECURITY_KEYWORD_PATTERN,
+    is_noise,
+)
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
 
 logger = logging.getLogger(__name__)
+
+# Config: sanity bounds for occurred_at + deterministic pre-screen
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
+try:
+    with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as _f:
+        _SETTINGS = json.load(_f)
+except (OSError, json.JSONDecodeError):
+    _SETTINGS = {}
+_INGESTION = _SETTINGS.get("ingestion", {})
+MAX_EVENT_AGE_DAYS = _INGESTION.get("max_event_age_days", 30)
+MAX_EVENT_FUTURE_DAYS = _INGESTION.get("max_event_future_days", 1)
+
+_CLASSIFICATION = _SETTINGS.get("classification", {})
+PRESCREEN_ENABLED = _CLASSIFICATION.get("deterministic_prescreen_enabled", True)
+PRESCREEN_SKIP_FLOOR = _CLASSIFICATION.get("deterministic_skip_floor", 15)
+
+# Word-boundary pattern for high-signal terms only (subset of the full security
+# pattern). Used to (a) score relevance and (b) override LLM false-negatives —
+# if a hard signal like "explosion"/"airstrike"/"killed" is present we never let
+# the LLM silently archive the event as noise.
+_HIGH_SIGNAL_PATTERN = re.compile(
+    "|".join(rf"\b{re.escape(t)}\b" for t in sorted(_HIGH_SIGNAL_TERMS)),
+    re.IGNORECASE,
+)
+_CASUALTY_NUM_PATTERN = re.compile(
+    r"\b\d+\s+(killed|dead|deaths?|injured|wounded|casualties|fatalities|missing)\b",
+    re.IGNORECASE,
+)
+
+
+def deterministic_relevance(title: str, text: str, trusted_domain: bool = False) -> dict:
+    """Zero-LLM relevance estimate used to skip clearly off-topic articles before
+    spending an LLM call (token-positive) and to guard against LLM false-negatives.
+
+    Returns a dict with an integer ``score`` (0-100) and boolean signals. The score
+    is intentionally conservative: an article only scores low when it contains NO
+    security vocabulary at all (none of the ~400 emergency/geopolitical keywords or
+    high-signal terms), which for a real incident is extremely unlikely.
+    """
+    blob = f"{title} {text}"
+    has_high_signal = bool(_HIGH_SIGNAL_PATTERN.search(blob))
+    has_security = has_high_signal or bool(_SECURITY_KEYWORD_PATTERN.search(blob))
+    has_casualty = bool(_CASUALTY_NUM_PATTERN.search(blob))
+    noisy = is_noise(f"{title} {text[:500]}")
+
+    score = 0
+    if has_high_signal:
+        score += 45
+    elif has_security:
+        score += 25
+    if has_casualty:
+        score += 15
+    if trusted_domain:
+        score += 10
+    if noisy and not has_high_signal:
+        score -= 30
+    score = max(0, min(100, score))
+
+    return {
+        "score": score,
+        "has_security": has_security,
+        "has_high_signal": has_high_signal,
+        "has_casualty": has_casualty,
+        "noisy": noisy,
+    }
 
 CLASSIFICATION_SYSTEM_PROMPT = """You are a global security and geopolitical incident classifier.
 Your job is to analyze news reports and determine if they describe REAL security incidents, conflicts, or threats.
@@ -75,6 +147,13 @@ Extract the following fields:
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1
 11. relevance_reasoning: One sentence explaining why this relevance score was given
+12. aviation_impact: How this event threatens civil aviation operations. One of:
+    - "direct": targets/disrupts an airport, aircraft, airline, airspace, or aviation personnel
+      (e.g. airport attack, drone near runway, airspace closure, crew assault, GPS jamming of flights)
+    - "indirect": nearby or regional event that could spill over to aviation
+      (e.g. conflict/airstrikes near a city with an airport, unrest affecting airport access)
+    - "none": no plausible connection to aviation operations
+    Aviation is the PRIORITY domain — assess this field carefully for every event.
 
 WHEN TO USE event_type "noise" (relevance < 30):
 - Flight simulators, plane spotting, aviation photography, model aircraft
@@ -141,13 +220,30 @@ def _normalize_storyline_hint(hint: str | None) -> str | None:
     return hint if hint else None
 
 
+def _within_sane_bounds(parsed) -> bool:
+    """Reject LLM-estimated timestamps that are implausibly old or in the future.
+
+    LLMs sometimes hallucinate dates years in the past (anniversary/retrospective
+    articles) or in the future. Such values pollute storyline time windows and the
+    weekly forecast, so they are discarded (caller falls back to None/'unknown').
+    """
+    now = dt.utcnow()
+    if parsed > now + timedelta(days=MAX_EVENT_FUTURE_DAYS):
+        return False
+    if parsed < now - timedelta(days=MAX_EVENT_AGE_DAYS):
+        return False
+    return True
+
+
 def _parse_occurred_at(raw: str | None):
     """Safely parse LLM's occurred_at ISO 8601 string into a naive datetime.
-    Returns None if the value is missing, empty, or unparseable.
+    Returns None if the value is missing, empty, unparseable, or outside sane bounds.
     """
     if not raw or not isinstance(raw, str):
         return None
     raw = raw.strip()
+
+    parsed = None
     # Try common ISO formats LLMs produce
     for fmt in (
         "%Y-%m-%dT%H:%M:%S%z",
@@ -157,19 +253,24 @@ def _parse_occurred_at(raw: str | None):
         "%Y-%m-%d",
     ):
         try:
-            parsed = dt.strptime(raw, fmt)
             # Strip timezone info → naive timestamp (DB column is TIMESTAMP without tz)
-            return parsed.replace(tzinfo=None)
+            parsed = dt.strptime(raw, fmt).replace(tzinfo=None)
+            break
         except ValueError:
             continue
+
     # Last resort: dateutil-style fallback
-    try:
-        # Handle "Z" suffix
-        cleaned = raw.replace("Z", "+00:00")
-        parsed = dt.fromisoformat(cleaned)
-        return parsed.replace(tzinfo=None)
-    except (ValueError, TypeError):
+    if parsed is None:
+        try:
+            cleaned = raw.replace("Z", "+00:00")  # Handle "Z" suffix
+            parsed = dt.fromisoformat(cleaned).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            return None
+
+    if not _within_sane_bounds(parsed):
+        logger.info("Discarded out-of-bounds occurred_at estimate: %s", raw[:40])
         return None
+    return parsed
 
 
 class LLMParseError(Exception):
@@ -266,6 +367,30 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
             # Detect travel advisory sources for special handling
             is_travel_advisory = source_domain in ('travel.state.gov', 'gov.uk', 'smartraveller.gov.au')
 
+            # ── Deterministic pre-screen (zero-LLM, token-positive) ──
+            # Skip clearly off-topic articles (no security vocabulary at all) before
+            # spending an LLM call. Travel advisories always go to the LLM. The same
+            # signals also guard against LLM false-negatives later (see Tier 1 below).
+            det = deterministic_relevance(source_title, canonical_text)
+            if PRESCREEN_ENABLED and not is_travel_advisory and det["score"] < PRESCREEN_SKIP_FLOOR:
+                update_domain_penalty(db_conn, source_domain, 1)
+                db_conn.execute(
+                    """UPDATE events
+                       SET event_type = 'other_aviation_related',
+                           llm_parsed_output = %s,
+                           status = 'archived',
+                           updated_at = NOW()
+                       WHERE id = %s""",
+                    (json.dumps({"prescreen": det, "archived_reason": "deterministic_prescreen"}), event_id),
+                )
+                db_conn.commit()
+                logger.info(
+                    "Event %s prescreen-archived (score=%d, no security signal) — saved 1 LLM call",
+                    event_id[:8], det["score"],
+                )
+                release_lock(db_conn, event_id, worker_id)
+                return {"event_type": "other_aviation_related", "_prescreen_skipped": True}
+
             prompt = f"""Classify this news report:
 
 Headline: {source_title[:500]}
@@ -289,6 +414,20 @@ Text: {canonical_text[:3000]}"""
             # Graduated relevance handling using LLM's relevance_score
             event_type = parsed.get("event_type", "other_aviation_related")
             relevance = int(parsed.get("relevance_score", 50))
+
+            # LLM false-negative guard: if a hard deterministic signal is present
+            # (explosion/airstrike/killed/etc.) but the LLM scored this as noise,
+            # keep it in the pipeline rather than silently archiving. Better a
+            # low-priority event than a missed real incident.
+            if det["has_high_signal"] and relevance < 30:
+                logger.warning(
+                    "Event %s: LLM relevance=%d but high-signal term present — overriding archive, keeping event",
+                    event_id[:8], relevance,
+                )
+                relevance = max(relevance, 30)
+                if event_type == "noise":
+                    event_type = "other_aviation_related"
+                    parsed["event_type"] = event_type
 
             # Tier 1: Clear noise (relevance < 20) → archive immediately
             # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'

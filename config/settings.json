@@ -9,17 +9,28 @@
   "ingestion": {
     "max_article_age_days": 2,
     "fetch_full_text": false,
-    "query_language": "en"
+    "query_language": "en",
+    "max_event_age_days": 30,
+    "max_event_future_days": 1
+  },
+  "classification": {
+    "deterministic_prescreen_enabled": true,
+    "deterministic_skip_floor": 15
   },
   "dedup": {
     "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
     "content_similarity_threshold": 0.50,
-    "title_similarity_threshold": 0.65
+    "title_similarity_threshold": 0.65,
+    "title_token_jaccard_threshold": 0.72,
+    "content_shingle_threshold": 0.40
   },
   "scoring": {
     "proximity_bonus": 30,
     "czib_bonus": 20,
+    "aviation_nexus_bonus": 15,
+    "safety_severity_cap": 40,
+    "safety_lift_cap_on_mass_casualty": true,
     "max_severity": 100,
     "llm_confidence_weight": 0.4,
     "anchor_confidence_weight": 0.3,
@@ -33,10 +44,20 @@
   "storyline": {
     "jaccard_threshold": 0.4,
     "country_match_required": true,
-    "time_window_days": 14
+    "time_window_days": 14,
+    "anchor_assist_threshold": 0.2,
+    "anchor_assist_max_hours": 72
+  },
+  "narrative": {
+    "enabled": true,
+    "min_severity": 65,
+    "min_events": 2,
+    "max_per_run": 10,
+    "lookback_days": 14
   },
   "alert": {
     "suppression_ttl_hours": 4,
+    "new_activity_window_hours": 24,
     "tiers": {
       "CRITICAL": {
         "severity_min": 80,
@@ -108,6 +129,19 @@
       "https://tass.com/rss/v2.xml",
       "https://www.theguardian.com/world/rss",
       "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+      "https://www.crisisgroup.org/rss.xml",
+      "https://www.bellingcat.com/feed/",
+      "https://thecipherbrief.com/feed",
+      "https://foreignpolicy.com/feed/",
+      "https://www.defenseone.com/rss/all/",
+      "https://www.twz.com/feed",
+      "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+      "https://www.al-monitor.com/rss",
+      "https://www.themoscowtimes.com/rss/news",
+      "https://meduza.io/rss/en/all",
+      "https://warsawinstitute.org/feed/",
+      "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+      "https://feeds.bbci.co.uk/news/world/rss.xml",
       "https://news.google.com/rss/search?q=Iran+Israel+war+military&hl=en-US&gl=US&ceid=US:en",
       "https://news.google.com/rss/search?q=Iran+missile+strike+drone&hl=en-US&gl=US&ceid=US:en",
       "https://news.google.com/rss/search?q=%22Strait+of+Hormuz%22+OR+%22Red+Sea%22+military&hl=en-US&gl=US&ceid=US:en"

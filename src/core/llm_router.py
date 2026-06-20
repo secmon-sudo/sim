@@ -215,3 +215,23 @@ def build_llm_router() -> LLMRouter:
     if not active:
         logger.critical("No LLM API keys configured! Set GROQ_API_KEY_A/B and/or OPENROUTER_API_KEY_A/B")
     return LLMRouter(active)
+
+
+def build_bulk_router() -> LLMRouter:
+    """Router that uses ONLY the high-quota bulk slot (llama-3.1-8b-instant, 14.4K RPD).
+
+    Used for low-stakes, high-volume work (e.g. storyline narrative prose) so it never
+    competes with Pass C classification for the scarce smart-model quota. Falls back to
+    the full router if the bulk account's key is unset.
+    """
+    bulk = LLMAccount(
+        provider="groq", account_id="A",
+        model="llama-3.1-8b-instant",
+        api_key=os.environ.get("GROQ_API_KEY_A", ""),
+        rpm=30, rpd=14400,
+        bucket=TokenBucket(rate_per_minute=30, daily_limit=14400),
+    )
+    if not bulk.api_key:
+        logger.warning("Bulk router: GROQ_API_KEY_A unset, falling back to full router")
+        return build_llm_router()
+    return LLMRouter([bulk])

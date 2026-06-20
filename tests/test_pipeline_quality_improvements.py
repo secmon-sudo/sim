@@ -205,9 +205,10 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
         "reuters.com" # source_domain
     )
     
-    # We want COUNT(*) to return 0 for both country and location quiet hours checks
+    # New-activity query returns a single row (country_cnt, location_cnt); 0/0 means
+    # this is the first genuine security event for both → both "new" flags set.
     cursor_counts = MagicMock()
-    cursor_counts.fetchone.return_value = (0,)
+    cursor_counts.fetchone.return_value = (0, 0)
     
     # Mock event_type_catalog query
     cursor_cat = MagicMock()
