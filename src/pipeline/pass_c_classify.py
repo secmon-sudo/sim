@@ -217,6 +217,15 @@ def _normalize_storyline_hint(hint: str | None) -> str | None:
     import re as _re
     hint = _re.sub(r'\s+', ' ', hint.strip().lower())
     hint = _re.sub(r'[^\w\s-]', '', hint)
+    # Drop a malformed date-hint when the LLM had no day (it is required to append a
+    # "MonDD" token, e.g. "Jun8", but emits "JunUnknown"/"JunTBD" when the day is
+    # unknown). Left in place it both uglifies the title and pollutes Jaccard with a
+    # "jununknown" token. Well-formed "jun8" hints are untouched here and are handled
+    # by the tokenizer's date-token filter.
+    _months = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+    hint = _re.sub(rf'\b(?:{_months})(?:unknown|tbd)\b', '', hint)
+    hint = _re.sub(r'\bunknown\b', '', hint)
+    hint = _re.sub(r'\s+', ' ', hint).strip()
     return hint if hint else None
 
 

@@ -31,7 +31,7 @@ AVIATION_STOPWORDS = {
 # share one (inflated sim). They are stripped from the similarity signal — time is
 # handled separately by the occurred_at window. Flight numbers ("dl54") are kept.
 _DATE_TOKEN = re.compile(
-    r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\d{0,2}$|^\d{1,4}$"
+    r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:\d{0,2}|unknown|tbd)$|^\d{1,4}$"
 )
 
 

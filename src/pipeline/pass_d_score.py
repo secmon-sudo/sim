@@ -576,6 +576,21 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             )
         db_conn.commit()
 
+        # Make this freshly-scored event visible to the REST of the same Pass D batch.
+        # recent_events is fetched once per pass and only contains already
+        # scored/reconciled rows, so sibling reports of one incident that arrive
+        # together were blind to each other and each spawned a new storyline_id.
+        # Advertising the just-committed event lets later siblings link into it,
+        # clustering multi-source reports into a single storyline.
+        recent_events.append({
+            "id": event["id"],
+            "storyline_id": storyline_id,
+            "storyline_hint": event.get("storyline_hint"),
+            "country_iso": event.get("country_iso"),
+            "occurred_at_est": occurred_at_est,
+            "anchor_name_norm": event.get("anchor_name_norm"),
+        })
+
         logger.info(
             "Scored event %s: severity=%d, confidence=%.2f, tier=%s, anchor=%s",
             event_id[:8], severity, system_conf, alert_tier, anchor["norm"],
