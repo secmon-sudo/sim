@@ -47,6 +47,9 @@ logs/
 scratch/
 test_reload.py
 
+# Tek seferlik DB bakım SQL'leri (elle çalıştırılır, migration değildir)
+db/maintenance/
+
 # AI tool artifacts
 .kilo/
 

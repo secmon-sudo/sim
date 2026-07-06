@@ -198,10 +198,10 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
         "US", # country_iso
         '{"confidence": 0.9, "time_certainty": "same_day"}', # llm_parsed_output
         "JFK Shooting", # storyline_hint
-        datetime(2026, 6, 9, 14, 30, tzinfo=timezone.utc), # occurred_at_est
+        datetime.now(timezone.utc) - timedelta(hours=2), # occurred_at_est
         "Active Shooter at JFK Airport Terminal 4", # source_title
         "https://reuters.com/jfk-shooter", # source_url
-        datetime(2026, 6, 9, 14, 35, tzinfo=timezone.utc), # ingested_at
+        datetime.now(timezone.utc) - timedelta(hours=1), # ingested_at
         "reuters.com" # source_domain
     )
     
@@ -247,3 +247,40 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
     assert called_event["location_quiet_24h"] is True
 
 
+
+
+def test_dispatch_alert_skips_stale_ingested_event():
+    """Events ingested weeks ago (orphan recovery / backlog replay) must never alert,
+    even at maximum severity — they are old news, not breaking incidents."""
+    from src.pipeline.pass_d_score import dispatch_alert
+
+    db_conn = MagicMock()
+    event = {
+        "severity_score": 100,
+        "alert_tier": "CRITICAL",
+        "ingested_at": datetime.now(timezone.utc) - timedelta(days=45),
+    }
+    assert dispatch_alert(db_conn, event, "event_stale") == "skipped"
+    db_conn.execute.assert_not_called()
+
+
+def test_requeue_orphans_archives_ancient_events_first():
+    """requeue_orphaned_locked_events must archive orphans older than
+    MAX_EVENT_AGE_DAYS before requeuing the rest, so stale news is never
+    re-classified and alerted with weeks-old timestamps."""
+    from src.pipeline.pass_b_dedup import requeue_orphaned_locked_events, MAX_EVENT_AGE_DAYS
+
+    db_conn = MagicMock()
+    archive_cursor = MagicMock(rowcount=3)
+    requeue_cursor = MagicMock(rowcount=2)
+    db_conn.execute.side_effect = [archive_cursor, requeue_cursor]
+
+    assert requeue_orphaned_locked_events(db_conn) == 2
+
+    archive_query = db_conn.execute.call_args_list[0][0][0]
+    assert "'archived'" in archive_query
+    assert "ingested_at <" in archive_query
+    assert db_conn.execute.call_args_list[0][0][1] == (MAX_EVENT_AGE_DAYS,)
+
+    requeue_query = db_conn.execute.call_args_list[1][0][0]
+    assert "'deduped'" in requeue_query

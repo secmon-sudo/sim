@@ -24,6 +24,7 @@ STALE_LOCK_THRESHOLD_MINUTES = _SETTINGS["pipeline"].get("stale_lock_threshold_m
 # Allow env-var override so CI/CD can set SIM_MATURATION_WINDOW_HOURS=0
 _default_maturation = _SETTINGS["dedup"].get("maturation_window_hours", 2)
 MATURATION_WINDOW_HOURS = int(os.environ.get("SIM_MATURATION_WINDOW_HOURS", _default_maturation))
+MAX_EVENT_AGE_DAYS = _SETTINGS.get("ingestion", {}).get("max_event_age_days", 30)
 
 
 def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
@@ -217,8 +218,20 @@ def requeue_orphaned_locked_events(db_conn) -> int:
     worker released the lock on a failure path (LLM exhausted / unexpected error)
     the event stayed in 'locked' forever and was never classified. Returns the
     number of events requeued to 'deduped'.
+
+    Orphans older than MAX_EVENT_AGE_DAYS are archived instead of requeued:
+    classifying them now would resurrect stale news — their occurred_at_est
+    falls back to the old ingested_at in Pass D and they fire alerts with
+    weeks-old timestamps.
     """
     try:
+        archived = db_conn.execute(
+            """UPDATE events
+               SET status = 'archived', updated_at = NOW()
+               WHERE status = 'locked' AND classification_lock = FALSE
+                 AND ingested_at < NOW() - (%s * INTERVAL '1 day')""",
+            (MAX_EVENT_AGE_DAYS,),
+        ).rowcount
         result = db_conn.execute(
             """UPDATE events
                SET status = 'deduped', updated_at = NOW()
@@ -226,6 +239,8 @@ def requeue_orphaned_locked_events(db_conn) -> int:
         )
         db_conn.commit()
         count = result.rowcount
+        if archived > 0:
+            logger.warning("Archived %d orphaned 'locked' events older than %d days", archived, MAX_EVENT_AGE_DAYS)
         if count > 0:
             logger.warning("Requeued %d orphaned 'locked' events back to 'deduped'", count)
         return count

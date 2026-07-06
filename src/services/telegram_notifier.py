@@ -74,6 +74,10 @@ def send_telegram_alert(event: dict) -> bool:
             safe_time = occurred_at.strftime("%Y-%m-%d %H:%M")
         else:
             safe_time = str(occurred_at)
+        if event.get("occurred_at_is_fallback"):
+            # The timestamp is when WE ingested the report, not when the
+            # incident happened — label it so it doesn't read as an incident time.
+            safe_time = f"Unknown (report seen {safe_time})"
     else:
         safe_time = "Unknown"
 

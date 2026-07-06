@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.core.alerts import build_suppression_key, evaluate_alert_tier, is_suppressed, record_suppression
@@ -75,6 +76,9 @@ AVIATION_NEXUS_BONUS = _SCORING.get("aviation_nexus_bonus", 15)
 ALERT_SUPPRESSION_TTL_HOURS = _SETTINGS.get("alert", {}).get("suppression_ttl_hours", 4)
 ALERT_SEVERITY_MIN = 80
 NEW_ACTIVITY_WINDOW_HOURS = _SETTINGS.get("alert", {}).get("new_activity_window_hours", 24)
+# Events ingested longer ago than this never notify — they are old news being
+# (re)processed late (e.g. orphan recovery), not breaking incidents.
+ALERT_MAX_AGE_DAYS = _SETTINGS.get("alert", {}).get("alert_max_age_days", 2)
 
 # Accidental (safety/emniyet) event types — kept for coverage but de-prioritized,
 # because the platform's mission is SECURITY (hostile/intentional) events. A
@@ -374,6 +378,20 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
     if event.get("severity_score", 0) < ALERT_SEVERITY_MIN:
         return "skipped"
 
+    # Freshness gate: an event ingested weeks ago that is only being scored now
+    # (orphan recovery, backlog replay) is stale news — score it, but never page.
+    ingested_at = event.get("ingested_at")
+    if ingested_at:
+        if ingested_at.tzinfo is None:
+            ingested_at = ingested_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - ingested_at
+        if age > timedelta(days=ALERT_MAX_AGE_DAYS):
+            logger.info(
+                "Alert skipped for stale event %s (ingested %.1f days ago)",
+                event_id[:8], age.total_seconds() / 86400,
+            )
+            return "skipped"
+
     if not event.get("alert_tier"):
         event["alert_tier"] = "ALERT"
 
@@ -462,6 +480,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "llm_parsed": llm_parsed,
             "storyline_hint": row[5],
             "occurred_at_est": occurred_at_est,
+            # True when occurred_at_est is really the ingestion time, not an
+            # incident time — notifier renders it as such instead of lying.
+            "occurred_at_is_fallback": row[6] is None,
+            "ingested_at": row[9],
             "source_title": row[7],
             "source_url": row[8],
             "source_domain": row[10],

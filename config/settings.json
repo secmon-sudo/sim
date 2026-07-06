@@ -58,6 +58,7 @@
   "alert": {
     "suppression_ttl_hours": 4,
     "new_activity_window_hours": 24,
+    "alert_max_age_days": 2,
     "tiers": {
       "CRITICAL": {
         "severity_min": 80,
