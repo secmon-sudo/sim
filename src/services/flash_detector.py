@@ -10,8 +10,8 @@ Critical Event Circuit Breaker (Flash Update) trigger logic:
 
 import math
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Tuple
+from datetime import datetime
+from typing import List, Dict, Any
 
 from src.core.forecast_engine import get_source_credibility
 

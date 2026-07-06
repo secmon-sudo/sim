@@ -61,7 +61,7 @@ def send_telegram_alert(event: dict) -> bool:
     safe_anchor = html.escape(str(event.get("anchor_name_norm") or "Unknown"))
     safe_country = html.escape(str(event.get("country_iso") or ""))
     safe_hint = html.escape(str(event.get("storyline_hint") or ""))
-    safe_url = str(event.get("source_url") or "")
+    safe_url = html.escape(str(event.get("source_url") or ""), quote=True)
 
     location = f"{safe_anchor} ({safe_country})" if safe_country else safe_anchor
     severity = event.get("severity_score", 0)

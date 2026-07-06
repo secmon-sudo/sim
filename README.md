@@ -1,12 +1,16 @@
 # Security Incident Monitor (SIM)
 
-> Zero-cost, serverless Aviation & Geopolitical OSINT platform with auditable cold storage.
+> Zero-cost, serverless Terrorism & Security OSINT platform with auditable cold storage.
 
 **Blueprint Version:** V20.1 — Multi-Provider Production Fortress
 
+**Mission focus:** terrorism, bombings/explosions, hotel & resort attacks, airport terror
+attacks, mass-casualty events, and geopolitical escalation — with aviation security as a
+supporting lens (airport/airspace impact of every event is assessed).
+
 ## Architecture
 
-SIM is a multi-stage pipeline that collects, classifies, scores, and archives security incidents from global news sources. It runs as a GitHub Actions cron job and serves a Streamlit intelligence dashboard.
+SIM is a multi-stage pipeline that collects, classifies, scores, and archives security incidents from global news sources. It runs headless as a GitHub Actions cron job; all outputs are delivered via Telegram (alert cards, flash updates, weekly HTML reports, JSONL archives) and Cloudflare R2.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -24,13 +28,6 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
           │  (with RLS)  │                   │   Cold Storage │
           └──────┬──────┘                   └────────────────┘
                  │
-                 ├────────────────────────────────────────┐
-                 ▼ (REST API)                             ▼
-          ┌─────────────┐                          ┌──────────────┐
-          │  Streamlit   │                          │  Cloudflare  │
-          │  Dashboard   │                          │  Pages (Web) │
-          └─────────────┘                          └──────────────┘
-                 │
                  ▼ (Weekly Run / On-Demand CLI)
           ┌───────────────────────────────────────────────┐
           │   Weekly Intelligence & Forecasting (Pass G)  │
@@ -45,7 +42,7 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 
 | Pass | Function | Key Features |
 |------|----------|-------------|
-| **A** | Ingest & Canonicalization | Multi-region Google News RSS, GDELT 2.0, Nitter, Travel Advisories, content translation & dedup |
+| **A** | Ingest & Canonicalization | Google News RSS (terror/hotel/airport attack queries), 50+ curated news & terrorism-research feeds, GDELT 2.0, Nitter, Travel Advisories, content translation & dedup |
 | **B** | Dedup & Distributed Locks | URL hash dedup, maturation window, stale lock cleanup with telemetry |
 | **C** | LLM Classification | Multi-provider router (Groq + OpenRouter), heartbeat-protected locks |
 | **D** | Scoring & Storyline | Anchor resolution, severity/confidence scoring, storyline linking, Telegram alerts |
@@ -67,12 +64,19 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 
 **Total daily capacity:** ~33,200 RPD across 7 model slots.
 
+## Source Coverage
+
+- **Targeted Google News queries** (always-on static feeds): hotel attacks/bombings/sieges, airport attacks/bombings/explosions, suicide bombings & vehicle bombs, terror attacks with casualties, attacks on tourists — plus ~110 rotating tier queries (aviation security, transit attacks, protests, travel advisories).
+- **Terrorism research:** Jamestown Foundation, The Soufan Center, CTC Sentinel (West Point), Counter Extremism Project, Long War Journal, HSToday.
+- **Global & regional wires:** BBC (World/Middle East/Africa/Asia), Al Jazeera, Guardian, France24, NYT, WSJ, CNN, Fox, UN News and Israeli/Iranian/Russian/Ukrainian outlets for conflict-zone coverage.
+- **Structured sources:** GDELT 2.0 (region-rotating), EASA CZIB conflict zones, US State Dept travel advisories, Nitter/X conflict trackers.
+
 ## Tech Stack
 
 - **Pipeline:** Python 3.12, `httpx`, `tenacity`, `psycopg[binary]`, `trafilatura`
 - **Database:** Supabase PostgreSQL (with `pg_trgm` and Row Level Security policies)
 - **LLM Providers:** Groq (free tier, 2 accounts) + OpenRouter (free tier, 2 accounts)
-- **Dashboard:** Streamlit with PyDeck maps, NetworkX storyline graphs
+- **Delivery:** Telegram Bot API (alert cards, flash updates, weekly HTML reports, archives)
 - **Cold Storage:** Cloudflare R2 + Telegram Bot API
 - **CI/CD:** GitHub Actions (cron every 2 hours)
 
@@ -147,7 +151,6 @@ sim/
 │       ├── telegram_report_notifier.py    # [NEW] Weekly reports & HTML notifier
 │       ├── supabase_client.py             # Thread-safe connection pool
 │       └── telegram_notifier.py           # Alert card sender
-├── streamlit_app/                         # Dashboard UI
 ├── tests/                                 # pytest test suite
 │   └── test_weekly_forecast.py            # [NEW] Weekly forecast test suite
 ├── requirements.txt                       # Python dependencies
@@ -170,9 +173,8 @@ git clone https://github.com/secmon-sudo/sim.git
 cd sim
 pip install -r requirements.txt
 
-# Configure secrets
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit with your DATABASE_URL, API keys, Telegram, and R2 credentials
+# Configure secrets (.env file or exported environment variables)
+# Set DATABASE_URL, LLM API keys, Telegram, and R2 credentials — see table below
 
 # Run migrations
 python -c "
@@ -190,9 +192,6 @@ python -m src.pipeline.orchestrator
 
 # Run weekly forecast pipeline
 python -m src.pipeline.orchestrator --weekly
-
-# Launch dashboard
-streamlit run streamlit_app/app.py
 ```
 
 ### Environment Variables

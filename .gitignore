@@ -26,7 +26,6 @@ Thumbs.db
 
 # Secrets — ASLA commit edilmemeli
 .env
-.streamlit/secrets.toml
 
 # Test / Cache
 .pytest_cache/

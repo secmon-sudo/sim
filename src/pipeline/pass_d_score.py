@@ -59,7 +59,12 @@ SOURCE_CREDIBILITY = {
     "themoscowtimes.com": 0.85,
     "meduza.io": 0.85,
     "warsawinstitute.org": 0.82,
-    "un.org": 0.95
+    "un.org": 0.95,
+    "bbc.com": 0.95,
+    "jamestown.org": 0.88,
+    "thesoufancenter.org": 0.88,
+    "ctc.westpoint.edu": 0.92,
+    "counterextremism.com": 0.85,
 }
 
 _SCORING = _SETTINGS.get("scoring", {})
@@ -96,6 +101,18 @@ STORYLINE_TIME_WINDOW_DAYS = _STORYLINE.get("time_window_days", 14)
 STORYLINE_COUNTRY_MATCH_REQUIRED = _STORYLINE.get("country_match_required", True)
 STORYLINE_ANCHOR_ASSIST_THRESHOLD = _STORYLINE.get("anchor_assist_threshold", 0.2)
 STORYLINE_ANCHOR_ASSIST_MAX_HOURS = _STORYLINE.get("anchor_assist_max_hours", 72)
+
+
+def _safe_float(value, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
+    """Coerce an LLM-supplied numeric field (e.g. confidence) to a bounded float.
+
+    Guards against null / "high" / other non-numeric values that would otherwise
+    raise mid-scoring and leave the event stuck in 'classified' forever.
+    """
+    try:
+        return max(lo, min(hi, float(value)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _safe_int(value) -> int:
@@ -468,7 +485,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             storyline_id = str(uuid.uuid4())
 
         # 4. Compute confidence (with real source diversity and credibility multiplier)
-        llm_conf = event["llm_parsed"].get("confidence", 0.5)
+        llm_conf = _safe_float(event["llm_parsed"].get("confidence", 0.5))
         diversity = compute_diversity_score(db_conn, storyline_id)
         system_conf = compute_confidence(llm_conf, anchor["confidence"], diversity)
 

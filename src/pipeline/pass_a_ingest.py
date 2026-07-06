@@ -12,7 +12,6 @@ import email.utils
 import hashlib
 import json
 import logging
-import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -505,14 +504,14 @@ def build_search_queries(db_conn=None) -> list[dict]:
     queries = []
     seen = set()
 
-    def _add(q: str):
+    def _add(q: str, dynamic: bool = False):
         if q.lower() not in seen:
             seen.add(q.lower())
-            queries.append({"query": q, "broad": False})
+            queries.append({"query": q, "broad": False, "dynamic": dynamic})
 
     # Add active dynamic queries FIRST so they are run with highest priority
     for q in active_queries:
-        _add(q)
+        _add(q, dynamic=True)
 
     # ── Tier 1: Unambiguous aviation / airport security phrases ──
     tier1 = [
@@ -1147,7 +1146,8 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
     if is_direct_url:
         url = query_info if isinstance(query_info, str) else query_info.get("url", "")
     else:
-        url = GOOGLE_NEWS_RSS.format(query=query_info["query"])
+        from urllib.parse import quote_plus
+        url = GOOGLE_NEWS_RSS.format(query=quote_plus(query_info["query"]))
 
     try:
         headers = {
@@ -1308,17 +1308,12 @@ def extract_domain(url: str) -> str:
     return f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
 
 
-_GOOGLE_NEWS_REDIR = re.compile(r"^https?://news\.google\.com/rss/articles/")
-
 def compute_url_hash(url: str) -> str:
     """SHA-256 hash of normalized URL for deduplication."""
     normalized = url.strip().lower()
-    # For Google News redirect URLs, strip query params as well
-    # because the article ID is in the path, params are tracking.
-    if _GOOGLE_NEWS_REDIR.match(normalized):
-        normalized = normalized.split("?")[0].split("#")[0]
-    else:
-        normalized = normalized.split("?")[0].split("#")[0]
+    # Strip query params and fragments — for Google News redirect URLs the
+    # article ID is in the path and params are tracking; other sources likewise.
+    normalized = normalized.split("?")[0].split("#")[0]
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
@@ -1492,6 +1487,8 @@ def check_domain_penalty(db_conn, domain: str) -> float:
         "thecipherbrief.com", "foreignpolicy.com", "defenseone.com",
         "twz.com", "defensenews.com", "al-monitor.com", "themoscowtimes.com",
         "meduza.io", "warsawinstitute.org", "un.org",
+        "jamestown.org", "thesoufancenter.org", "ctc.westpoint.edu",
+        "counterextremism.com",
     }
     if domain in TRUSTED_DOMAINS:
         return 0.0
@@ -1545,8 +1542,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     queries = build_search_queries(db_conn)
     all_items = []
 
-    # Execute global queries
-    for query_info in queries[:50]:
+    # Execute up to 50 queries per run. Active storyline queries always run first;
+    # the remaining slots rotate through the static tiers by hour-of-day so that
+    # every tier gets coverage across runs (a fixed [:50] slice permanently
+    # starved tiers beyond the first ~50 queries).
+    MAX_QUERIES_PER_RUN = 50
+    dynamic_count = sum(1 for q in queries if q.get("dynamic"))
+    static_queries = queries[dynamic_count:]
+    selected_queries = queries[:dynamic_count]
+    remaining_slots = max(0, MAX_QUERIES_PER_RUN - len(selected_queries))
+    if static_queries and remaining_slots:
+        offset = (datetime.now(timezone.utc).hour * remaining_slots) % len(static_queries)
+        rotated = static_queries[offset:] + static_queries[:offset]
+        selected_queries.extend(rotated[:remaining_slots])
+
+    for query_info in selected_queries:
         items = fetch_rss_feed(query_info, is_direct_url=False, stats=stats)
         all_items.extend(items)
         stats["queries_executed"] += 1
@@ -1583,9 +1593,10 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     # If it works → bonus data. If not → silently skip.
     try:
         gdelt_queries = build_gdelt_queries()
-        # Pick 1 random query per run to minimize rate-limit exposure
-        random.seed(datetime.now().minute)
-        selected = random.choice(gdelt_queries)
+        # Pick 1 query per run to minimize rate-limit exposure. Rotate by hour so
+        # all regions get coverage over a day (seeding the GLOBAL random module by
+        # minute both polluted other random users and biased the selection).
+        selected = gdelt_queries[datetime.now(timezone.utc).hour % len(gdelt_queries)]
 
         items = fetch_gdelt_articles(
             query=selected["query"],

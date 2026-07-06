@@ -69,12 +69,16 @@ def clear_stale_locks(db_conn, worker_id: uuid.UUID) -> int:
                 (json.dumps(telemetry_payload),),
             )
 
-            # Step 2: Clear the lock (same transaction)
+            # Step 2: Clear the lock (same transaction).
+            # Also requeue the event: acquire_lock set status='locked', and a dead
+            # worker never restores it — without this reset the event would be
+            # invisible to get_events_for_classification forever.
             db_conn.execute(
                 """UPDATE events
                    SET classification_lock = FALSE,
                        lock_owner = NULL,
-                       last_heartbeat_at = NULL
+                       last_heartbeat_at = NULL,
+                       status = CASE WHEN status = 'locked' THEN 'deduped' ELSE status END
                    WHERE id = %s AND lock_owner = %s""",
                 (event_id, lock_owner),
             )
@@ -195,6 +199,7 @@ def _dedup_by_url_hash(db_conn) -> int:
             RETURNING id"""
         )
         removed = len(result.fetchall()) if result else 0
+        db_conn.commit()
         if removed > 0:
             logger.info("URL dedup removed %d duplicate raw events", removed)
         return removed
@@ -204,15 +209,39 @@ def _dedup_by_url_hash(db_conn) -> int:
         return 0
 
 
+def requeue_orphaned_locked_events(db_conn) -> int:
+    """
+    Requeue events stuck in status='locked' with no active lock.
+
+    release_lock() clears classification_lock but does not touch status; if a
+    worker released the lock on a failure path (LLM exhausted / unexpected error)
+    the event stayed in 'locked' forever and was never classified. Returns the
+    number of events requeued to 'deduped'.
+    """
+    try:
+        result = db_conn.execute(
+            """UPDATE events
+               SET status = 'deduped', updated_at = NOW()
+               WHERE status = 'locked' AND classification_lock = FALSE"""
+        )
+        db_conn.commit()
+        count = result.rowcount
+        if count > 0:
+            logger.warning("Requeued %d orphaned 'locked' events back to 'deduped'", count)
+        return count
+    except Exception:
+        db_conn.rollback()
+        logger.exception("Error requeuing orphaned locked events")
+        return 0
+
+
 def mark_as_deduped(db_conn) -> int:
     """
     Move raw events to 'deduped' status after URL dedup and maturation.
+    (URL-hash dedup is run separately by run_pass_b before this step.)
     """
     try:
-        # First dedup by URL hash
-        _dedup_by_url_hash(db_conn)
-
-        # Then mark remaining as deduped
+        # Mark remaining raw events as deduped
         result = db_conn.execute(
             """UPDATE events
                SET status = 'deduped', updated_at = NOW()
@@ -247,6 +276,7 @@ def run_pass_b(db_conn) -> dict:
         "events_deduped": 0,
         "url_duplicates_removed": 0,
         "stale_locks_cleared": 0,
+        "orphaned_locked_requeued": 0,
     }
 
     # Step 1: URL hash dedup + move raw → deduped
@@ -255,6 +285,9 @@ def run_pass_b(db_conn) -> dict:
 
     # Step 2: Clear stale locks
     stats["stale_locks_cleared"] = clear_stale_locks(db_conn, worker_id)
+
+    # Step 3: Requeue events orphaned in 'locked' with no active lock
+    stats["orphaned_locked_requeued"] = requeue_orphaned_locked_events(db_conn)
 
     # Log telemetry
     try:

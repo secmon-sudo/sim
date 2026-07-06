@@ -141,9 +141,20 @@
       "https://warsawinstitute.org/feed/",
       "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
       "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
+      "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
+      "https://jamestown.org/feed/",
+      "https://thesoufancenter.org/feed/",
+      "https://ctc.westpoint.edu/feed/",
+      "https://www.counterextremism.com/rss.xml",
       "https://news.google.com/rss/search?q=Iran+Israel+war+military&hl=en-US&gl=US&ceid=US:en",
       "https://news.google.com/rss/search?q=Iran+missile+strike+drone&hl=en-US&gl=US&ceid=US:en",
-      "https://news.google.com/rss/search?q=%22Strait+of+Hormuz%22+OR+%22Red+Sea%22+military&hl=en-US&gl=US&ceid=US:en"
+      "https://news.google.com/rss/search?q=%22Strait+of+Hormuz%22+OR+%22Red+Sea%22+military&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22hotel+attack%22+OR+%22hotel+bombing%22+OR+%22hotel+siege%22&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22airport+attack%22+OR+%22airport+bombing%22+OR+%22airport+explosion%22&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22suicide+bombing%22+OR+%22car+bomb%22+OR+%22truck+bomb%22&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22terrorist+attack%22+OR+%22terror+attack%22+casualties&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22tourists+killed%22+OR+%22tourist+attack%22+OR+%22tourists+kidnapped%22&hl=en-US&gl=US&ceid=US:en"
     ],
     "nitter_feeds": [
       "https://nitter.net/ww3mediaa/rss",

@@ -236,7 +236,7 @@ def _within_sane_bounds(parsed) -> bool:
     articles) or in the future. Such values pollute storyline time windows and the
     weekly forecast, so they are discarded (caller falls back to None/'unknown').
     """
-    now = dt.utcnow()
+    now = dt.now(timezone.utc).replace(tzinfo=None)
     if parsed > now + timedelta(days=MAX_EVENT_FUTURE_DAYS):
         return False
     if parsed < now - timedelta(days=MAX_EVENT_AGE_DAYS):
@@ -280,6 +280,18 @@ def _parse_occurred_at(raw: str | None):
         logger.info("Discarded out-of-bounds occurred_at estimate: %s", raw[:40])
         return None
     return parsed
+
+
+def _safe_relevance(value, default: int = 50) -> int:
+    """Coerce the LLM's relevance_score to an int in [0, 100].
+
+    LLMs occasionally emit null or non-numeric values ("high", "N/A"); a bare
+    int() would raise and permanently fail the event, so fall back to default.
+    """
+    try:
+        return max(0, min(100, int(float(value))))
+    except (TypeError, ValueError):
+        return default
 
 
 class LLMParseError(Exception):
@@ -422,7 +434,7 @@ Text: {canonical_text[:3000]}"""
 
             # Graduated relevance handling using LLM's relevance_score
             event_type = parsed.get("event_type", "other_aviation_related")
-            relevance = int(parsed.get("relevance_score", 50))
+            relevance = _safe_relevance(parsed.get("relevance_score", 50))
 
             # LLM false-negative guard: if a hard deterministic signal is present
             # (explosion/airstrike/killed/etc.) but the LLM scored this as noise,

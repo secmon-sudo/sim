@@ -10,7 +10,12 @@ import json
 import logging
 
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
-from src.pipeline.pass_d_score import apply_safety_downrank, compute_confidence, compute_severity
+from src.pipeline.pass_d_score import (
+    _safe_float,
+    apply_safety_downrank,
+    compute_confidence,
+    compute_severity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +100,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 new_severity, is_safety = apply_safety_downrank(event_type, new_severity, llm_parsed)
 
                 # Recalculate confidence
-                llm_conf = llm_parsed.get("confidence", 0.5)
+                llm_conf = _safe_float(llm_parsed.get("confidence", 0.5))
                 new_system_conf = compute_confidence(llm_conf, new_conf)
 
                 # Update with upgraded anchor

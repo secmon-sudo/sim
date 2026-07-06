@@ -96,7 +96,10 @@ def should_link_storyline(
     if dt_a is None or dt_b is None:
         return False
     try:
-        within_window = abs((dt_a - dt_b).days) <= max_days
+        # Use total_seconds, not .days: timedelta.days truncates toward -inf, so
+        # the window was asymmetric depending on which event came first
+        # (e.g. -14.5 days → -15 → excluded, +14.5 days → 14 → included).
+        within_window = abs((dt_a - dt_b).total_seconds()) <= max_days * 86400
     except Exception:
         return False
     if not within_window:

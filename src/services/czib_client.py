@@ -130,11 +130,14 @@ def sync_czib_to_db(db_conn) -> dict:
                            valid_until = EXCLUDED.valid_until,
                            valid_descr = EXCLUDED.valid_descr,
                            updated_at = NOW(),
-                           synced_at = NOW()""",
+                           synced_at = NOW()
+                       RETURNING (xmax = 0) AS was_inserted""",
                     (nid, name, status, countries, country_names, coords, issued_dt, valid_until, valid_descr),
                 )
-                # rowcount is unreliable for ON CONFLICT; check if row existed before
-                if result.rowcount == 1:
+                # rowcount is 1 for both branches of ON CONFLICT; xmax=0 is the
+                # standard Postgres trick to distinguish a fresh insert from an update.
+                row = result.fetchone()
+                if row and row[0]:
                     inserted += 1
                 else:
                     updated += 1
@@ -145,92 +148,3 @@ def sync_czib_to_db(db_conn) -> dict:
     db_conn.commit()
     logger.info("CZIB sync complete: %d fetched, %d upserted", len(zones), inserted + updated)
     return {"fetched": len(zones), "inserted": inserted, "updated": updated}
-
-
-def get_active_czib_countries(db_conn) -> set[str]:
-    """Return set of ISO2 country codes from active CZIB zones."""
-    rows = db_conn.execute(
-        "SELECT DISTINCT unnest(countries) FROM czib_zones WHERE status = 'Active'"
-    ).fetchall()
-    return {row[0] for row in rows if row[0]}
-
-
-def get_all_czib_countries(db_conn) -> set[str]:
-    """Return set of ISO2 country codes from all CZIB zones (active + suspended)."""
-    rows = db_conn.execute(
-        "SELECT DISTINCT unnest(countries) FROM czib_zones WHERE status IN ('Active', 'Suspended')"
-    ).fetchall()
-    return {row[0] for row in rows if row[0]}
-
-
-# Extended conflict-region pools for GDELT source-country filtering.
-# These are FIPS 2-letter codes used by GDELT's sourcecountry filter.
-# We combine: EASA CZIB countries + known high-risk regions not yet in CZIB.
-CONFLICT_REGION_POOLS = {
-    "africa_sahel": [
-        "NG", "NE", "ML", "BF", "TD", "CF", "SN", "MR", "GN", "SL",
-        "LR", "CI", "GH", "TG", "BJ", "CM", "GA", "GQ", "ST",
-    ],
-    "africa_horn": [
-        "SO", "ET", "ER", "DJ", "KE", "SS", "SD", "UG", "RW", "BI",
-    ],
-    "africa_north": [
-        "DZ", "LY", "EG", "TN", "MA", "EH", "MR",
-    ],
-    "africa_central": [
-        "CD", "CG", "AO", "CM", "CF", "TD", "GQ", "GA", "ST",
-    ],
-    "africa_south": [
-        "ZA", "MZ", "ZW", "ZM", "MW", "MG", "SZ", "LS", "BW", "NA",
-    ],
-    "middle_east": [
-        "SY", "IQ", "IR", "IL", "JO", "LB", "YE", "SA", "AE", "QA",
-        "KW", "BH", "OM", "TR", "PS",
-    ],
-    "asia_south": [
-        "AF", "PK", "IN", "BD", "LK", "NP", "BT", "MV",
-    ],
-    "asia_southeast": [
-        "MM", "TH", "PH", "ID", "MY", "VN", "LA", "KH", "SG", "BN",
-    ],
-    "asia_east": [
-        "KP", "KR", "CN", "TW", "JP", "MN",
-    ],
-    "latin_america": [
-        "CO", "VE", "MX", "HT", "EC", "PE", "BR", "HN", "GT", "SV",
-        "NI", "CR", "PA", "BO", "PY", "CL", "AR", "UY", "CU", "JM",
-    ],
-    "eurasia": [
-        "UA", "RU", "BY", "MD", "GE", "AM", "AZ", "KG", "KZ", "TJ",
-        "TM", "UZ",
-    ],
-    "balkans_caucasus": [
-        "RS", "BA", "ME", "MK", "AL", "XK", "MD", "GE", "AM", "AZ",
-    ],
-}
-
-
-def get_enriched_gdelt_countries(db_conn, region: str | None = None) -> list[str]:
-    """
-    Get GDELT source-country filter list enriched with EASA CZIB data.
-
-    Args:
-        db_conn: Database connection
-        region: Specific region key from CONFLICT_REGION_POOLS, or None for all
-
-    Returns:
-        List of FIPS 2-letter country codes for GDELT sourcecountry filter
-    """
-    # Start with CZIB-derived countries
-    czib_countries = get_all_czib_countries(db_conn)
-
-    if region and region in CONFLICT_REGION_POOLS:
-        pool = set(CONFLICT_REGION_POOLS[region])
-    else:
-        pool = set()
-        for r in CONFLICT_REGION_POOLS.values():
-            pool.update(r)
-
-    # Merge: CZIB countries take priority, pool fills gaps
-    merged = czib_countries | pool
-    return sorted(merged)

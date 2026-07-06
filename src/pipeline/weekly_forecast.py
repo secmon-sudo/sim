@@ -34,9 +34,11 @@ from src.services.forecast_generator import (
     run_g2_country_assessment,
     run_g3_global_assessment
 )
+from src.services.flash_detector import check_flash_triggers
 from src.services.telegram_report_notifier import (
     send_weekly_report_telegram,
-    generate_html_report_payload
+    generate_html_report_payload,
+    send_flash_update_telegram,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,74 @@ def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Opt
     except Exception:
         logger.exception("Cloudflare R2 upload failed for report: %s", filename)
         return None
+
+
+def run_flash_detection(
+    db_conn,
+    events: List[Dict[str, Any]],
+    countries_data: List[Dict[str, Any]],
+    max_flashes: int = 5,
+) -> List[Dict[str, Any]]:
+    """Run the Flash Detector over the last 24h of events and dispatch alerts.
+
+    Uses the Z-scores already computed for countries_data. At most one flash per
+    country per run (highest-priority trigger wins — check_flash_triggers already
+    skips lower triggers for Z-score-triggered countries), capped at max_flashes
+    Telegram messages. Each trigger is recorded in system_telemetry.
+    """
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    recent_events = []
+    for ev in events:
+        dt = ev.get("occurred_at_est")
+        if dt is None:
+            continue
+        dt_naive = dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
+        if (now_naive - dt_naive).total_seconds() <= 86400:
+            recent_events.append(ev)
+
+    if not recent_events:
+        return []
+
+    country_z_scores = {c["country_iso"]: c.get("z_score", 0.0) for c in countries_data}
+    triggers = check_flash_triggers(recent_events, country_z_scores)
+    if not triggers:
+        return []
+
+    logger.warning("Flash Detector: %d trigger(s) fired", len(triggers))
+    seen_countries: set = set()
+    dispatched = 0
+    for trig in triggers:
+        country = trig.get("country_iso")
+        if country in seen_countries:
+            continue
+        seen_countries.add(country)
+
+        try:
+            db_conn.execute(
+                "INSERT INTO system_telemetry(event_type, value_json) VALUES ('flash_trigger', %s)",
+                (json.dumps({
+                    "type": trig.get("type"),
+                    "country_iso": country,
+                    "reason": trig.get("reason"),
+                    "event_ids": [str(e.get("id")) for e in trig.get("events", [])][:20],
+                }),),
+            )
+            db_conn.commit()
+        except Exception:
+            db_conn.rollback()
+            logger.exception("Failed to log flash trigger telemetry for %s", country)
+
+        if dispatched < max_flashes:
+            msg_id = send_flash_update_telegram(
+                trigger_type=trig.get("type", "Flash"),
+                country_iso=country or "??",
+                reason=trig.get("reason", ""),
+                events=trig.get("events", []),
+            )
+            if msg_id:
+                dispatched += 1
+
+    return triggers
 
 
 def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
@@ -210,6 +280,15 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
 
     # Sort countries by TI descending
     countries_data = sorted(countries_data, key=lambda x: x["ti"], reverse=True)
+
+    # 3b. Flash Detector — critical-event circuit breaker (zero-LLM).
+    # Checks the last 24h for Z-score spikes, cross-domain convergence, and
+    # high-volume escalation; dispatches Telegram flash updates. Failures here
+    # must never break the weekly report.
+    try:
+        run_flash_detection(db_conn, events, countries_data)
+    except Exception:
+        logger.exception("Flash detection failed, continuing with weekly report")
 
     # 4. Filter top 8 candidate countries for G1 selection (Top-8 Dinamik Filtresi)
     # Target countries with active movements: TI > 30 or Z-Score > 0.5
