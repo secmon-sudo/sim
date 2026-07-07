@@ -27,6 +27,13 @@ TIERS = {
     "WATCH":    AlertTier("WATCH",    "#CA8A04", ["telegram"]),
 }
 
+# Official government travel advisories are actionable at the COUNTRY level, so they
+# never carry an airport anchor and the standard anchor/time gates would drop them.
+# They are pre-filtered upstream (Level 3-4 / "do not travel", curated high-risk
+# countries) so gate them on severity alone.
+ADVISORY_EVENT_TYPES = {"travel_advisory", "travel_ban"}
+ADVISORY_ALERT_SEVERITY_MIN = 55
+
 
 def evaluate_alert_tier(event: dict) -> str | None:
     """
@@ -38,6 +45,12 @@ def evaluate_alert_tier(event: dict) -> str | None:
     conf = event.get("system_confidence", 0.0)
     anc = event.get("anchor_confidence", "LOW")
     time_ = event.get("time_certainty", "unknown")
+
+    # Travel advisory path — country-level official warning, no airport anchor and its
+    # "time" is the standing advisory date, so bypass the anchor/time gates and key on
+    # severity only (already pre-filtered to Level 3-4 / "do not travel" upstream).
+    if event.get("event_type") in ADVISORY_EVENT_TYPES:
+        return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
 
     # CRITICAL — original V19 gate, unchanged
     if sev >= 80 and conf >= 0.8 and anc == "HIGH" and time_ != "unknown":

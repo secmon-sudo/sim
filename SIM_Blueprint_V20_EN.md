@@ -187,7 +187,22 @@ INSERT INTO event_type_catalog VALUES
 ## 4. Multi-Stage Pipeline (GitHub Actions — Every 30 Minutes)
 
 ### PASS A: Ingest & Canonicalization
-Unchanged from V19.
+Unchanged from V19, plus official travel-advisory ingestion (V20.2):
+
+- **Sources:** US State Dept (RSS, "Level N") + UK FCDO per-country Atom feeds
+  (`gov.uk/foreign-travel-advice/{country}.atom`) for a curated set of high-risk
+  countries. `fetch_travel_advisories` parses both RSS `<item>` and Atom `<entry>`.
+- **Filtering:** US/level feeds keep the level-increase / Level 3-4 gate via a
+  multi-agency parser (`_parse_advisory_level` understands "Level N" AND phrase wording:
+  "do not travel", "advise against all travel", "avoid all travel" → L4; "reconsider",
+  "all but essential", "non-essential travel" → L3). UK feeds are curated (the high-risk
+  country selection IS the filter) so every recent entry is ingested.
+- **Re-ingestion:** advisory page URLs are stable, but the pipeline dedups permanently by
+  URL hash, so each item's link is stamped with its update date (`#adv-YYYYMMDD`) — a
+  genuine update becomes a new event/alert, repeated runs of the same update stay deduped.
+- **Alerting:** advisories are country-level (no airport anchor), so `evaluate_alert_tier`
+  routes `travel_advisory`/`travel_ban` on severity alone (bypassing the anchor/time gates)
+  and they are excluded from the generic-umbrella incident gate.
 
 ---
 

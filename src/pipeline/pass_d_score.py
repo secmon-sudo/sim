@@ -98,9 +98,11 @@ SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
 # story. Used by the incident gate: an umbrella label with no located anchor and no
 # casualties is commentary/analysis, not an actionable incident, and is capped so a
 # single LLM mislabel can never become a near-critical alert.
+# NB: travel_advisory is deliberately NOT here — official advisories are country-level
+# (no airport anchor, no casualties) but ARE actionable, and have their own alert path.
 GENERIC_UMBRELLA_TYPES = {
     "geopolitical_conflict", "political_event", "civil_unrest",
-    "humanitarian_crisis", "travel_advisory",
+    "humanitarian_crisis",
 }
 INCIDENT_GATE_CAP = _SCORING.get("incident_gate_cap", 50)
 SAFETY_LIFT_ON_MASS_CASUALTY = _SCORING.get("safety_lift_cap_on_mass_casualty", True)
@@ -595,6 +597,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "system_confidence": system_conf,
             "anchor_confidence": anchor["level"],
             "time_certainty": event["llm_parsed"].get("time_certainty", "unknown"),
+            "event_type": event["event_type"],
         }
         alert_tier = evaluate_alert_tier(alert_data)
 

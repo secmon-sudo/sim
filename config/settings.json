@@ -172,7 +172,21 @@
       "https://nitter.poast.org"
     ],
     "travel_advisory_feeds": [
-      "https://travel.state.gov/_res/rss/TAsTWs.xml"
+      "https://travel.state.gov/_res/rss/TAsTWs.xml",
+      "https://www.gov.uk/foreign-travel-advice/ukraine.atom",
+      "https://www.gov.uk/foreign-travel-advice/russia.atom",
+      "https://www.gov.uk/foreign-travel-advice/israel.atom",
+      "https://www.gov.uk/foreign-travel-advice/iran.atom",
+      "https://www.gov.uk/foreign-travel-advice/lebanon.atom",
+      "https://www.gov.uk/foreign-travel-advice/syria.atom",
+      "https://www.gov.uk/foreign-travel-advice/yemen.atom",
+      "https://www.gov.uk/foreign-travel-advice/iraq.atom",
+      "https://www.gov.uk/foreign-travel-advice/egypt.atom",
+      "https://www.gov.uk/foreign-travel-advice/mali.atom",
+      "https://www.gov.uk/foreign-travel-advice/somalia.atom",
+      "https://www.gov.uk/foreign-travel-advice/sudan.atom",
+      "https://www.gov.uk/foreign-travel-advice/afghanistan.atom",
+      "https://www.gov.uk/foreign-travel-advice/nigeria.atom"
     ]
   }
 }
