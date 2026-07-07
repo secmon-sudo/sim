@@ -31,6 +31,7 @@
     "aviation_nexus_bonus": 15,
     "safety_severity_cap": 40,
     "safety_lift_cap_on_mass_casualty": true,
+    "incident_gate_cap": 50,
     "max_severity": 100,
     "llm_confidence_weight": 0.4,
     "anchor_confidence_weight": 0.3,

@@ -93,6 +93,16 @@ SAFETY_EVENT_TYPES = {
     "bird_strike", "engine_failure", "emergency_landing", "depressurization",
 }
 SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
+
+# Generic "umbrella" event types the LLM reaches for on any geopolitics/policy-flavoured
+# story. Used by the incident gate: an umbrella label with no located anchor and no
+# casualties is commentary/analysis, not an actionable incident, and is capped so a
+# single LLM mislabel can never become a near-critical alert.
+GENERIC_UMBRELLA_TYPES = {
+    "geopolitical_conflict", "political_event", "civil_unrest",
+    "humanitarian_crisis", "travel_advisory",
+}
+INCIDENT_GATE_CAP = _SCORING.get("incident_gate_cap", 50)
 SAFETY_LIFT_ON_MASS_CASUALTY = _SCORING.get("safety_lift_cap_on_mass_casualty", True)
 LLM_CONF_WEIGHT = _SCORING.get("llm_confidence_weight", 0.4)
 ANCHOR_CONF_WEIGHT = _SCORING.get("anchor_confidence_weight", 0.3)
@@ -257,7 +267,30 @@ def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_par
     if llm_parsed:
         score += compute_casualty_bonus(llm_parsed)
 
+    # Incident gate (defense-in-depth): a generic umbrella type with NO located anchor
+    # and NO reported casualties is analysis/commentary, not an actionable incident.
+    # Cap it so an LLM mislabel (e.g. an inflation survey tagged geopolitical_conflict)
+    # can never be near-critical, regardless of the type's catalog base.
+    has_proximity = bool(anchor_data and anchor_data.get("confidence", 0) >= 0.6)
+    if (event_type in GENERIC_UMBRELLA_TYPES
+            and not has_proximity
+            and not _has_casualties(llm_parsed)):
+        score = min(score, INCIDENT_GATE_CAP)
+
     return min(score, MAX_SEVERITY)
+
+
+def _has_casualties(llm_parsed: dict | None) -> bool:
+    """True if the LLM extracted any deaths/injuries/missing (a real-incident signal)."""
+    if not llm_parsed:
+        return False
+    casualties = llm_parsed.get("casualties") or {}
+    if not isinstance(casualties, dict):
+        return False
+    try:
+        return any(int(casualties.get(k) or 0) > 0 for k in ("deaths", "injuries", "missing"))
+    except (TypeError, ValueError):
+        return False
 
 
 def compute_confidence(llm_confidence: float, anchor_confidence: float, diversity_score: float = 0.5) -> float:
