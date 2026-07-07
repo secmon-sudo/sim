@@ -9,6 +9,8 @@ composite suppression key to prevent duplicate notifications.
 import logging
 from dataclasses import dataclass
 
+from src.core.geo import geo_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +62,33 @@ def build_suppression_key(event: dict) -> str:
     return "|".join([
         str(event.get("storyline_id") or "no_storyline"),
         event.get("anchor_name_norm") or "UNKNOWN",
+        str(int(event.get("severity_score", 0) // 10) * 10),
+    ])
+
+
+def build_geo_suppression_key(event: dict) -> str | None:
+    """Storyline-independent suppression fingerprint (safety net).
+
+    The primary key keys off storyline_id, so when the same real-world event is split
+    across several storyline_ids (paraphrased hints that fall below the Jaccard
+    threshold), each fragment produces a different primary key and every source pages
+    separately. This fingerprint drops storyline_id and keys off coarse geography
+    instead — country + resolved location + severity bucket — so near-identical alerts
+    within the suppression TTL collapse regardless of storyline fragmentation.
+
+    Location resolution prefers the precise IATA anchor, then a coarse geo_key derived
+    from the raw location text. Returns None when no usable location is known (so the
+    net is never so broad that it mutes unrelated same-country alerts).
+    """
+    loc = event.get("anchor_name_norm") or geo_key(
+        event.get("anchor_name_raw"), event.get("country_iso")
+    )
+    if not loc or loc == "UNKNOWN":
+        return None
+    return "|".join([
+        "geofp",
+        event.get("country_iso") or "??",
+        loc,
         str(int(event.get("severity_score", 0) // 10) * 10),
     ])
 

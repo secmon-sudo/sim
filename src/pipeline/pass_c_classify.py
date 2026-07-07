@@ -143,6 +143,14 @@ Extract the following fields:
    - MUST include a short date hint (MonDD format, e.g. Jun8, May15)
    - NEVER use generic phrases like "emergency landing" or "bomb threat" alone
    - Two articles about the SAME event MUST produce the SAME hint
+   Consistency rules (critical — the hint is used to group multi-source reports):
+   - Use the most specific COMMON place NAME (the city/airport), NEVER a descriptor
+     like "capital", "the north", "border area", or "the region". Write "Kyiv", not
+     "Ukrainian capital"; "Gaza", not "the enclave".
+   - Use the canonical English spelling: "Kyiv" (not "Kiev"), "Kharkiv" (not "Kharkov"),
+     "Odesa" (not "Odessa"), "Aleppo", "Sanaa".
+   - Order the tokens LOCATION → ACTOR → ACTION every time, so paraphrases converge.
+   - If several places are named, use the PRIMARY target/impact location only.
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1

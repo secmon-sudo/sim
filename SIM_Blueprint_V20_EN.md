@@ -820,10 +820,48 @@ def should_link_storyline(event_a: dict, event_b: dict) -> bool:
     return similarity > 0.4 and same_country and within_window
 ```
 
-#### Scoring (Unchanged from V19)
+#### Hybrid Storyline Dedup (V20.2 — geo-assist + LLM adjudicator + alert fingerprint)
 
-- **Severity:** `Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20)`. Max 100.
+Pure lexical Jaccard on `storyline_hint` fails for the dominant real-world case: one
+incident (e.g. a Kyiv strike) reported by ~20 sources whose paraphrased hints share
+almost no tokens ("Kyiv Russia drone strike" vs "Ukrainian capital missile attack").
+Each fragment spawned a new `storyline_id`, and because the Telegram suppression key was
+keyed on `storyline_id`, every source paged separately. Three layers fix this:
+
+- **Layer 1 — coarse geo-assist** (`src/core/geo.py`). The airport `anchor_master`
+  gazetteer is IATA-centric, so city events never resolve to an anchor. `geo_key()` is a
+  DB-free, paraphrase-stable coarse key (`Kyiv`/`Kiev`/`Ukraine capital` → `KYIV`), wired
+  into `should_link_storyline` as a fallback "anchor". It requires a 0.2 lexical floor —
+  never a pure-time auto-link — so two DISTINCT same-city incidents are not merged on
+  geography alone.
+- **Layer 2 — LLM adjudicator** (`src/core/storyline_adjudicator.py`). When deterministic
+  linking finds no match, same-country + same-geo + near-time candidates (the ambiguous,
+  near-zero-overlap residue) are judged by a single LLM call: "SAME real-world incident,
+  or NEW?". Runs on the **bulk router (gpt-oss-20b)** so it never competes with Pass C
+  classification quota; fails safe to NEW (can only ever merge, never lose an event).
+  Config-gated via `storyline.llm_adjudication_enabled`.
+- **Layer 3 — storyline-independent alert fingerprint** (`build_geo_suppression_key`).
+  Alongside the primary suppression key, `dispatch_alert` also checks/records a
+  `geofp|country|geo|severity_bucket` key, so duplicate alerts collapse within the TTL
+  even if the storyline still fragments.
+
+Pass C is also nudged to emit canonical hints (city name over descriptors like
+"capital", consistent `LOCATION → ACTOR → ACTION` order) so paraphrases converge upstream.
+
+#### Scoring (V20.2 — umbrella rebalance + incident gate)
+
+- **Severity:** `Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20) + Casualty_Bonus`. Max 100.
 - **Confidence:** `Max(0.0, Min(1.0, (llm_confidence * 0.4) + (anchor_score_val * 0.3) + (diversity_score * 0.3)))`
+- **Umbrella rebalance** (migration `012`): generic parent types the LLM over-uses as
+  catch-alls were dropped — `geopolitical_conflict` 85→45, `political_event` 60→35. The
+  SPECIFIC incident children (missile_strike 100, military_action 95, war_escalation 90,
+  civilian_casualties 92, …) are unchanged and still carry the real severity.
+- **Incident gate** (defense-in-depth, `compute_severity`): a generic umbrella type with
+  NO located anchor (no proximity bonus) AND NO reported casualties is commentary/analysis,
+  not an actionable incident, and is capped at `scoring.incident_gate_cap` (50). This makes
+  an LLM mislabel — e.g. an inflation/CPI survey or a corporate "companies remaining in
+  Russia" story tagged `geopolitical_conflict` — impossible to escalate to near-critical,
+  regardless of the type's catalog base.
 
 ---
 

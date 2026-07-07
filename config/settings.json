@@ -46,7 +46,10 @@
     "country_match_required": true,
     "time_window_days": 14,
     "anchor_assist_threshold": 0.2,
-    "anchor_assist_max_hours": 72
+    "anchor_assist_max_hours": 72,
+    "llm_adjudication_enabled": true,
+    "adjudication_window_hours": 48,
+    "adjudication_max_candidates": 6
   },
   "narrative": {
     "enabled": true,
