@@ -160,29 +160,29 @@ def build_llm_router() -> LLMRouter:
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
-        # ② Groq-A Secondary — kanıtlanmış kalite
+        # ② Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
         LLMAccount(
             provider="groq", account_id="A",
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
-        # ③ Groq-B Throughput — en yüksek TPM
+        # ③ Groq-B Throughput — en yüksek TPM (eski llama-4-scout yerine)
         LLMAccount(
             provider="groq", account_id="B",
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="openai/gpt-oss-120b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
-        # ④ Groq-B Burst — en yüksek RPM
+        # ④ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
         LLMAccount(
             provider="groq", account_id="B",
-            model="qwen/qwen3-32b",
+            model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
-            rpm=60, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=60, daily_limit=1000),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
         # ⑤ OpenRouter-A Emergency — 405B
         LLMAccount(
@@ -201,13 +201,15 @@ def build_llm_router() -> LLMRouter:
             bucket=TokenBucket(rate_per_minute=20, daily_limit=200),
         ),
         # ⑦ Reserved for future model slot (Blueprint V20.1 §4.5.2)
-        # ⑧ Groq Bulk Fallback — son çare, 14.4K RPD
+        # ⑧ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
+        # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli
+        # artık 1K RPD üstüne çıkmıyor (2026-06-17 Groq deprecation).
         LLMAccount(
             provider="groq", account_id="A",
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
-            rpm=30, rpd=14400,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=14400),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
     ]
     # Filter out accounts with empty API keys
@@ -218,20 +220,30 @@ def build_llm_router() -> LLMRouter:
 
 
 def build_bulk_router() -> LLMRouter:
-    """Router that uses ONLY the high-quota bulk slot (llama-3.1-8b-instant, 14.4K RPD).
+    """Router for low-stakes, high-volume work (e.g. storyline narrative prose).
 
-    Used for low-stakes, high-volume work (e.g. storyline narrative prose) so it never
-    competes with Pass C classification for the scarce smart-model quota. Falls back to
-    the full router if the bulk account's key is unset.
+    Uses gpt-oss-20b — deliberately a model that is NOT in the main cascade — so bulk
+    narrative work keeps its own separate quota buckets and never competes with Pass C
+    classification for the scarce smart-model quota. Stacking the slot across both Groq
+    keys yields ~2K RPD combined, isolated from classification.
+
+    History: this used to run on llama-3.1-8b-instant (14.4K RPD), but Groq deprecated it
+    on 2026-06-17 and no free-tier chat model exceeds 1K RPD anymore, so capacity is
+    reconstructed by pooling per-key slots instead. Falls back to the full router only if
+    no Groq key is set at all.
     """
-    bulk = LLMAccount(
-        provider="groq", account_id="A",
-        model="llama-3.1-8b-instant",
-        api_key=os.environ.get("GROQ_API_KEY_A", ""),
-        rpm=30, rpd=14400,
-        bucket=TokenBucket(rate_per_minute=30, daily_limit=14400),
-    )
-    if not bulk.api_key:
-        logger.warning("Bulk router: GROQ_API_KEY_A unset, falling back to full router")
+    slots = [
+        LLMAccount(
+            provider="groq", account_id=account_id,
+            model="openai/gpt-oss-20b",
+            api_key=os.environ.get(f"GROQ_API_KEY_{account_id}", ""),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+        )
+        for account_id in ("A", "B")
+    ]
+    active = [s for s in slots if s.api_key]
+    if not active:
+        logger.warning("Bulk router: no GROQ_API_KEY_A/B set, falling back to full router")
         return build_llm_router()
-    return LLMRouter([bulk])
+    return LLMRouter(active)

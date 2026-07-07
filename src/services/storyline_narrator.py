@@ -9,8 +9,8 @@ Token discipline:
   - Only storylines with >= min_events and peak severity >= min_severity.
   - A content `signature` (event ids + latest time) is cached; unchanged storylines
     are skipped (no LLM call).
-  - Runs on the bulk router (llama-3.1-8b-instant, 14.4K RPD) so it never competes
-    with Pass C for smart-model quota.
+  - Runs on the bulk router (gpt-oss-20b, pooled across Groq keys A+B for ~2K RPD) so
+    it never competes with Pass C for smart-model quota.
   - Capped at max_per_run generations per pipeline run.
 """
 

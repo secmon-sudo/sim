@@ -37,7 +37,7 @@ class TestLLMRouter:
     def test_failover_on_rate_limit(self):
         """After rate-limit failure, should rotate to next account."""
         a1 = make_account(model="openai/gpt-oss-120b", rpd=1000)
-        a2 = make_account(model="llama-3.3-70b-versatile", rpd=1000)
+        a2 = make_account(model="qwen/qwen3.6-27b", rpd=1000)
         router = LLMRouter([a1, a2])
 
         # Get first account and report rate limit
@@ -47,7 +47,7 @@ class TestLLMRouter:
 
         # Should rotate to second
         acct2 = router.get_available_account()
-        assert acct2.model == "llama-3.3-70b-versatile"
+        assert acct2.model == "qwen/qwen3.6-27b"
 
     def test_all_exhausted_returns_none(self):
         """When all accounts exhausted, should return None."""
