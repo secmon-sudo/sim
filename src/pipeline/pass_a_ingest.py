@@ -777,11 +777,33 @@ _ADVISORY_UPGRADE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Phrase-based highest-tier wording, so non-US agencies (UK FCDO, Canada, Australia,
+# New Zealand) that don't use "Level N" are still understood. Mapped to the US 1-4 scale.
+_ADVISORY_L4_RE = re.compile(
+    r"\b(do not travel"                          # US L4 / Australia / NZ
+    r"|advise against all travel"                # UK FCDO highest
+    r"|avoid all travel)\b",                     # Canada highest
+    re.IGNORECASE,
+)
+_ADVISORY_L3_RE = re.compile(
+    r"\b(reconsider (your )?(need to )?travel"    # US L3 / Australia
+    r"|advise against all but essential travel"   # UK FCDO second
+    r"|avoid (all )?non[- ]essential travel)\b",  # Canada second
+    re.IGNORECASE,
+)
 
-def _parse_advisory_level(title: str) -> int:
-    """Extract numeric advisory level from title (e.g. 'Level 3'). Returns 0 if not found."""
-    m = _LEVEL_RE.search(title)
-    return int(m.group(1)) if m else 0
+
+def _parse_advisory_level(title: str, description: str = "") -> int:
+    """Highest advisory level implied by the text, on the US 1-4 scale.
+
+    Combines the numeric "Level N" form (US) with phrase-based wording used by other
+    agencies (UK/CA/AU/NZ). Returns the max of the two, or 0 if none is found.
+    """
+    text = f"{title} {description}"
+    m = _LEVEL_RE.search(text)
+    numeric = int(m.group(1)) if m else 0
+    phrase = 4 if _ADVISORY_L4_RE.search(text) else (3 if _ADVISORY_L3_RE.search(text) else 0)
+    return max(numeric, phrase)
 
 
 def _is_advisory_worth_ingesting(title: str, description: str) -> bool:
@@ -802,7 +824,7 @@ def _is_advisory_worth_ingesting(title: str, description: str) -> bool:
     # Rule 2: downgrade
     if _ADVISORY_DOWNGRADE_RE.search(desc_plain):
         return False
-    level = _parse_advisory_level(title)
+    level = _parse_advisory_level(title, desc_plain)
     # Rule 3: high-risk level
     if level >= 3:
         return True
@@ -842,26 +864,47 @@ def fetch_travel_advisories(stats: dict | None = None) -> list[dict]:
                 continue
 
             root = ET.fromstring(resp.text)
-            for item in root.findall(".//item"):
-                title = (item.findtext("title") or "").strip()
-                link = (item.findtext("link") or "").strip()
-                pub_date_str = (item.findtext("pubDate") or "").strip()
-                description = (item.findtext("description") or "").strip()
+            # UK FCDO feeds are curated to high-risk countries (the country selection IS
+            # the L3-4 filter) AND are Atom, not RSS. US State Dept is RSS + "Level N".
+            is_uk = "gov.uk/foreign-travel-advice" in feed_url
+            _ATOM = "{http://www.w3.org/2005/Atom}"
+            entries = root.findall(".//item") or root.findall(f".//{_ATOM}entry")
+            for item in entries:
+                if item.tag.endswith("entry"):  # Atom (UK FCDO)
+                    title = (item.findtext(f"{_ATOM}title") or "").strip()
+                    link_el = item.find(f"{_ATOM}link")
+                    link = ((link_el.get("href") if link_el is not None else "") or "").strip()
+                    pub_date_str = (item.findtext(f"{_ATOM}updated")
+                                    or item.findtext(f"{_ATOM}published") or "").strip()
+                    description = (item.findtext(f"{_ATOM}summary")
+                                   or item.findtext(f"{_ATOM}content") or "").strip()
+                else:  # RSS (US State Dept)
+                    title = (item.findtext("title") or "").strip()
+                    link = (item.findtext("link") or "").strip()
+                    pub_date_str = (item.findtext("pubDate") or "").strip()
+                    description = (item.findtext("description") or "").strip()
 
                 if not title or not link:
                     continue
 
-                # Only ingest level increases / high-risk entries
-                if not _is_advisory_worth_ingesting(title, description):
+                # UK entries are change-notes without level wording, so ingest every
+                # recent entry (the curated high-risk country is the filter). US/level
+                # feeds keep the level-increase / Level 3-4 gate.
+                if not is_uk and not _is_advisory_worth_ingesting(title, description):
                     continue
 
-                # Parse date — advisory feed uses date-only "Mon, 19 May 2026"
+                # Parse date — RSS uses "Mon, 19 May 2026"; Atom uses ISO 8601.
                 pub_dt: datetime | None = None
                 if pub_date_str:
                     try:
-                        pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
+                        pub_dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
                     except Exception:
                         pass
+                    if pub_dt is None:
+                        try:
+                            pub_dt = email.utils.parsedate_to_datetime(pub_date_str)
+                        except Exception:
+                            pass
                     if pub_dt is None:
                         try:
                             t = parsedate(pub_date_str)
@@ -892,9 +935,16 @@ def fetch_travel_advisories(stats: dict | None = None) -> list[dict]:
                 desc_plain = re.sub(r"<[^>]+>", " ", description)
                 desc_plain = re.sub(r"\s+", " ", desc_plain).strip()
 
+                # Advisory page URLs are stable across updates, but the pipeline dedups
+                # permanently by URL hash (INSERT ... WHERE NOT EXISTS source_url_hash).
+                # Stamp the update date onto the link so each genuine update becomes a
+                # distinct event/alert, while the same update seen on repeated runs stays
+                # deduped (no re-alert spam). The fragment is ignored when the link opens.
+                dated_link = f"{link}#adv-{pub_dt.strftime('%Y%m%d')}"
+
                 all_items.append({
                     "title": title,
-                    "link": link,
+                    "link": dated_link,
                     "pub_date": pub_date_str,
                     "pub_dt": pub_dt,
                     "description": desc_plain,
@@ -1612,7 +1662,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # GDELT failure is expected on cloud IPs — never block pipeline
         pass
 
-    # Fetch US State Dept travel advisories — level increases and Level 3/4 only
+    # Fetch official travel advisories (US State Dept + UK FCDO) — Level 3-4 / "do not travel"
     try:
         advisory_items = fetch_travel_advisories(stats=stats)
         all_items.extend(advisory_items)

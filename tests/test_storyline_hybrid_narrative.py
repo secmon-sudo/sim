@@ -40,6 +40,50 @@ class TestDateTokenRemoval:
         assert sim > 0.5
 
 
+def _geo_ev(hint, raw, iso="UA", when=_T0, sev=50):
+    """Event without an IATA anchor but with raw location text for geo-assist."""
+    return {
+        "storyline_hint": hint,
+        "country_iso": iso,
+        "anchor_name_norm": None,
+        "anchor_name_raw": raw,
+        "occurred_at_est": when,
+        "severity_score": sev,
+    }
+
+
+class TestCoarseGeoAssist:
+    def test_same_city_partial_overlap_links(self):
+        # No IATA anchor; same city (KYIV); lexical sim ~0.27 — below the 0.4 main
+        # threshold but above the 0.2 geo floor -> geo-assist links them.
+        a = _geo_ev("kyiv power grid damaged", raw="Kyiv")
+        b = _geo_ev("kyiv power station outage", raw="Kiev")
+        assert 0.2 <= jaccard_similarity(a["storyline_hint"], b["storyline_hint"]) < 0.4
+        assert should_link_storyline(a, b) is True
+
+    def test_capital_paraphrase_zero_overlap_not_linked_here(self):
+        # Same real place (KYIV via capital resolution) but ZERO lexical overlap.
+        # Deterministic geo-assist deliberately does NOT link this — it is the LLM
+        # adjudicator's job (Layer 2), so we don't merge on geography alone.
+        a = _geo_ev("kyiv drone strike", raw="Kyiv")
+        b = _geo_ev("ukrainian capital missile", raw="Ukrainian capital")
+        from src.core.geo import geo_key
+        assert geo_key("Kyiv") == geo_key("Ukrainian capital", "UA")  # same place
+        assert jaccard_similarity(a["storyline_hint"], b["storyline_hint"]) < 0.2
+        assert should_link_storyline(a, b) is False
+
+    def test_different_city_low_overlap_not_linked(self):
+        a = _geo_ev("kyiv power grid outage", raw="Kyiv")
+        b = _geo_ev("moscow power station failure", raw="Moscow", iso="RU")
+        assert should_link_storyline(a, b) is False
+
+    def test_missing_raw_location_is_safe(self):
+        a = _geo_ev("kyiv power grid outage", raw=None)
+        b = _geo_ev("kyiv power station outage", raw=None)
+        # No raw text -> no geo key -> falls through without crashing (main threshold only).
+        assert should_link_storyline(a, b) is False
+
+
 class TestHybridAnchorAssist:
     def test_paraphrase_same_airport_same_day_links(self):
         a = _ev("kabul airport explosion terminal", anchor="KBL", when=_T0)

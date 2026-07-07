@@ -143,6 +143,14 @@ Extract the following fields:
    - MUST include a short date hint (MonDD format, e.g. Jun8, May15)
    - NEVER use generic phrases like "emergency landing" or "bomb threat" alone
    - Two articles about the SAME event MUST produce the SAME hint
+   Consistency rules (critical — the hint is used to group multi-source reports):
+   - Use the most specific COMMON place NAME (the city/airport), NEVER a descriptor
+     like "capital", "the north", "border area", or "the region". Write "Kyiv", not
+     "Ukrainian capital"; "Gaza", not "the enclave".
+   - Use the canonical English spelling: "Kyiv" (not "Kiev"), "Kharkiv" (not "Kharkov"),
+     "Odesa" (not "Odessa"), "Aleppo", "Sanaa".
+   - Order the tokens LOCATION → ACTOR → ACTION every time, so paraphrases converge.
+   - If several places are named, use the PRIMARY target/impact location only.
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1
@@ -164,6 +172,18 @@ WHEN TO USE event_type "noise" (relevance < 30):
 - Reddit hobby discussions: "what is this plane", "spotted this", personal travel
 - Opinion editorials, policy analysis with NO actual incident
 - Generic street crime with NO link to aviation/infrastructure/military
+- Economics/markets/finance: inflation, CPI, interest rates, central-bank surveys,
+  stock/currency/oil-price moves, trade or tariff figures — even when they mention a
+  country, sanctions, or a "deal" (e.g. "CPI expectations before a U.S.-Iran deal")
+- Corporate / ESG / activism: boycotts, divestment, companies "remaining in" or exiting
+  a country, brand statements, shareholder pressure, sustainability pledges
+- Diplomatic/policy commentary with NO physical incident: negotiations, statements,
+  sanctions announcements, treaty debate, election punditry
+
+CRITICAL — do NOT use `geopolitical_conflict` (or any conflict/military type) for the
+above. Those types are ONLY for an actual armed event (a strike, attack, clash, troop
+movement, escalation on the ground). Economic, corporate, or diplomatic stories with no
+physical incident are `noise` (or `political_event` if a concrete government action).
 
 WHEN TO CLASSIFY (relevance >= 30, even if borderline):
 - Any mention of an actual attack, shooting, bombing, stabbing at a specific location

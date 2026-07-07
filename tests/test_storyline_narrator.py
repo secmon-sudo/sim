@@ -95,7 +95,7 @@ class _MockRouter:
 
 def _patch_call_llm(monkeypatch, content="A blast struck Kabul airport, then a second explosion followed."):
     monkeypatch.setattr(narrator, "call_llm", lambda *a, **k: {
-        "content": content, "provider": "groq", "model": "llama-3.1-8b-instant",
+        "content": content, "provider": "groq", "model": "openai/gpt-oss-20b",
     })
 
 

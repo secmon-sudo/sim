@@ -187,7 +187,22 @@ INSERT INTO event_type_catalog VALUES
 ## 4. Multi-Stage Pipeline (GitHub Actions — Every 30 Minutes)
 
 ### PASS A: Ingest & Canonicalization
-Unchanged from V19.
+Unchanged from V19, plus official travel-advisory ingestion (V20.2):
+
+- **Sources:** US State Dept (RSS, "Level N") + UK FCDO per-country Atom feeds
+  (`gov.uk/foreign-travel-advice/{country}.atom`) for a curated set of high-risk
+  countries. `fetch_travel_advisories` parses both RSS `<item>` and Atom `<entry>`.
+- **Filtering:** US/level feeds keep the level-increase / Level 3-4 gate via a
+  multi-agency parser (`_parse_advisory_level` understands "Level N" AND phrase wording:
+  "do not travel", "advise against all travel", "avoid all travel" → L4; "reconsider",
+  "all but essential", "non-essential travel" → L3). UK feeds are curated (the high-risk
+  country selection IS the filter) so every recent entry is ingested.
+- **Re-ingestion:** advisory page URLs are stable, but the pipeline dedups permanently by
+  URL hash, so each item's link is stamped with its update date (`#adv-YYYYMMDD`) — a
+  genuine update becomes a new event/alert, repeated runs of the same update stay deduped.
+- **Alerting:** advisories are country-level (no airport anchor), so `evaluate_alert_tier`
+  routes `travel_advisory`/`travel_ban` on severity alone (bypassing the anchor/time gates)
+  and they are excluded from the generic-umbrella incident gate.
 
 ---
 
@@ -374,10 +389,12 @@ V19 contained no strategy for LLM API quota management. V20 added a single-provi
 | Account | Model ID | Params | RPM | RPD | TPM | TPD | Role |
 |---|---|---|---|---|---|---|---|
 | Groq-A | `openai/gpt-oss-120b` | 120B | 30 | 1,000 | 8K | 200K | **① Primary** — en akıllı, ilk denenen model |
-| Groq-A | `llama-3.3-70b-versatile` | 70B | 30 | 1,000 | 12K | 100K | **② Secondary** — Primary rate-limited olunca devralır |
-| Groq-B | `meta-llama/llama-4-scout-17b-16e-instruct` | 17B×16E MoE | 30 | 1,000 | 30K | 500K | **③ Throughput** — en yüksek TPM (30K), Groq-A dolunca devralır |
-| Groq-B | `qwen/qwen3-32b` | 32B | 60 | 1,000 | 6K | 500K | **④ Burst** — en yüksek RPM (60), Groq-B scout dolunca |
-| Groq-A/B | `llama-3.1-8b-instant` | 8B | 30 | 14,400 | 6K | 500K | **⑧ Bulk fallback** — son çare, düşük zeka ama devasa RPD |
+| Groq-A | `qwen/qwen3.6-27b` | 27B | 30 | 1,000 | 8K | 200K | **② Secondary** — Primary rate-limited olunca devralır (eski llama-3.3-70b-versatile) |
+| Groq-B | `openai/gpt-oss-120b` | 120B | 30 | 1,000 | 8K | 200K | **③ Throughput** — Groq-A dolunca devralır (eski llama-4-scout) |
+| Groq-B | `qwen/qwen3.6-27b` | 27B | 30 | 1,000 | 8K | 200K | **④ Burst** — model çeşitliliği (eski qwen3-32b) |
+| Groq-A/B | `openai/gpt-oss-20b` | 20B | 30 | 1,000 | 8K | 200K | **⑧ Bulk fallback** — son çare (eski llama-3.1-8b-instant); A+B havuzlanınca ~2K RPD |
+
+> **2026-06-17 Groq deprecation:** `llama-3.3-70b-versatile`, `llama-4-scout`, `qwen3-32b` ve `llama-3.1-8b-instant` ücretsiz katmandan kaldırıldı. Önerilen yerine geçenler: `openai/gpt-oss-120b` / `qwen/qwen3.6-27b` (orta/büyük slotlar) ve `openai/gpt-oss-20b` (bulk). Artık hiçbir ücretsiz sohbet modeli 1K RPD'yi aşmıyor — eski 14.4K'lık bulk kapasitesi, slotu iki Groq anahtarına havuzlayarak kısmen telafi edilir.
 
 **OpenRouter Free Tier (2 ayrı hesap, para yüklemeyeceğiz):**
 
@@ -392,28 +409,28 @@ OpenRouter RPD = **200/gün** (unfunded hesap). Her hesap için tek model — 40
 
 | Provider | Akıllı Model RPD | Bulk Fallback RPD | Toplam RPD |
 |---|---|---|---|
-| Groq (2 hesap) | 4,000 | 28,800 | 32,800 |
+| Groq (2 hesap) | 4,000 | 2,000 | 6,000 |
 | OpenRouter (2 hesap) | 400 | — | 400 |
-| **Toplam** | **4,400** | **28,800** | **33,200** |
+| **Toplam** | **4,400** | **2,000** | **6,400** |
 
-Pipeline ihtiyacı: ~48 çalışma/gün × ~50 event = **~2,400 RPD**. Sadece akıllı modellerle bile ihtiyacın **~1.8× üstünde** kapasite var.
+Pipeline ihtiyacı: ~48 çalışma/gün × ~50 event = **~2,400 RPD**. Sadece akıllı modellerle bile ihtiyacın **~1.8× üstünde** kapasite var. (2026-06-17 sonrası bulk kapasitesi 28.8K → 2K RPD düştü; akıllı model kotası ihtiyacı hâlâ karşılıyor.)
 
 #### 4.5.2 Routing Priority Chain
 
 ```
 ① Groq-A  gpt-oss-120b        (120B — en akıllı, ilk denenir)
    ↓ rate-limited veya günlük kota doldu
-② Groq-A  llama-3.3-70b       (70B — kanıtlanmış kalite)
+② Groq-A  qwen3.6-27b         (27B — kanıtlanmış kalite yedeği)
    ↓
-③ Groq-B  llama-4-scout       (MoE — en yüksek token hızı)
+③ Groq-B  gpt-oss-120b        (120B — throughput)
    ↓
-④ Groq-B  qwen3-32b           (32B — en yüksek RPM: 60)
+④ Groq-B  qwen3.6-27b         (27B — model çeşitliliği)
    ↓
 ⑤ OR-A    hermes-3-405b       (405B — en büyük ücretsiz model)
    ↓
 ⑥ OR-B    gpt-oss-120b:free   (120B — cross-provider yedek)
    ↓
-⑧ Groq    llama-3.1-8b-instant (8B — 14.4K RPD, son çare)
+⑧ Groq    gpt-oss-20b         (20B — 1K RPD, son çare)
 ```
 
 #### 4.5.3 TokenBucket (V20.1 — Fixed Day Reset)
@@ -594,7 +611,7 @@ def build_llm_router() -> LLMRouter:
         ),
         LLMAccount(
             provider="groq", account_id="A",
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.6-27b",
             api_key=os.environ["GROQ_API_KEY_A"],
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
@@ -602,17 +619,17 @@ def build_llm_router() -> LLMRouter:
         # === GROQ Account B === (High throughput)
         LLMAccount(
             provider="groq", account_id="B",
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="openai/gpt-oss-120b",
             api_key=os.environ["GROQ_API_KEY_B"],
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
         LLMAccount(
             provider="groq", account_id="B",
-            model="qwen/qwen3-32b",
+            model="qwen/qwen3.6-27b",
             api_key=os.environ["GROQ_API_KEY_B"],
-            rpm=60, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=60, daily_limit=1000),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
         # === OPENROUTER Account A === (Emergency — en zeki ücretsiz model)
         LLMAccount(
@@ -630,13 +647,13 @@ def build_llm_router() -> LLMRouter:
             rpm=20, rpd=200,
             bucket=TokenBucket(rate_per_minute=20, daily_limit=200),
         ),
-        # === GROQ Bulk Fallback === (son çare, 14.4K RPD)
+        # === GROQ Bulk Fallback === (son çare, 1K RPD; A+B havuzlanınca ~2K)
         LLMAccount(
             provider="groq", account_id="A",
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             api_key=os.environ["GROQ_API_KEY_A"],
-            rpm=30, rpd=14400,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=14400),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
         ),
     ]
     return LLMRouter(accounts)
@@ -818,10 +835,48 @@ def should_link_storyline(event_a: dict, event_b: dict) -> bool:
     return similarity > 0.4 and same_country and within_window
 ```
 
-#### Scoring (Unchanged from V19)
+#### Hybrid Storyline Dedup (V20.2 — geo-assist + LLM adjudicator + alert fingerprint)
 
-- **Severity:** `Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20)`. Max 100.
+Pure lexical Jaccard on `storyline_hint` fails for the dominant real-world case: one
+incident (e.g. a Kyiv strike) reported by ~20 sources whose paraphrased hints share
+almost no tokens ("Kyiv Russia drone strike" vs "Ukrainian capital missile attack").
+Each fragment spawned a new `storyline_id`, and because the Telegram suppression key was
+keyed on `storyline_id`, every source paged separately. Three layers fix this:
+
+- **Layer 1 — coarse geo-assist** (`src/core/geo.py`). The airport `anchor_master`
+  gazetteer is IATA-centric, so city events never resolve to an anchor. `geo_key()` is a
+  DB-free, paraphrase-stable coarse key (`Kyiv`/`Kiev`/`Ukraine capital` → `KYIV`), wired
+  into `should_link_storyline` as a fallback "anchor". It requires a 0.2 lexical floor —
+  never a pure-time auto-link — so two DISTINCT same-city incidents are not merged on
+  geography alone.
+- **Layer 2 — LLM adjudicator** (`src/core/storyline_adjudicator.py`). When deterministic
+  linking finds no match, same-country + same-geo + near-time candidates (the ambiguous,
+  near-zero-overlap residue) are judged by a single LLM call: "SAME real-world incident,
+  or NEW?". Runs on the **bulk router (gpt-oss-20b)** so it never competes with Pass C
+  classification quota; fails safe to NEW (can only ever merge, never lose an event).
+  Config-gated via `storyline.llm_adjudication_enabled`.
+- **Layer 3 — storyline-independent alert fingerprint** (`build_geo_suppression_key`).
+  Alongside the primary suppression key, `dispatch_alert` also checks/records a
+  `geofp|country|geo|severity_bucket` key, so duplicate alerts collapse within the TTL
+  even if the storyline still fragments.
+
+Pass C is also nudged to emit canonical hints (city name over descriptors like
+"capital", consistent `LOCATION → ACTOR → ACTION` order) so paraphrases converge upstream.
+
+#### Scoring (V20.2 — umbrella rebalance + incident gate)
+
+- **Severity:** `Base_Type_Weight + Proximity_Bonus (+30) + CZIB_Bonus (+20) + Casualty_Bonus`. Max 100.
 - **Confidence:** `Max(0.0, Min(1.0, (llm_confidence * 0.4) + (anchor_score_val * 0.3) + (diversity_score * 0.3)))`
+- **Umbrella rebalance** (migration `012`): generic parent types the LLM over-uses as
+  catch-alls were dropped — `geopolitical_conflict` 85→45, `political_event` 60→35. The
+  SPECIFIC incident children (missile_strike 100, military_action 95, war_escalation 90,
+  civilian_casualties 92, …) are unchanged and still carry the real severity.
+- **Incident gate** (defense-in-depth, `compute_severity`): a generic umbrella type with
+  NO located anchor (no proximity bonus) AND NO reported casualties is commentary/analysis,
+  not an actionable incident, and is capped at `scoring.incident_gate_cap` (50). This makes
+  an LLM mislabel — e.g. an inflation/CPI survey or a corporate "companies remaining in
+  Russia" story tagged `geopolitical_conflict` — impossible to escalate to near-critical,
+  regardless of the type's catalog base.
 
 ---
 
@@ -1211,7 +1266,7 @@ def test_rate_limiter_daily_quota():
 **Acceptance Criteria:**
 - Groq-A rate-limited → automatic rotation to Groq-A secondary model, <2s added latency.
 - All Groq accounts exhausted → seamless failover to OpenRouter-A.
-- All smart accounts exhausted → fallback to `llama-3.1-8b-instant` (14.4K RPD bulk).
+- All smart accounts exhausted → fallback to `openai/gpt-oss-20b` (1K RPD bulk slot).
 - All accounts exhausted → `RuntimeError` raised, pipeline defers to next cycle, telemetry record written.
 - Correct `provider`, `account`, `model` fields written to `system_telemetry` after each rotation.
 - Rate-limited accounts auto-recover after cooldown period (60s RPM, 120s 429).
@@ -1220,7 +1275,7 @@ def test_rate_limiter_daily_quota():
 def test_router_failover_on_rate_limit():
     accounts = [
         make_account("groq", "A", "openai/gpt-oss-120b", rpd=1),
-        make_account("groq", "A", "llama-3.3-70b-versatile", rpd=1000),
+        make_account("groq", "A", "qwen/qwen3.6-27b", rpd=1000),
     ]
     router = LLMRouter(accounts)
     # Exhaust first account
@@ -1229,7 +1284,7 @@ def test_router_failover_on_rate_limit():
     router.report_failure(acct1, is_rate_limit=True)
     # Should rotate to second
     acct2 = router.get_available_account()
-    assert acct2.model == "llama-3.3-70b-versatile"
+    assert acct2.model == "qwen/qwen3.6-27b"
 
 def test_router_all_exhausted():
     accounts = [make_account("groq", "A", "test-model", rpd=0)]

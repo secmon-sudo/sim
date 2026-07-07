@@ -9,6 +9,8 @@ composite suppression key to prevent duplicate notifications.
 import logging
 from dataclasses import dataclass
 
+from src.core.geo import geo_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,13 @@ TIERS = {
     "WATCH":    AlertTier("WATCH",    "#CA8A04", ["telegram"]),
 }
 
+# Official government travel advisories are actionable at the COUNTRY level, so they
+# never carry an airport anchor and the standard anchor/time gates would drop them.
+# They are pre-filtered upstream (Level 3-4 / "do not travel", curated high-risk
+# countries) so gate them on severity alone.
+ADVISORY_EVENT_TYPES = {"travel_advisory", "travel_ban"}
+ADVISORY_ALERT_SEVERITY_MIN = 55
+
 
 def evaluate_alert_tier(event: dict) -> str | None:
     """
@@ -36,6 +45,12 @@ def evaluate_alert_tier(event: dict) -> str | None:
     conf = event.get("system_confidence", 0.0)
     anc = event.get("anchor_confidence", "LOW")
     time_ = event.get("time_certainty", "unknown")
+
+    # Travel advisory path — country-level official warning, no airport anchor and its
+    # "time" is the standing advisory date, so bypass the anchor/time gates and key on
+    # severity only (already pre-filtered to Level 3-4 / "do not travel" upstream).
+    if event.get("event_type") in ADVISORY_EVENT_TYPES:
+        return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
 
     # CRITICAL — original V19 gate, unchanged
     if sev >= 80 and conf >= 0.8 and anc == "HIGH" and time_ != "unknown":
@@ -60,6 +75,33 @@ def build_suppression_key(event: dict) -> str:
     return "|".join([
         str(event.get("storyline_id") or "no_storyline"),
         event.get("anchor_name_norm") or "UNKNOWN",
+        str(int(event.get("severity_score", 0) // 10) * 10),
+    ])
+
+
+def build_geo_suppression_key(event: dict) -> str | None:
+    """Storyline-independent suppression fingerprint (safety net).
+
+    The primary key keys off storyline_id, so when the same real-world event is split
+    across several storyline_ids (paraphrased hints that fall below the Jaccard
+    threshold), each fragment produces a different primary key and every source pages
+    separately. This fingerprint drops storyline_id and keys off coarse geography
+    instead — country + resolved location + severity bucket — so near-identical alerts
+    within the suppression TTL collapse regardless of storyline fragmentation.
+
+    Location resolution prefers the precise IATA anchor, then a coarse geo_key derived
+    from the raw location text. Returns None when no usable location is known (so the
+    net is never so broad that it mutes unrelated same-country alerts).
+    """
+    loc = event.get("anchor_name_norm") or geo_key(
+        event.get("anchor_name_raw"), event.get("country_iso")
+    )
+    if not loc or loc == "UNKNOWN":
+        return None
+    return "|".join([
+        "geofp",
+        event.get("country_iso") or "??",
+        loc,
         str(int(event.get("severity_score", 0) // 10) * 10),
     ])
 

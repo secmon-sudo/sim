@@ -54,15 +54,17 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 
 ```
 ① Groq-A  gpt-oss-120b        (120B — primary)
-② Groq-A  llama-3.3-70b       (70B — secondary)
-③ Groq-B  llama-4-scout       (MoE — high throughput)
-④ Groq-B  qwen3-32b           (32B — burst RPM)
+② Groq-A  qwen3.6-27b         (27B — secondary)
+③ Groq-B  gpt-oss-120b        (120B — high throughput)
+④ Groq-B  qwen3.6-27b         (27B — burst)
 ⑤ OR-A    hermes-3-405b       (405B — emergency)
 ⑥ OR-B    gpt-oss-120b:free   (120B — cross-provider)
-⑧ Groq    llama-3.1-8b-instant (8B — bulk fallback, 14.4K RPD)
+⑧ Groq    gpt-oss-20b         (20B — bulk fallback, 1K RPD)
 ```
 
-**Total daily capacity:** ~33,200 RPD across 7 model slots.
+**Total daily capacity:** ~5,400 RPD across 7 model slots.
+_(2026-06-17: Groq retired llama-3.3-70b-versatile, llama-4-scout, qwen3-32b and
+llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore.)_
 
 ## Source Coverage
 

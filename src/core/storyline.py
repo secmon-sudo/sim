@@ -8,6 +8,8 @@ Bigram-enhanced Jaccard similarity for linking related aviation events.
 import re
 from typing import Set
 
+from src.core.geo import geo_key
+
 # Context-independent words and generic incident types that dilute Jaccard signal
 AVIATION_STOPWORDS = {
     # Common English stopwords
@@ -138,6 +140,20 @@ def should_link_storyline(
             return True
         # Same place, far apart in time → require some lexical overlap.
         if similarity >= anchor_assist_threshold:
+            return True
+
+    # ── Coarse geo-assist (city-level, for events without a shared IATA anchor) ──
+    # Most Russia–Ukraine / Middle-East volume is city-level and never resolves to an
+    # airport IATA, so the anchor path above never fires for it. Fall back to a coarse,
+    # paraphrase-stable geo_key (e.g. "Kyiv"/"Kiev"/"Ukraine capital" → KYIV) and link
+    # when the SAME place shows a minimum lexical overlap. Unlike the IATA path there is
+    # deliberately NO pure-time auto-link: a city is coarser than a specific airport, so
+    # lexical support is always required to avoid merging two DISTINCT same-city events.
+    # Zero-overlap same-city candidates are left for the LLM adjudicator (Layer 2).
+    if not (anchor_a and anchor_a == anchor_b):
+        geo_a = geo_key(event_a.get("anchor_name_raw"), iso_a)
+        geo_b = geo_key(event_b.get("anchor_name_raw"), iso_b)
+        if geo_a and geo_a == geo_b and similarity >= anchor_assist_threshold:
             return True
 
     return False

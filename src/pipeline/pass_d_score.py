@@ -13,7 +13,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.core.alerts import build_suppression_key, evaluate_alert_tier, is_suppressed, record_suppression
+from src.core.alerts import (
+    build_geo_suppression_key,
+    build_suppression_key,
+    evaluate_alert_tier,
+    is_suppressed,
+    record_suppression,
+)
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.storyline import jaccard_similarity, should_link_storyline
 from src.services.telegram_notifier import send_telegram_alert
@@ -87,6 +93,18 @@ SAFETY_EVENT_TYPES = {
     "bird_strike", "engine_failure", "emergency_landing", "depressurization",
 }
 SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
+
+# Generic "umbrella" event types the LLM reaches for on any geopolitics/policy-flavoured
+# story. Used by the incident gate: an umbrella label with no located anchor and no
+# casualties is commentary/analysis, not an actionable incident, and is capped so a
+# single LLM mislabel can never become a near-critical alert.
+# NB: travel_advisory is deliberately NOT here — official advisories are country-level
+# (no airport anchor, no casualties) but ARE actionable, and have their own alert path.
+GENERIC_UMBRELLA_TYPES = {
+    "geopolitical_conflict", "political_event", "civil_unrest",
+    "humanitarian_crisis",
+}
+INCIDENT_GATE_CAP = _SCORING.get("incident_gate_cap", 50)
 SAFETY_LIFT_ON_MASS_CASUALTY = _SCORING.get("safety_lift_cap_on_mass_casualty", True)
 LLM_CONF_WEIGHT = _SCORING.get("llm_confidence_weight", 0.4)
 ANCHOR_CONF_WEIGHT = _SCORING.get("anchor_confidence_weight", 0.3)
@@ -105,6 +123,12 @@ STORYLINE_TIME_WINDOW_DAYS = _STORYLINE.get("time_window_days", 14)
 STORYLINE_COUNTRY_MATCH_REQUIRED = _STORYLINE.get("country_match_required", True)
 STORYLINE_ANCHOR_ASSIST_THRESHOLD = _STORYLINE.get("anchor_assist_threshold", 0.2)
 STORYLINE_ANCHOR_ASSIST_MAX_HOURS = _STORYLINE.get("anchor_assist_max_hours", 72)
+# Layer 2 — LLM adjudication of same-place/near-time candidates the deterministic
+# linker left unlinked (paraphrases with near-zero lexical overlap). Bounded to the
+# ambiguous residue and run on the bulk router so it never touches classification quota.
+STORYLINE_LLM_ADJUDICATION = _STORYLINE.get("llm_adjudication_enabled", True)
+STORYLINE_ADJUDICATION_WINDOW_HOURS = _STORYLINE.get("adjudication_window_hours", 48)
+STORYLINE_ADJUDICATION_MAX_CANDIDATES = _STORYLINE.get("adjudication_max_candidates", 6)
 
 
 def _safe_float(value, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -245,7 +269,30 @@ def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_par
     if llm_parsed:
         score += compute_casualty_bonus(llm_parsed)
 
+    # Incident gate (defense-in-depth): a generic umbrella type with NO located anchor
+    # and NO reported casualties is analysis/commentary, not an actionable incident.
+    # Cap it so an LLM mislabel (e.g. an inflation survey tagged geopolitical_conflict)
+    # can never be near-critical, regardless of the type's catalog base.
+    has_proximity = bool(anchor_data and anchor_data.get("confidence", 0) >= 0.6)
+    if (event_type in GENERIC_UMBRELLA_TYPES
+            and not has_proximity
+            and not _has_casualties(llm_parsed)):
+        score = min(score, INCIDENT_GATE_CAP)
+
     return min(score, MAX_SEVERITY)
+
+
+def _has_casualties(llm_parsed: dict | None) -> bool:
+    """True if the LLM extracted any deaths/injuries/missing (a real-incident signal)."""
+    if not llm_parsed:
+        return False
+    casualties = llm_parsed.get("casualties") or {}
+    if not isinstance(casualties, dict):
+        return False
+    try:
+        return any(int(casualties.get(k) or 0) > 0 for k in ("deaths", "injuries", "missing"))
+    except (TypeError, ValueError):
+        return False
 
 
 def compute_confidence(llm_confidence: float, anchor_confidence: float, diversity_score: float = 0.5) -> float:
@@ -396,21 +443,27 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
         event["alert_tier"] = "ALERT"
 
     supp_key = build_suppression_key(event)
-    if is_suppressed(db_conn, supp_key):
+    # Storyline-independent safety net: mutes same-place/same-severity duplicates even
+    # when the storyline_id fragments across paraphrased sources (None if no location).
+    geo_supp_key = build_geo_suppression_key(event)
+    supp_keys = [k for k in (supp_key, geo_supp_key) if k]
+
+    if any(is_suppressed(db_conn, k) for k in supp_keys):
         return "suppressed"
 
-    # Durably claim the alert slot first (record_suppression commits internally).
-    record_suppression(db_conn, supp_key, event["alert_tier"], event_id,
-                        ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
+    # Durably claim the alert slot(s) first (record_suppression commits internally).
+    for k in supp_keys:
+        record_suppression(db_conn, k, event["alert_tier"], event_id,
+                           ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
 
     if send_telegram_alert(event):
         return "sent"
 
-    # Send failed — release the claim so a sibling event can retry next time.
+    # Send failed — release the claim(s) so a sibling event can retry next time.
     logger.warning("Telegram alert send failed for %s; releasing suppression", event_id[:8])
     try:
         db_conn.execute(
-            "DELETE FROM alert_suppression WHERE suppression_key = %s", (supp_key,)
+            "DELETE FROM alert_suppression WHERE suppression_key = ANY(%s)", (supp_keys,)
         )
         db_conn.commit()
     except Exception:
@@ -424,7 +477,7 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
     try:
         rows = db_conn.execute(
             """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est,
-                      anchor_name_norm
+                      anchor_name_norm, anchor_name_raw
                FROM events
                WHERE status IN ('scored', 'reconciled')
                  AND storyline_hint IS NOT NULL
@@ -440,6 +493,7 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
                 "country_iso": r[3],
                 "occurred_at_est": r[4],
                 "anchor_name_norm": r[5],
+                "anchor_name_raw": r[6],
             }
             for r in rows
         ]
@@ -448,8 +502,13 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
         return []
 
 
-def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dict | None:
-    """Score a single classified event: resolve anchor, compute severity/confidence, assign alert tier."""
+def score_single_event(db_conn, event_id: str, recent_events: list[dict],
+                       adjudicator=None) -> dict | None:
+    """Score a single classified event: resolve anchor, compute severity/confidence, assign alert tier.
+
+    adjudicator: optional callable(event, recent_events) -> storyline_id | None, invoked
+    ONLY when deterministic linking finds no match, to resolve same-place paraphrases.
+    """
     try:
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, country_iso,
@@ -503,6 +562,13 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
 
         # 3. Try storyline linking first (needed for diversity score)
         storyline_id = link_storylines(event, recent_events)
+        if not storyline_id and adjudicator is not None:
+            # Deterministic linking failed — let the LLM adjudicator judge same-place,
+            # near-time candidates (paraphrases the lexical path could not confirm).
+            try:
+                storyline_id = adjudicator(event, recent_events)
+            except Exception:
+                logger.exception("Storyline adjudicator failed for %s", event_id[:8])
         if not storyline_id:
             storyline_id = str(uuid.uuid4())
 
@@ -531,6 +597,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "system_confidence": system_conf,
             "anchor_confidence": anchor["level"],
             "time_certainty": event["llm_parsed"].get("time_certainty", "unknown"),
+            "event_type": event["event_type"],
         }
         alert_tier = evaluate_alert_tier(alert_data)
 
@@ -628,6 +695,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict]) -> dic
             "country_iso": event.get("country_iso"),
             "occurred_at_est": occurred_at_est,
             "anchor_name_norm": event.get("anchor_name_norm"),
+            "anchor_name_raw": event.get("anchor_name_raw"),
         })
 
         logger.info(
@@ -669,12 +737,31 @@ def run_pass_d(db_conn) -> dict:
         # Fetch recent events once for storyline linking
         recent_events = _fetch_recent_events_for_linking(db_conn)
 
+        # Build the Layer 2 LLM adjudicator once per pass (bulk router, isolated quota).
+        # Any init failure degrades gracefully to deterministic-only linking.
+        adjudicator = None
+        if STORYLINE_LLM_ADJUDICATION:
+            try:
+                from src.core.llm_router import build_bulk_router
+                from src.core.storyline_adjudicator import adjudicate_storyline
+                _adj_router = build_bulk_router()
+
+                def adjudicator(event, recent, _router=_adj_router):
+                    return adjudicate_storyline(
+                        event, recent, _router,
+                        window_hours=STORYLINE_ADJUDICATION_WINDOW_HOURS,
+                        max_candidates=STORYLINE_ADJUDICATION_MAX_CANDIDATES,
+                    )
+            except Exception:
+                logger.exception("Failed to init storyline adjudicator; deterministic only")
+                adjudicator = None
+
         rows = db_conn.execute(
             "SELECT id FROM events WHERE status = 'classified' ORDER BY ingested_at ASC",
         ).fetchall()
 
         for row in rows:
-            result = score_single_event(db_conn, str(row[0]), recent_events)
+            result = score_single_event(db_conn, str(row[0]), recent_events, adjudicator)
             if result:
                 stats["events_scored"] += 1
                 tier = result.get("alert_tier")

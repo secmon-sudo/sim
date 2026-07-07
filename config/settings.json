@@ -31,6 +31,7 @@
     "aviation_nexus_bonus": 15,
     "safety_severity_cap": 40,
     "safety_lift_cap_on_mass_casualty": true,
+    "incident_gate_cap": 50,
     "max_severity": 100,
     "llm_confidence_weight": 0.4,
     "anchor_confidence_weight": 0.3,
@@ -46,7 +47,10 @@
     "country_match_required": true,
     "time_window_days": 14,
     "anchor_assist_threshold": 0.2,
-    "anchor_assist_max_hours": 72
+    "anchor_assist_max_hours": 72,
+    "llm_adjudication_enabled": true,
+    "adjudication_window_hours": 48,
+    "adjudication_max_candidates": 6
   },
   "narrative": {
     "enabled": true,
@@ -168,7 +172,21 @@
       "https://nitter.poast.org"
     ],
     "travel_advisory_feeds": [
-      "https://travel.state.gov/_res/rss/TAsTWs.xml"
+      "https://travel.state.gov/_res/rss/TAsTWs.xml",
+      "https://www.gov.uk/foreign-travel-advice/ukraine.atom",
+      "https://www.gov.uk/foreign-travel-advice/russia.atom",
+      "https://www.gov.uk/foreign-travel-advice/israel.atom",
+      "https://www.gov.uk/foreign-travel-advice/iran.atom",
+      "https://www.gov.uk/foreign-travel-advice/lebanon.atom",
+      "https://www.gov.uk/foreign-travel-advice/syria.atom",
+      "https://www.gov.uk/foreign-travel-advice/yemen.atom",
+      "https://www.gov.uk/foreign-travel-advice/iraq.atom",
+      "https://www.gov.uk/foreign-travel-advice/egypt.atom",
+      "https://www.gov.uk/foreign-travel-advice/mali.atom",
+      "https://www.gov.uk/foreign-travel-advice/somalia.atom",
+      "https://www.gov.uk/foreign-travel-advice/sudan.atom",
+      "https://www.gov.uk/foreign-travel-advice/afghanistan.atom",
+      "https://www.gov.uk/foreign-travel-advice/nigeria.atom"
     ]
   }
 }
