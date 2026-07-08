@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from src.core.llm_router import LLMAccount, LLMRouter, ProviderStatus
+from src.core.llm_router import (
+    LLMAccount,
+    LLMRouter,
+    ProviderStatus,
+    build_bulk_router,
+    build_llm_router,
+    reset_bucket_registry,
+)
 from src.core.token_bucket import TokenBucket
 
 
@@ -84,6 +91,23 @@ class TestLLMRouter:
         assert acct.status == ProviderStatus.ERROR
         assert acct.daily_errors == 10
 
+    def test_hard_error_sidelines_slot(self):
+        """A deterministic 4xx should cooldown the slot so it isn't re-picked this loop."""
+        a1 = make_account(model="qwen/qwen3.6-27b", rpd=1000)
+        a2 = make_account(model="openai/gpt-oss-120b", rpd=1000)
+        router = LLMRouter([a1, a2])
+
+        acct1 = router.get_available_account()
+        assert acct1.model == "qwen/qwen3.6-27b"
+        router.report_failure(acct1, hard_error=True)
+
+        # Broken slot is now on cooldown → router skips it and hands over the next one,
+        # instead of returning the same slot again on its remaining burst tokens.
+        assert acct1.status == ProviderStatus.RATE_LIMITED
+        assert acct1.cooldown_until > time.monotonic()
+        acct2 = router.get_available_account()
+        assert acct2.model == "openai/gpt-oss-120b"
+
     def test_report_success_resets(self):
         """Successful call should reset error count and status."""
         a1 = make_account(rpd=1000)
@@ -113,6 +137,21 @@ class TestLLMRouter:
         assert "groq/A/test" in snap
         assert snap["groq/A/test"]["status"] == "active"
 
+    def test_seconds_until_available(self):
+        """Reports 0 when ready, the soonest cooldown when throttled, None when exhausted."""
+        a1 = make_account(rpd=1000)
+        router = LLMRouter([a1])
+        assert router.seconds_until_available() == 0.0
+
+        acct = router.get_available_account()
+        router.report_failure(acct, is_rate_limit=True)
+        wait = router.seconds_until_available()
+        assert wait is not None and wait > 0
+
+        # Daily-exhausted account can't recover today → None.
+        acct.status = ProviderStatus.QUOTA_EXHAUSTED
+        assert router.seconds_until_available() is None
+
     def test_cross_provider_failover(self):
         """Groq exhausted → should failover to OpenRouter."""
         groq = make_account(provider="groq", model="groq-model", rpd=1)
@@ -126,3 +165,33 @@ class TestLLMRouter:
         # Next request should go to openrouter
         a2 = router.get_available_account()
         assert a2.provider == "openrouter"
+
+
+class TestSharedBuckets:
+    def test_same_key_model_shares_one_bucket(self, monkeypatch):
+        """The main router's gpt-oss-20b (key A) and the bulk router's must share a bucket,
+        so their combined usage counts against the one real server-side quota."""
+        reset_bucket_registry()
+        monkeypatch.setenv("GROQ_API_KEY_A", "keyA")
+        monkeypatch.setenv("GROQ_API_KEY_B", "keyB")
+        monkeypatch.delenv("OPENROUTER_API_KEY_A", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY_B", raising=False)
+
+        main = build_llm_router()
+        bulk = build_bulk_router()
+
+        def bucket_for(router, model, key):
+            return next(
+                a.bucket for a in router.accounts
+                if a.model == model and a.api_key == key
+            )
+
+        main_20b = bucket_for(main, "openai/gpt-oss-20b", "keyA")
+        bulk_20b = bucket_for(bulk, "openai/gpt-oss-20b", "keyA")
+        assert main_20b is bulk_20b  # same object → shared accounting
+
+        # Distinct (key, model) pairs must NOT share.
+        main_120b_a = bucket_for(main, "openai/gpt-oss-120b", "keyA")
+        main_120b_b = bucket_for(main, "openai/gpt-oss-120b", "keyB")
+        assert main_120b_a is not main_120b_b
+        reset_bucket_registry()

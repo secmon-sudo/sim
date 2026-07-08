@@ -22,12 +22,19 @@ class TokenBucket:
     burst           : max tokens held at once (None = rate_per_minute). Caps the
                       initial/idle burst so we don't fire a full minute of requests
                       back-to-back and trip provider RPM/TPM limits.
+    tpm_limit       : tokens-per-minute ceiling (None = untracked). Modeled as a second
+                      sliding window because for Groq's free tier TPM (8K) is far tighter
+                      than RPM (30) — a burst of requests trips TPM long before RPM, which
+                      is what drove the "all accounts 429" cascade. acquire() charges the
+                      caller's estimated tokens against this window.
     """
     rate_per_minute: float
     daily_limit: int | None = None
     burst: float | None = None
+    tpm_limit: int | None = None
 
     _tokens: float = field(init=False)
+    _tpm_tokens: float = field(init=False)
     _last_refill: float = field(default_factory=time.monotonic, init=False)
     _daily_used: int = field(default=0, init=False)
     _current_day: datetime.date = field(default_factory=datetime.date.today, init=False)
@@ -37,13 +44,17 @@ class TokenBucket:
         if self.burst is None:
             self.burst = self.rate_per_minute
         self._tokens = self.burst
+        self._tpm_tokens = float(self.tpm_limit) if self.tpm_limit is not None else 0.0
 
-    def acquire(self, timeout: float = 300.0) -> bool:
-        """Block until a token is available or timeout is reached.
+    def acquire(self, est_tokens: int = 0, timeout: float = 300.0) -> bool:
+        """Block until a request slot is available or timeout is reached.
+
+        est_tokens: estimated tokens this call will consume (prompt + max_tokens),
+        charged against the TPM window. Ignored when tpm_limit is None.
 
         Raises:
             RuntimeError: If daily quota is exhausted.
-            TimeoutError: If token cannot be acquired within timeout.
+            TimeoutError: If a slot cannot be acquired within timeout.
         """
         deadline = time.monotonic() + timeout
 
@@ -56,9 +67,15 @@ class TokenBucket:
                     raise RuntimeError(
                         "Daily LLM quota exhausted. Pipeline will resume tomorrow."
                     )
-                if self._tokens >= 1:
+                # A request needs both an RPM token and enough TPM budget. Clamp the TPM
+                # requirement so an oversized prompt just waits for a near-full window
+                # rather than deadlocking on a demand no window can ever satisfy.
+                tpm_need = 0.0 if self.tpm_limit is None else min(est_tokens, self.tpm_limit)
+                if self._tokens >= 1 and self._tpm_tokens >= tpm_need:
                     self._tokens -= 1
                     self._daily_used += 1
+                    if self.tpm_limit is not None:
+                        self._tpm_tokens = max(0.0, self._tpm_tokens - est_tokens)
                     return True
 
             if time.monotonic() >= deadline:
@@ -76,6 +93,11 @@ class TokenBucket:
             self.burst,
             self._tokens + elapsed * (self.rate_per_minute / 60.0),
         )
+        if self.tpm_limit is not None:
+            self._tpm_tokens = min(
+                float(self.tpm_limit),
+                self._tpm_tokens + elapsed * (self.tpm_limit / 60.0),
+            )
         self._last_refill = now
         # Reliable day-boundary reset using date comparison
         today = datetime.date.today()

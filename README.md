@@ -66,6 +66,16 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 _(2026-06-17: Groq retired llama-3.3-70b-versatile, llama-4-scout, qwen3-32b and
 llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore.)_
 
+**Rate limiting:** The binding constraint on Groq's free tier is **TPM (8K)**, not RPM
+(30) — a classification is ~2–3K tokens, so only ~3 fit per minute. The router models a
+per-(key, model) TPM window (`TokenBucket.tpm_limit`) and charges each call's estimated
+tokens against it, so a burst can't trip provider 429s and cascade the whole pool into
+cooldown. When every slot is momentarily throttled, Pass C paces (waits for the next token
+refill and retries) instead of aborting. qwen3.6-27b is a reasoning model, so its calls set
+`reasoning_effort:"none"` — otherwise thinking consumes the whole budget and Groq rejects
+the empty JSON with `400 json_validate_failed`. Router instances that share a (key, model)
+pair (main + bulk) share one bucket to keep quota accounting truthful.
+
 ## Source Coverage
 
 - **Targeted Google News queries** (always-on static feeds): hotel attacks/bombings/sieges, airport attacks/bombings/explosions, suicide bombings & vehicle bombs, terror attacks with casualties, attacks on tourists — plus ~110 rotating tier queries (aviation security, transit attacks, protests, travel advisories).

@@ -30,8 +30,16 @@ MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300
 # Repeated hard (non-429) errors: likely a real outage/bad key — back off long.
 ERROR_COOLDOWN_SECONDS = 600
 ERROR_THRESHOLD = 10
+# Deterministic client error (HTTP 4xx other than 429): the request is structurally
+# rejected (bad model, unsupported param, bad key). Sideline the slot briefly so the
+# router stops re-selecting it within the same rotation loop — where no cooldown means
+# a broken slot gets picked again on its remaining burst tokens (the double-400 we saw).
+CLIENT_ERROR_COOLDOWN_SECONDS = 120
 # Max tokens held at once per model slot — smooths the opening burst.
 DEFAULT_BURST = 8
+# Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.6-27b all list 8K).
+# This — not RPM — is the binding constraint; modeling it stops a burst from tripping 429.
+GROQ_TPM = 8000
 
 
 class ProviderStatus(Enum):
@@ -93,10 +101,12 @@ class LLMRouter:
     def accounts(self) -> list[LLMAccount]:
         return self._accounts
 
-    def get_available_account(self) -> Optional[LLMAccount]:
+    def get_available_account(self, est_tokens: int = 0) -> Optional[LLMAccount]:
         """Return the highest-priority account that can accept a request.
 
-        Returns None if all accounts are exhausted or in cooldown.
+        est_tokens: estimated tokens for this call (prompt + max_tokens), charged
+        against each account's TPM window so a burst can't blow the per-minute token
+        ceiling. Returns None if all accounts are exhausted or in cooldown.
         """
         with self._lock:
             now = time.monotonic()
@@ -104,13 +114,13 @@ class LLMRouter:
                 # Active and not in cooldown → try to acquire
                 if acct.status == ProviderStatus.ACTIVE and acct.cooldown_until <= now:
                     try:
-                        acct.bucket.acquire(timeout=0)
+                        acct.bucket.acquire(est_tokens=est_tokens, timeout=0)
                         return acct
                     except TimeoutError:
                         acct.status = ProviderStatus.RATE_LIMITED
                         acct.cooldown_until = now + RPM_COOLDOWN_SECONDS
                         logger.info(
-                            "Account %s RPM limited, cooldown %ds",
+                            "Account %s RPM/TPM limited, cooldown %ds",
                             acct.display_name, RPM_COOLDOWN_SECONDS,
                         )
                     except RuntimeError:
@@ -121,7 +131,7 @@ class LLMRouter:
                 elif acct.status == ProviderStatus.RATE_LIMITED and acct.cooldown_until <= now:
                     acct.status = ProviderStatus.ACTIVE
                     try:
-                        acct.bucket.acquire(timeout=0)
+                        acct.bucket.acquire(est_tokens=est_tokens, timeout=0)
                         return acct
                     except (TimeoutError, RuntimeError):
                         acct.cooldown_until = now + RPM_COOLDOWN_SECONDS
@@ -139,11 +149,14 @@ class LLMRouter:
         acct: LLMAccount,
         is_rate_limit: bool = False,
         retry_after: float | None = None,
+        hard_error: bool = False,
     ):
         """Mark an account as degraded after a failed call.
 
         retry_after: seconds from the provider's Retry-After header (429), if any.
         Honored over the default cooldown, clamped to MAX_RATE_LIMIT_COOLDOWN_SECONDS.
+        hard_error: a deterministic client 4xx (not 429) — sideline the slot on a short
+        cooldown so it leaves the rotation instead of being re-picked on burst tokens.
         """
         with self._lock:
             if is_rate_limit:
@@ -157,6 +170,14 @@ class LLMRouter:
                     acct.display_name, cooldown,
                     " (Retry-After)" if retry_after else "",
                 )
+            elif hard_error:
+                acct.daily_errors += 1
+                acct.status = ProviderStatus.RATE_LIMITED
+                acct.cooldown_until = time.monotonic() + CLIENT_ERROR_COOLDOWN_SECONDS
+                logger.warning(
+                    "Account %s hard client error (4xx), cooldown %ds",
+                    acct.display_name, CLIENT_ERROR_COOLDOWN_SECONDS,
+                )
             else:
                 acct.daily_errors += 1
                 if acct.daily_errors >= ERROR_THRESHOLD:
@@ -166,6 +187,25 @@ class LLMRouter:
                         "Account %s marked ERROR after %d failures, cooldown %ds",
                         acct.display_name, acct.daily_errors, ERROR_COOLDOWN_SECONDS,
                     )
+
+    def seconds_until_available(self) -> Optional[float]:
+        """Seconds until the soonest account can serve again.
+
+        Returns 0.0 if an account is ready now, a positive wait if all serviceable
+        accounts are merely on cooldown, or None if none can recover today (every account
+        is daily-quota-exhausted). Lets a caller pace through a throttle instead of aborting
+        the moment the per-minute token windows drain.
+        """
+        with self._lock:
+            now = time.monotonic()
+            soonest: Optional[float] = None
+            for acct in self._accounts:
+                if acct.status == ProviderStatus.QUOTA_EXHAUSTED:
+                    continue  # won't recover until tomorrow's day-boundary reset
+                wait = max(0.0, acct.cooldown_until - now)
+                if soonest is None or wait < soonest:
+                    soonest = wait
+            return soonest
 
     def get_status_snapshot(self) -> dict:
         """Returns serializable status for telemetry logging."""
@@ -180,6 +220,36 @@ class LLMRouter:
         }
 
 
+# Process-wide bucket registry: providers enforce rate limits server-side per
+# (API key, model). Multiple router instances can target the same pair — the main
+# router (Pass C), the bulk router used by the storyline adjudicator and narratives,
+# and the main router's own gpt-oss-20b fallback slot all share gpt-oss-20b on key A.
+# Giving each its own TokenBucket would let them collectively issue N× the real quota
+# (split-brain). Sharing one bucket per (provider, key, model) keeps accounting truthful.
+_BUCKET_REGISTRY: dict[tuple[str, str, str], TokenBucket] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _share_buckets(accounts: list[LLMAccount]) -> list[LLMAccount]:
+    """Replace each account's bucket with the one shared for its (provider, key, model).
+
+    Accounts with the same server-side rate limit converge on a single bucket; the first
+    one constructed for a pair wins (rate params are identical for a given key+model).
+    """
+    for a in accounts:
+        key = (a.provider, a.api_key, a.model)
+        with _REGISTRY_LOCK:
+            shared = _BUCKET_REGISTRY.setdefault(key, a.bucket)
+        a.bucket = shared
+    return accounts
+
+
+def reset_bucket_registry() -> None:
+    """Clear the shared-bucket registry (test isolation only)."""
+    with _REGISTRY_LOCK:
+        _BUCKET_REGISTRY.clear()
+
+
 def build_llm_router() -> LLMRouter:
     """
     Initialize all LLM accounts from environment variables.
@@ -192,7 +262,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-120b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
         # ② Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
         LLMAccount(
@@ -200,7 +270,7 @@ def build_llm_router() -> LLMRouter:
             model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
         # ③ Groq-B Throughput — en yüksek TPM (eski llama-4-scout yerine)
         LLMAccount(
@@ -208,7 +278,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-120b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
         # ④ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
         LLMAccount(
@@ -216,7 +286,7 @@ def build_llm_router() -> LLMRouter:
             model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
         # ⑤ OpenRouter-A Emergency — 405B
         LLMAccount(
@@ -243,14 +313,14 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-20b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
     ]
     # Filter out accounts with empty API keys
     active = [a for a in accounts if a.api_key]
     if not active:
         logger.critical("No LLM API keys configured! Set GROQ_API_KEY_A/B and/or OPENROUTER_API_KEY_A/B")
-    return LLMRouter(active)
+    return LLMRouter(_share_buckets(active))
 
 
 def build_bulk_router() -> LLMRouter:
@@ -272,7 +342,7 @@ def build_bulk_router() -> LLMRouter:
             model="openai/gpt-oss-20b",
             api_key=os.environ.get(f"GROQ_API_KEY_{account_id}", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         )
         for account_id in ("A", "B")
     ]
@@ -280,4 +350,4 @@ def build_bulk_router() -> LLMRouter:
     if not active:
         logger.warning("Bulk router: no GROQ_API_KEY_A/B set, falling back to full router")
         return build_llm_router()
-    return LLMRouter(active)
+    return LLMRouter(_share_buckets(active))

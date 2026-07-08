@@ -9,6 +9,7 @@ Uses HeartbeatWorker to keep locks alive during long calls.
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime as dt, timedelta, timezone
 from pathlib import Path
@@ -629,6 +630,12 @@ Text: {canonical_text[:3000]}"""
         release_lock(db_conn, event_id, worker_id)
 
 
+# Pacing bounds — cap a single wait for a token-window refill, and the cumulative pacing
+# time per run, so a real provider outage still aborts the pass promptly.
+PASS_C_PACING_MAX_WAIT = 30.0
+PASS_C_PACING_TOTAL_BUDGET = 180.0
+
+
 def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
     """
     Execute Pass C: LLM Classification.
@@ -656,14 +663,35 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
         logger.info("Pass C: No events to classify")
         return stats
 
+    # Pacing: when every slot is momentarily throttled (per-minute token windows drained),
+    # wait for the soonest refill and retry rather than aborting the whole pass — TPM is
+    # far tighter than RPM on the free tier, so a backlog otherwise stops after a handful
+    # of events. Bounded per-wait and per-run so a genuine outage still fails fast.
+    paced_total = 0.0
+    exhausted = False
     for event in events:
-        try:
-            result = classify_single_event(db_conn, router, event, worker_id)
-            if result:
-                stats["events_classified"] += 1
-            else:
-                stats["events_failed"] += 1
-        except RuntimeError:
+        while True:
+            try:
+                result = classify_single_event(db_conn, router, event, worker_id)
+                if result:
+                    stats["events_classified"] += 1
+                else:
+                    stats["events_failed"] += 1
+                break  # this event is done → move on
+            except RuntimeError:
+                wait = router.seconds_until_available()
+                if (wait is None
+                        or wait > PASS_C_PACING_MAX_WAIT
+                        or paced_total + wait > PASS_C_PACING_TOTAL_BUDGET):
+                    exhausted = True
+                    break
+                logger.info(
+                    "Pass C paced: all slots throttled, waiting %.1fs for token refill",
+                    wait,
+                )
+                time.sleep(wait + 0.5)
+                paced_total += wait + 0.5
+        if exhausted:
             stats["llm_exhausted"] = True
             logger.error("LLM accounts exhausted, stopping Pass C")
             break

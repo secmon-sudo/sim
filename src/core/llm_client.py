@@ -92,6 +92,13 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # OpenAI-compat requirement that the word "json" appear in the conversation.)
     if acct.provider == "groq":
         payload["response_format"] = {"type": "json_object"}
+        # qwen3 slots are reasoning models: in thinking mode they burn the whole token
+        # budget on reasoning and emit an empty final message, which trips Groq's
+        # json_object validator (HTTP 400 json_validate_failed, failed_generation="").
+        # Disable thinking so the model returns the JSON answer directly — this also cuts
+        # per-request token usage, easing the 8K TPM ceiling that drives the 429 cascade.
+        if acct.model.startswith("qwen"):
+            payload["reasoning_effort"] = "none"
 
     response = httpx.post(
         PROVIDER_ENDPOINTS[acct.provider],
@@ -122,11 +129,16 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
+    # Estimate tokens for TPM accounting: ~4 chars/token for the prompt, plus the
+    # completion budget. Charged against each account's per-minute token window so a
+    # burst of requests can't blow the (much tighter than RPM) TPM ceiling.
+    est_tokens = sum(len(m["content"]) for m in messages) // 4 + max_tokens
+
     last_error = None
     attempted = False
 
     for _ in range(len(router.accounts)):
-        acct = router.get_available_account()
+        acct = router.get_available_account(est_tokens=est_tokens)
         if acct is None:
             break
         attempted = True
@@ -152,14 +164,23 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             }
 
         except httpx.HTTPStatusError as e:
-            is_429 = e.response.status_code == 429
+            status = e.response.status_code
+            is_429 = status == 429
+            # Other 4xx are deterministic (bad model/param/key) — sideline the slot so it
+            # isn't re-picked this loop. 5xx stays on the soft error path (transient).
+            is_hard_error = 400 <= status < 500 and not is_429
             retry_after = _parse_retry_after(e.response) if is_429 else None
-            router.report_failure(acct, is_rate_limit=is_429, retry_after=retry_after)
+            router.report_failure(
+                acct,
+                is_rate_limit=is_429,
+                retry_after=retry_after,
+                hard_error=is_hard_error,
+            )
             last_error = e
             logger.warning(
                 "LLM %s failed (HTTP %d), rotating...",
                 acct.display_name,
-                e.response.status_code,
+                status,
             )
 
         except Exception as e:

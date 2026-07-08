@@ -78,3 +78,35 @@ class TestTokenBucket:
             bucket.acquire(timeout=0)
         assert bucket.remaining_daily is None
         assert bucket.daily_used == 50
+
+    def test_tpm_ceiling_blocks_burst(self):
+        """TPM budget should block a burst even when RPM tokens remain."""
+        # High RPM/burst so requests aren't the constraint; tight 3K TPM is.
+        bucket = TokenBucket(rate_per_minute=60, daily_limit=1000, burst=60, tpm_limit=3000)
+        # Two 1200-token calls fit (2400 <= 3000); the third (would be 3600) must block
+        # on TPM despite plenty of RPM tokens still available.
+        assert bucket.acquire(est_tokens=1200, timeout=0) is True
+        assert bucket.acquire(est_tokens=1200, timeout=0) is True
+        with pytest.raises(TimeoutError):
+            bucket.acquire(est_tokens=1200, timeout=0)
+
+    def test_tpm_refills_over_time(self):
+        """TPM window should refill so throughput resumes after a short pause."""
+        bucket = TokenBucket(rate_per_minute=60, daily_limit=1000, burst=60, tpm_limit=600)
+        bucket.acquire(est_tokens=600, timeout=0)  # drain the TPM window
+        with pytest.raises(TimeoutError):
+            bucket.acquire(est_tokens=600, timeout=0)
+        time.sleep(1.1)  # 600 TPM → 10 tokens/sec → ~11 tokens back
+        assert bucket.acquire(est_tokens=10, timeout=0) is True
+
+    def test_oversized_prompt_not_deadlocked(self):
+        """A request larger than the whole TPM window should still pass on a full window."""
+        bucket = TokenBucket(rate_per_minute=60, daily_limit=1000, burst=60, tpm_limit=1000)
+        # est_tokens exceeds tpm_limit; clamped requirement means a full window suffices.
+        assert bucket.acquire(est_tokens=5000, timeout=0) is True
+
+    def test_no_tpm_limit_ignores_est_tokens(self):
+        """With tpm_limit=None, est_tokens is ignored (back-compat)."""
+        bucket = TokenBucket(rate_per_minute=60, daily_limit=1000)
+        for _ in range(10):
+            assert bucket.acquire(est_tokens=99999, timeout=0) is True

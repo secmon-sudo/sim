@@ -396,6 +396,10 @@ V19 contained no strategy for LLM API quota management. V20 added a single-provi
 
 > **2026-06-17 Groq deprecation:** `llama-3.3-70b-versatile`, `llama-4-scout`, `qwen3-32b` ve `llama-3.1-8b-instant` ücretsiz katmandan kaldırıldı. Önerilen yerine geçenler: `openai/gpt-oss-120b` / `qwen/qwen3.6-27b` (orta/büyük slotlar) ve `openai/gpt-oss-20b` (bulk). Artık hiçbir ücretsiz sohbet modeli 1K RPD'yi aşmıyor — eski 14.4K'lık bulk kapasitesi, slotu iki Groq anahtarına havuzlayarak kısmen telafi edilir.
 
+> **qwen3.6-27b + JSON modu (zorunlu `reasoning_effort:"none"`):** qwen3.6 bir *reasoning* modeli. `response_format={"type":"json_object"}` ile birlikte düşünme açıkken tüm token bütçesini "thinking"e harcayıp **boş** final içerik üretir; Groq da bunu `HTTP 400 json_validate_failed` (`failed_generation:""`) ile reddeder. Bu yüzden client, qwen çağrılarına `reasoning_effort:"none"` ekler (json_object korunur, gpt-oss'a dokunulmaz). Bonus: thinking token'ı üretilmediği için aşağıdaki 8K TPM darboğazına da nefes aldırır.
+
+> **Bağlayıcı kısıt TPM'dir, RPM değil.** Free-tier'da gerçek darboğaz RPM (30) değil **TPM (8K)**: bir sınıflandırma ≈ prompt + `max_tokens` ≈ 2–3K token, yani dakikada ancak ~3 istek sığar. Router bu yüzden her (key, model) için TPM penceresini de modelleyip istek başına tahmini token düşer (`TokenBucket.tpm_limit`); aksi halde bir burst, RPM kotasına çarpmadan çok önce provider 429'una girip tüm havuzu aynı anda cooldown'a sokar. Ek olarak: (a) tüm slotlar anlık throttle olduğunda Pass C, pencere dolana kadar bekleyip devam eder (**pacing**, `PASS_C_PACING_*`); (b) aynı (key, model) çifti birden çok router örneğinde (ana + adjudicator/narratives bulk router + ⑧ fallback) **tek bir bucket'ı paylaşır** — yoksa her örnek kotayı ayrı sayıp server-side limiti N× aşardı (split-brain).
+
 **OpenRouter Free Tier (2 ayrı hesap, para yüklemeyeceğiz):**
 
 | Account | Model ID | Params | Context | RPM | RPD | Role |
@@ -596,6 +600,8 @@ class LLMRouter:
 ```
 
 #### 4.5.5 Account Initialization
+
+> Not: Aşağıdaki snippet sadeleştirilmiştir. Gerçek `src/core/llm_router.py`'de Groq slotları `TokenBucket(..., tpm_limit=GROQ_TPM)` alır, döndürülen liste `_share_buckets()` ile aynı (key, model) için tek bucket'a indirgenir, ve qwen çağrılarına client tarafında `reasoning_effort:"none"` eklenir (yukarıdaki notlar).
 
 ```python
 def build_llm_router() -> LLMRouter:
