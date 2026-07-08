@@ -24,6 +24,39 @@ PROVIDER_ENDPOINTS = {
 }
 
 
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    """Extract a backoff hint (seconds) from a 429 response.
+
+    Honors the standard `Retry-After` header (delta-seconds form) and Groq/OpenAI's
+    `x-ratelimit-reset-requests` (e.g. "2.5s", "1m30s"). Returns None if absent/unparsable.
+    """
+    ra = response.headers.get("retry-after")
+    if ra:
+        try:
+            return float(ra)
+        except ValueError:
+            pass  # HTTP-date form is not worth parsing for a sub-minute reset window
+    reset = response.headers.get("x-ratelimit-reset-requests")
+    if reset:
+        try:
+            total, num = 0.0, ""
+            for ch in reset:
+                if ch.isdigit() or ch == ".":
+                    num += ch
+                elif ch == "m":
+                    total += float(num or 0) * 60
+                    num = ""
+                elif ch == "s":
+                    total += float(num or 0)
+                    num = ""
+            if num:  # bare number, assume seconds
+                total += float(num)
+            return total or None
+        except ValueError:
+            pass
+    return None
+
+
 @tenacity.retry(
     retry=tenacity.retry_if_exception_type(
         (httpx.ConnectError, httpx.TimeoutException)
@@ -46,15 +79,24 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
         headers["HTTP-Referer"] = "https://sim-osint.app"
         headers["X-Title"] = "SIM-OSINT-Pipeline"
 
+    payload = {
+        "model": acct.model,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    # Force a JSON object so reasoning models (gpt-oss / qwen3.6) can't return an
+    # empty or prose-wrapped message that then fails json.loads. Groq supports this
+    # for all its models; we skip it for OpenRouter where some free models 400 on it.
+    # (The prompt already instructs "Respond ONLY with valid JSON", satisfying the
+    # OpenAI-compat requirement that the word "json" appear in the conversation.)
+    if acct.provider == "groq":
+        payload["response_format"] = {"type": "json_object"}
+
     response = httpx.post(
         PROVIDER_ENDPOINTS[acct.provider],
         headers=headers,
-        json={
-            "model": acct.model,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-        },
+        json=payload,
         timeout=30.0,
     )
     response.raise_for_status()
@@ -81,11 +123,13 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
     messages.append({"role": "user", "content": prompt})
 
     last_error = None
+    attempted = False
 
     for _ in range(len(router.accounts)):
         acct = router.get_available_account()
         if acct is None:
             break
+        attempted = True
 
         try:
             t0 = time.monotonic()
@@ -109,7 +153,8 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
 
         except httpx.HTTPStatusError as e:
             is_429 = e.response.status_code == 429
-            router.report_failure(acct, is_rate_limit=is_429)
+            retry_after = _parse_retry_after(e.response) if is_429 else None
+            router.report_failure(acct, is_rate_limit=is_429, retry_after=retry_after)
             last_error = e
             logger.warning(
                 "LLM %s failed (HTTP %d), rotating...",
@@ -122,6 +167,8 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             last_error = e
             logger.exception("LLM %s unexpected error", acct.display_name)
 
+    if not attempted:
+        raise RuntimeError("All LLM accounts on cooldown/rate-limited; no request attempted")
     raise RuntimeError(f"All LLM accounts exhausted. Last error: {last_error}")
 
 

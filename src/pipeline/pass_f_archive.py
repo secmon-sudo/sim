@@ -138,7 +138,14 @@ def upload_to_cloudflare_r2(content: bytes, filename: str) -> bool:
             endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            config=Config(signature_version="s3v4"),
+            config=Config(
+                signature_version="s3v4",
+                # Bound the upload so a stalled connection can't hang the whole
+                # pipeline indefinitely (worst case ~3 * (10 + 60)s ≈ 3.5 min).
+                connect_timeout=10,
+                read_timeout=60,
+                retries={"max_attempts": 3, "mode": "standard"},
+            ),
             region_name="auto",
         )
         

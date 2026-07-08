@@ -18,6 +18,21 @@ from src.core.token_bucket import TokenBucket
 
 logger = logging.getLogger(__name__)
 
+# --- Cooldown tuning ------------------------------------------------------
+# Local RPM throttle (our own bucket ran dry): tokens refill at rate_per_minute,
+# so a short pause is enough — don't idle the account for a full minute.
+RPM_COOLDOWN_SECONDS = 15
+# Provider returned HTTP 429: back off, but free-tier RPM windows reset within
+# ~a minute. Used only when the response carries no Retry-After header.
+RATE_LIMIT_COOLDOWN_SECONDS = 30
+# Upper bound so a bogus Retry-After can't park an account for hours.
+MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300
+# Repeated hard (non-429) errors: likely a real outage/bad key — back off long.
+ERROR_COOLDOWN_SECONDS = 600
+ERROR_THRESHOLD = 10
+# Max tokens held at once per model slot — smooths the opening burst.
+DEFAULT_BURST = 8
+
 
 class ProviderStatus(Enum):
     ACTIVE = "active"
@@ -93,8 +108,11 @@ class LLMRouter:
                         return acct
                     except TimeoutError:
                         acct.status = ProviderStatus.RATE_LIMITED
-                        acct.cooldown_until = now + 60
-                        logger.info("Account %s RPM limited, cooldown 60s", acct.display_name)
+                        acct.cooldown_until = now + RPM_COOLDOWN_SECONDS
+                        logger.info(
+                            "Account %s RPM limited, cooldown %ds",
+                            acct.display_name, RPM_COOLDOWN_SECONDS,
+                        )
                     except RuntimeError:
                         acct.status = ProviderStatus.QUOTA_EXHAUSTED
                         logger.warning("Account %s daily quota exhausted", acct.display_name)
@@ -106,7 +124,7 @@ class LLMRouter:
                         acct.bucket.acquire(timeout=0)
                         return acct
                     except (TimeoutError, RuntimeError):
-                        acct.cooldown_until = now + 120
+                        acct.cooldown_until = now + RPM_COOLDOWN_SECONDS
 
             return None
 
@@ -116,21 +134,37 @@ class LLMRouter:
             acct.status = ProviderStatus.ACTIVE
             acct.daily_errors = 0
 
-    def report_failure(self, acct: LLMAccount, is_rate_limit: bool = False):
-        """Mark an account as degraded after a failed call."""
+    def report_failure(
+        self,
+        acct: LLMAccount,
+        is_rate_limit: bool = False,
+        retry_after: float | None = None,
+    ):
+        """Mark an account as degraded after a failed call.
+
+        retry_after: seconds from the provider's Retry-After header (429), if any.
+        Honored over the default cooldown, clamped to MAX_RATE_LIMIT_COOLDOWN_SECONDS.
+        """
         with self._lock:
             if is_rate_limit:
+                cooldown = RATE_LIMIT_COOLDOWN_SECONDS
+                if retry_after is not None and retry_after > 0:
+                    cooldown = min(retry_after, MAX_RATE_LIMIT_COOLDOWN_SECONDS)
                 acct.status = ProviderStatus.RATE_LIMITED
-                acct.cooldown_until = time.monotonic() + 120
-                logger.warning("Account %s rate-limited (429), cooldown 120s", acct.display_name)
+                acct.cooldown_until = time.monotonic() + cooldown
+                logger.warning(
+                    "Account %s rate-limited (429), cooldown %.0fs%s",
+                    acct.display_name, cooldown,
+                    " (Retry-After)" if retry_after else "",
+                )
             else:
                 acct.daily_errors += 1
-                if acct.daily_errors >= 10:
+                if acct.daily_errors >= ERROR_THRESHOLD:
                     acct.status = ProviderStatus.ERROR
-                    acct.cooldown_until = time.monotonic() + 600
+                    acct.cooldown_until = time.monotonic() + ERROR_COOLDOWN_SECONDS
                     logger.error(
-                        "Account %s marked ERROR after %d failures, cooldown 600s",
-                        acct.display_name, acct.daily_errors
+                        "Account %s marked ERROR after %d failures, cooldown %ds",
+                        acct.display_name, acct.daily_errors, ERROR_COOLDOWN_SECONDS,
                     )
 
     def get_status_snapshot(self) -> dict:
@@ -158,7 +192,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-120b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         ),
         # ② Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
         LLMAccount(
@@ -166,7 +200,7 @@ def build_llm_router() -> LLMRouter:
             model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         ),
         # ③ Groq-B Throughput — en yüksek TPM (eski llama-4-scout yerine)
         LLMAccount(
@@ -174,7 +208,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-120b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         ),
         # ④ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
         LLMAccount(
@@ -182,7 +216,7 @@ def build_llm_router() -> LLMRouter:
             model="qwen/qwen3.6-27b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         ),
         # ⑤ OpenRouter-A Emergency — 405B
         LLMAccount(
@@ -190,7 +224,7 @@ def build_llm_router() -> LLMRouter:
             model="nousresearch/hermes-3-llama-3.1-405b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
             rpm=20, rpd=200,
-            bucket=TokenBucket(rate_per_minute=20, daily_limit=200),
+            bucket=TokenBucket(rate_per_minute=20, daily_limit=200, burst=DEFAULT_BURST),
         ),
         # ⑥ OpenRouter-B Mirror — cross-provider yedek
         LLMAccount(
@@ -198,7 +232,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-120b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_B", ""),
             rpm=20, rpd=200,
-            bucket=TokenBucket(rate_per_minute=20, daily_limit=200),
+            bucket=TokenBucket(rate_per_minute=20, daily_limit=200, burst=DEFAULT_BURST),
         ),
         # ⑦ Reserved for future model slot (Blueprint V20.1 §4.5.2)
         # ⑧ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
@@ -209,7 +243,7 @@ def build_llm_router() -> LLMRouter:
             model="openai/gpt-oss-20b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         ),
     ]
     # Filter out accounts with empty API keys
@@ -238,7 +272,7 @@ def build_bulk_router() -> LLMRouter:
             model="openai/gpt-oss-20b",
             api_key=os.environ.get(f"GROQ_API_KEY_{account_id}", ""),
             rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000),
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST),
         )
         for account_id in ("A", "B")
     ]

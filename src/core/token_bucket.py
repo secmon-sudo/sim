@@ -19,9 +19,13 @@ class TokenBucket:
 
     rate_per_minute : maximum requests allowed per minute
     daily_limit     : hard daily cap (None = unlimited)
+    burst           : max tokens held at once (None = rate_per_minute). Caps the
+                      initial/idle burst so we don't fire a full minute of requests
+                      back-to-back and trip provider RPM/TPM limits.
     """
     rate_per_minute: float
     daily_limit: int | None = None
+    burst: float | None = None
 
     _tokens: float = field(init=False)
     _last_refill: float = field(default_factory=time.monotonic, init=False)
@@ -30,7 +34,9 @@ class TokenBucket:
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     def __post_init__(self):
-        self._tokens = self.rate_per_minute
+        if self.burst is None:
+            self.burst = self.rate_per_minute
+        self._tokens = self.burst
 
     def acquire(self, timeout: float = 300.0) -> bool:
         """Block until a token is available or timeout is reached.
@@ -67,7 +73,7 @@ class TokenBucket:
         now = time.monotonic()
         elapsed = now - self._last_refill
         self._tokens = min(
-            self.rate_per_minute,
+            self.burst,
             self._tokens + elapsed * (self.rate_per_minute / 60.0),
         )
         self._last_refill = now

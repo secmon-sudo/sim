@@ -327,10 +327,12 @@ def validate_and_parse(content: str) -> dict:
     """
     import re
 
-    if not content:
+    text = content.strip() if content else ""
+    # Whitespace-only content (common when a reasoning model spends its whole
+    # budget "thinking" and returns an empty message) reaches json.loads("") as
+    # the misleading "Expecting value: line 1 column 1 (char 0)". Catch it here.
+    if not text:
         raise LLMParseError("Empty LLM response")
-
-    text = content.strip()
 
     # Strip markdown code block if present
     if text.startswith("```"):
@@ -611,9 +613,11 @@ Text: {canonical_text[:3000]}"""
         return None
 
     except RuntimeError as e:
-        # All LLM accounts exhausted
+        # All LLM accounts exhausted (every account on cooldown / rate-limited).
+        # Propagate so run_pass_c breaks the loop instead of hammering call_llm for
+        # every remaining event and spamming the log while nothing can succeed.
         logger.error("All LLM accounts exhausted: %s", e)
-        return None
+        raise
 
     except Exception:
         db_conn.rollback()
