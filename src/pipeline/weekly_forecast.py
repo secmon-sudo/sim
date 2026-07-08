@@ -35,6 +35,10 @@ from src.services.forecast_generator import (
     run_g3_global_assessment
 )
 from src.services.flash_detector import check_flash_triggers
+from src.services.forecast_resolver import (
+    resolve_pending_reports,
+    build_calibration_feedback,
+)
 from src.services.telegram_report_notifier import (
     send_weekly_report_telegram,
     generate_html_report_payload,
@@ -290,6 +294,22 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     except Exception:
         logger.exception("Flash detection failed, continuing with weekly report")
 
+    # 3c. Forecast Resolution — grade LAST week's forecasts against the TI/delta/Z
+    # just computed for this week (they ARE the outcomes of that forecast window),
+    # then turn the resolution history into a calibration prior for this week's G2.
+    # Pure math + one SQL insert; must never block the report itself.
+    current_scores_map = {
+        c["country_iso"]: {"ti": c["ti"], "delta": c["delta"], "z_score": c["z_score"]}
+        for c in countries_data
+    }
+    resolutions: List[Dict[str, Any]] = []
+    calibration = {"note": "", "per_country": {}}
+    try:
+        resolutions = resolve_pending_reports(db_conn, current_scores_map, week_start)
+        calibration = build_calibration_feedback(db_conn)
+    except Exception:
+        logger.exception("Forecast resolution failed, continuing with weekly report")
+
     # 4. Filter top 8 candidate countries for G1 selection (Top-8 Dinamik Filtresi)
     # Target countries with active movements: TI > 30 or Z-Score > 0.5
     candidate_countries = [
@@ -310,7 +330,13 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     for c in countries_data:
         if c["country_iso"] in chosen_isos:
             logger.info("Running G2 Assessment for %s...", c["country_iso"])
-            ass = run_g2_country_assessment(router, c["country_iso"], c["events"], c)
+            note = calibration["note"]
+            country_note = calibration["per_country"].get(c["country_iso"])
+            if country_note:
+                note = f"{note} {country_note}" if note else country_note
+            ass = run_g2_country_assessment(
+                router, c["country_iso"], c["events"], c, calibration_note=note
+            )
             c["assessment"] = ass.model_dump()
             g2_assessments.append(ass)
 
@@ -444,6 +470,12 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
         db_conn.commit()
 
     # 7. Dispatch to Telegram
+    scorecard = None
+    if resolutions:
+        res = resolutions[0]
+        n = len(res["records"])
+        hits = sum(1 for r in res["records"] if r["correct"])
+        scorecard = f"{hits}/{n} ülke tahmini doğrulandı (Brier {res['brier']:.2f})"
     telegram_message_id = send_weekly_report_telegram(
         str(week_start),
         str(week_end),
@@ -451,7 +483,8 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
         watchlist,
         emergings,
         global_brief,
-        r2_url=r2_html_url
+        r2_url=r2_html_url,
+        scorecard=scorecard,
     )
 
     if telegram_message_id:

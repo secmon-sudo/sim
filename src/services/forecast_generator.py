@@ -151,11 +151,16 @@ def run_g2_country_assessment(
     router: LLMRouter,
     country_iso: str,
     events: List[Dict[str, Any]],
-    metrics: Dict[str, Any]
+    metrics: Dict[str, Any],
+    calibration_note: str = "",
 ) -> G2CountryAssessment:
     """
     Pass G2: Detailed evaluation and forecast for a single chosen country.
     Includes trajectory cross-check and up to 2 retries on validation failure.
+
+    calibration_note: optional feedback from the forecast resolver on how past
+    forecasts verified (accuracy / over- or under-escalation bias) — injected
+    into the prompt as a mild prior so the model can self-correct.
     """
     # Sample events from each cluster to feed into prompt
     from src.core.storyline_clusterer import greedy_centrist_cluster
@@ -217,6 +222,12 @@ def run_g2_country_assessment(
         cluster_count=metrics["cluster_count"],
         clusters_json=json.dumps(cluster_samples, indent=2)
     )
+
+    if calibration_note:
+        user_prompt += (
+            f"\n\nCALIBRATION FEEDBACK (how your past forecasts verified):\n{calibration_note}\n"
+            "Treat this as a mild prior — do not overcorrect; the evidence above still dominates."
+        )
 
     feedback_msg = ""
     for attempt in range(3):

@@ -235,12 +235,16 @@ def send_weekly_report_telegram(
     watchlist: List[str],
     emergings: List[str],
     global_assessment: Dict[str, Any],
-    r2_url: Optional[str] = None
+    r2_url: Optional[str] = None,
+    scorecard: Optional[str] = None,
 ) -> Optional[str]:
     """
     Dispatches the weekly report:
     1. Short summary message using sendMessage.
     2. Styled HTML report sent as a file attachment (sendDocument).
+
+    scorecard: optional one-liner grading LAST week's forecast against measured
+    outcomes (from the forecast resolver), shown under the global direction.
     """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
@@ -267,7 +271,11 @@ def send_weekly_report_telegram(
     summary_text += f"- 💡 <b>Emerging Concerns:</b> {', '.join(emergings) if emergings else 'Yok'}\n"
     
     summary_text += f"\n🌍 <b>Global Yön:</b> <code>{global_assessment.get('global_risk_direction', 'Stable')}</code>\n"
-    
+
+    if scorecard:
+        summary_text += f"\n🎯 <b>Geçen Haftanın Karnesi:</b> {scorecard}\n"
+
+
     if r2_url:
         summary_text += f"\n🔗 <a href='{r2_url}'>Tarayıcıda Detaylı Raporu Oku (CF R2)</a>\n"
     

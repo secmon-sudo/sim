@@ -200,7 +200,11 @@ def adjudicate_storyline(
         return None
     prompt = _build_prompt(event, candidates)
     try:
-        result = call_llm_fn(router, prompt, system_prompt=_SYSTEM_PROMPT, max_tokens=200)
+        # gpt-oss (the bulk model) still emits some low-effort reasoning tokens before the
+        # answer even with reasoning_effort=low; too small a budget gets fully consumed by
+        # reasoning, leaving an empty final message that trips Groq's json_object validator
+        # (HTTP 400). Give enough headroom for reasoning + the tiny {"match": ...} reply.
+        result = call_llm_fn(router, prompt, system_prompt=_SYSTEM_PROMPT, max_tokens=512)
     except Exception:
         logger.exception("Storyline adjudication LLM call failed; treating as NEW")
         return None
