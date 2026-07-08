@@ -21,7 +21,9 @@ from src.core.alerts import (
     record_suppression,
 )
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
+from src.core.geo import geo_coords
 from src.core.storyline import jaccard_similarity, should_link_storyline
+from src.core.storyline_alert_state import get_peak_tier, is_escalation, register_alert
 from src.services.telegram_notifier import send_telegram_alert
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,10 @@ NEW_ACTIVITY_WINDOW_HOURS = _SETTINGS.get("alert", {}).get("new_activity_window_
 # Events ingested longer ago than this never notify — they are old news being
 # (re)processed late (e.g. orphan recovery), not breaking incidents.
 ALERT_MAX_AGE_DAYS = _SETTINGS.get("alert", {}).get("alert_max_age_days", 2)
+
+# After this many hours with no new page, an alerted storyline is considered quiet and
+# gets a single closure note (the counterpart to the escalation cue).
+STORYLINE_QUIET_HOURS = _SETTINGS.get("alert", {}).get("storyline_quiet_hours", 12)
 
 # Accidental (safety/emniyet) event types — kept for coverage but de-prioritized,
 # because the platform's mission is SECURITY (hostile/intentional) events. A
@@ -366,6 +372,15 @@ def resolve_anchor_for_event(db_conn, event: dict) -> dict:
         except Exception:
             pass
 
+    # City-level fallback: most conflict events never resolve to an IATA airport, so the
+    # anchor_master lookup above leaves lat/lon empty. Resolve the raw location text
+    # against the curated city gazetteer so these events still carry coordinates.
+    if lat is None or lon is None:
+        coords = geo_coords(raw_anchor, country)
+        if coords:
+            lat, lon, coord_iso = coords
+            country = country or coord_iso
+
     return {
         "norm": norm,
         "confidence": conf,
@@ -409,6 +424,32 @@ def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
             best_id = existing.get("storyline_id")
 
     return best_id
+
+
+def run_storyline_closures(db_conn) -> int:
+    """Emit a 'storyline quiet' note for each alerted storyline that has gone silent.
+
+    Best-effort and idempotent: `find_and_close_quiet` atomically flips each storyline to
+    closed as it returns it, so re-running (or a concurrent pass) never double-closes.
+    """
+    from src.core.storyline_alert_state import find_and_close_quiet
+    from src.services.telegram_notifier import send_storyline_closure
+
+    closed = find_and_close_quiet(db_conn, STORYLINE_QUIET_HOURS)
+    for c in closed:
+        send_storyline_closure(c["peak_tier"], c["label"], STORYLINE_QUIET_HOURS)
+    if closed:
+        logger.info("Closed %d quiet storyline(s)", len(closed))
+    return len(closed)
+
+
+def _alert_label(event: dict) -> str:
+    """Short human context stored with alert state, reused in the quiet-closure note."""
+    title = str(event.get("source_title") or "").strip()[:80]
+    anchor = str(event.get("anchor_name_norm") or "Unknown")
+    country = str(event.get("country_iso") or "")
+    loc = f"{anchor} {country}".strip()
+    return f"{title} · {loc}" if title else loc
 
 
 def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
@@ -456,7 +497,21 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
         record_suppression(db_conn, k, event["alert_tier"], event_id,
                            ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
 
+    # Escalation context: if this storyline already paged at a lower tier, mark the card
+    # so the higher-tier alert reads as "this got worse", not an unrelated fresh event.
+    storyline_id = event.get("storyline_id")
+    tier = event["alert_tier"]
+    try:
+        prev_peak = get_peak_tier(db_conn, storyline_id)
+        if is_escalation(prev_peak, tier):
+            event["escalation_from"] = prev_peak
+    except Exception:
+        logger.exception("Escalation check failed for %s", event_id[:8])
+
     if send_telegram_alert(event):
+        # Persist paging history (peak tier / recency) for escalation + quiet-closure.
+        register_alert(db_conn, storyline_id, tier,
+                       int(event.get("severity_score", 0)), _alert_label(event))
         return "sent"
 
     # Send failed — release the claim(s) so a sibling event can retry next time.

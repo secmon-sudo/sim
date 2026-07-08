@@ -116,7 +116,8 @@ Automatically dispatches immediate **Flash Alerts** if:
 ```
 sim/
 ├── .github/workflows/osint-pipeline.yml   # Regular 2-hour pipeline
-├── .github/workflows/weekly-forecast.yml  # [NEW] Weekly strategic forecast
+├── .github/workflows/weekly-forecast.yml  # Weekly strategic forecast
+├── .github/workflows/deadman.yml          # [NEW] Hourly dead-man's switch (pipeline liveness)
 ├── config/
 │   ├── keywords.json                      # Search queries & noise filters
 │   └── settings.json                      # Pipeline configuration
@@ -208,6 +209,7 @@ python -m src.pipeline.orchestrator --weekly
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot for alerts and reports |
 | `TELEGRAM_ALERTS_CHAT_ID` | No | Alert and weekly report channel chat ID |
 | `TELEGRAM_ARCHIVE_CHAT_ID` | No | Archive channel chat ID |
+| `DEADMAN_MAX_AGE_HOURS` | No | Dead-man's switch staleness threshold in hours (default `3`) |
 | `R2_ACCOUNT_ID` | No | Cloudflare R2 account ID |
 | `R2_ACCESS_KEY_ID` | No | Cloudflare R2 access key ID |
 | `R2_SECRET_ACCESS_KEY` | No | Cloudflare R2 secret access key |

@@ -50,10 +50,48 @@ class TestFindGeoCandidates:
         sids = [c["storyline_id"] for c in find_geo_candidates(event, recent)]
         assert sids == ["S1", "S2"]
 
-    def test_no_geo_no_candidates(self):
-        event = _ev("kyiv drone strike", raw=None)
+    def test_no_geo_no_country_no_candidates(self):
+        # Nothing coarse enough to gather a plausibly-same set from.
+        event = _ev("some event", raw=None, iso=None)
         recent = [_ev("kyiv thing", sid="S1")]
         assert find_geo_candidates(event, recent) == []
+
+    def test_locationless_falls_back_to_country(self):
+        # National-level news (no resolvable place) still gathers same-country,
+        # lexically-related storylines so the LLM can adjudicate paraphrased duplicates.
+        event = _ev("china missile test", raw=None, iso="CN")
+        recent = [_ev("china pla missile_test", raw=None, iso="CN", sid="S1")]
+        cands = find_geo_candidates(event, recent)
+        assert [c["storyline_id"] for c in cands] == ["S1"]
+
+    def test_country_fallback_excludes_unrelated(self):
+        # Same country but zero lexical kinship → not a candidate.
+        event = _ev("china missile test", raw=None, iso="CN")
+        recent = [_ev("shanghai factory flood", raw=None, iso="CN", sid="S1")]
+        assert find_geo_candidates(event, recent) == []
+
+    def test_country_fallback_excludes_other_country(self):
+        event = _ev("china missile test", raw=None, iso="CN")
+        recent = [_ev("india missile test", raw=None, iso="IN", sid="S1")]
+        assert find_geo_candidates(event, recent) == []
+
+    def test_country_fallback_ranks_by_overlap(self):
+        # The strongest lexical match must survive the max_candidates cap.
+        event = _ev("china submarine missile test", raw=None, iso="CN")
+        recent = [
+            _ev("china economy trade", raw=None, iso="CN", sid="S_weak"),
+            _ev("china submarine missile launch", raw=None, iso="CN", sid="S_strong"),
+        ]
+        cands = find_geo_candidates(event, recent, max_candidates=1)
+        assert [c["storyline_id"] for c in cands] == ["S_strong"]
+
+    def test_degenerate_unknown_geo_uses_country(self):
+        # geo_key("Unknown") is degenerate; the event must not match other unresolved
+        # events as if "UNKNOWN" were a shared place — it takes the country path instead.
+        event = _ev("china missile test", raw="Unknown", iso="CN")
+        recent = [_ev("china pla missile_test", raw="Unknown", iso="CN", sid="S1")]
+        cands = find_geo_candidates(event, recent)
+        assert [c["storyline_id"] for c in cands] == ["S1"]
 
 
 class TestParseDecision:

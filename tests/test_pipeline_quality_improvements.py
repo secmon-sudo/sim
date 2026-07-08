@@ -113,14 +113,16 @@ def test_telegram_notifier_premium_formatting(mock_post):
     payload = kwargs["payload"]
     text = payload["text"]
     
-    # Check premium layout elements
+    # Check modern layout elements
     assert "CRITICAL" in text
     assert "JFK Airport" in text
-    assert "mass_casualty" in text
+    assert "Mass Casualty" in text          # event_type humanized for display
+    assert "mass_casualty" not in text       # raw enum never surfaces
     assert "2026-06-09 14:30" in text
+    assert "85/100" in text                  # severity meter
     assert "━━━━━━━━━━━━━━━━━━━━━" in text
-    assert "<code>" in text
     assert "🔴" in text
+    assert "ALERT ALERT" not in text         # no more doubled tier word
 
 
 @patch("src.services.telegram_notifier._post_telegram")
@@ -147,8 +149,8 @@ def test_telegram_notifier_quiet_hours_formatting(mock_post):
     assert res is True
     _, kwargs = mock_post.call_args
     text = kwargs["payload"]["text"]
-    assert "CRITICAL ALERT — 📍 NEW LOCATION" in text
-    assert "⚠️ <b>[NEW LOCATION]</b>" in text
+    assert "First activity at this location (24h)" in text
+    assert "First activity in this country" not in text
 
     # Test 2: New Country only
     mock_post.reset_mock()
@@ -158,8 +160,7 @@ def test_telegram_notifier_quiet_hours_formatting(mock_post):
     assert res is True
     _, kwargs = mock_post.call_args
     text = kwargs["payload"]["text"]
-    assert "CRITICAL ALERT — 🌍 NEW COUNTRY ACTIVITY" in text
-    assert "⚠️ <b>[NEW COUNTRY ACTIVITY]</b>" in text
+    assert "First activity in this country (24h)" in text
 
     # Test 3: Both
     mock_post.reset_mock()
@@ -169,8 +170,7 @@ def test_telegram_notifier_quiet_hours_formatting(mock_post):
     assert res is True
     _, kwargs = mock_post.call_args
     text = kwargs["payload"]["text"]
-    assert "CRITICAL ALERT — 🚨 NEW LOCATION & COUNTRY" in text
-    assert "⚠️ <b>[NEW LOCATION & COUNTRY]</b>" in text
+    assert "First activity at this location & country (24h)" in text
 
 
 @patch("src.pipeline.pass_d_score.resolve_anchor_for_event")

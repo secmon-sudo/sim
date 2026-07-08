@@ -27,6 +27,7 @@ import re
 
 from src.core.geo import geo_key
 from src.core.llm_client import call_llm
+from src.core.storyline import jaccard_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,25 @@ _SYSTEM_PROMPT = (
 )
 
 
+# A location key that carries no discriminating signal — geo_key's normalized-text
+# fallback yields these for events whose location the model could not resolve
+# ("Unknown", ""). Treated as "no usable geo" so such events take the country path.
+_DEGENERATE_GEO = {"", "UNKNOWN"}
+
+
 def _event_geo(ev: dict) -> str | None:
-    """Coarse location key for an event: precise IATA anchor, else geo_key of raw text."""
-    return ev.get("anchor_name_norm") or geo_key(
+    """Coarse location key for an event: precise IATA anchor, else geo_key of raw text.
+
+    Returns None when the only key available is degenerate ("Unknown"), so a genuinely
+    location-less event is routed to the country-level fallback rather than being matched
+    against every other unresolved-location event as if they shared a real place.
+    """
+    g = ev.get("anchor_name_norm") or geo_key(
         ev.get("anchor_name_raw"), ev.get("country_iso")
     )
+    if g and g.strip().upper() in _DEGENERATE_GEO:
+        return None
+    return g
 
 
 def find_geo_candidates(
@@ -52,19 +67,32 @@ def find_geo_candidates(
 ) -> list[dict]:
     """Candidate storylines that plausibly describe the same incident.
 
-    Same country + same coarse location + within a tight time window, one representative
-    hint per storyline_id. This is intentionally the SAME set the deterministic geo-assist
-    saw but could not confirm lexically — the ambiguous residue the LLM should judge.
+    Two candidate nets, both within a tight time window, one representative hint per
+    storyline_id, and both deliberately LLM-adjudicated afterwards (the caller only ever
+    MERGES on an explicit same-incident verdict):
+
+    - **Geo net** (event has a resolvable location): same country + same coarse location.
+      Intentionally the SAME set the deterministic geo-assist saw but could not confirm
+      lexically — the ambiguous residue the LLM should judge.
+    - **Country fallback** (event has NO usable location — e.g. missile tests, nuclear
+      announcements and other national-level news that never resolves to a place): same
+      country, ranked by lexical kinship so the most plausible duplicates fill the bounded
+      candidate slots. Without this, location-less events bypass every dedup layer and each
+      source pages separately. A minimal lexical-overlap floor stands in for the missing
+      geo constraint so wholly unrelated same-country events are not offered to the LLM.
     """
     dt = event.get("occurred_at_est")
     if dt is None:
         return []
     ev_geo = _event_geo(event)
-    if not ev_geo:
-        return []
     iso = event.get("country_iso")
+    # Geo net needs a location; country fallback needs a country. With neither, there is
+    # nothing coarse enough to gather a plausibly-same set from.
+    if not ev_geo and not iso:
+        return []
+    ev_hint = event.get("storyline_hint") or ""
 
-    candidates: list[dict] = []
+    scored: list[tuple[float, str, str]] = []  # (lexical_overlap, storyline_id, hint)
     seen_storylines: set[str] = set()
     for r in recent_events:
         sid = r.get("storyline_id")
@@ -79,15 +107,29 @@ def find_geo_candidates(
         except Exception:
             continue
         r_iso = r.get("country_iso")
-        if iso and r_iso and iso != r_iso:
-            continue
-        if _event_geo(r) != ev_geo:
-            continue
+        r_hint = r.get("storyline_hint") or ""
+        if ev_geo:
+            # Geo net: same country (when both known) + same coarse location.
+            if iso and r_iso and iso != r_iso:
+                continue
+            if _event_geo(r) != ev_geo:
+                continue
+            overlap = 1.0
+        else:
+            # Country fallback: same country required (both sides known), and some lexical
+            # kinship — a wholly unrelated same-country incident is not a candidate.
+            if not r_iso or r_iso != iso:
+                continue
+            overlap = jaccard_similarity(ev_hint, r_hint)
+            if overlap <= 0.0:
+                continue
         seen_storylines.add(sid)
-        candidates.append({"storyline_id": sid, "hint": r.get("storyline_hint") or ""})
-        if len(candidates) >= max_candidates:
-            break
-    return candidates
+        scored.append((overlap, sid, r_hint))
+
+    # Highest lexical overlap first so the real duplicate lands inside max_candidates even
+    # when the country net is broad; geo-net ties keep insertion (recency) order.
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [{"storyline_id": s, "hint": h} for _, s, h in scored[:max_candidates]]
 
 
 def _build_prompt(event: dict, candidates: list[dict]) -> str:

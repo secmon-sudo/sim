@@ -117,6 +117,14 @@ def run_pipeline():
         logger.info("--- PASS E: Reconciliation ---")
         results["pass_e"] = run_pass_e(db_conn)
 
+        # Storyline quiet-closures — page a single "storyline quiet" note for alerted
+        # storylines that have gone silent. Isolated so it can never break the run.
+        try:
+            from src.pipeline.pass_d_score import run_storyline_closures
+            results["storyline_closures"] = run_storyline_closures(db_conn)
+        except Exception:
+            logger.exception("Storyline closure sweep failed, continuing")
+
         # Storyline narratives ("story so far") — budgeted, bulk-router, cache-aware.
         # Isolated failure must never break the pipeline.
         try:
@@ -141,9 +149,10 @@ def run_pipeline():
 
         results["success"] = True
 
-    except Exception:
+    except Exception as e:
         logger.exception("Pipeline run %s failed", run_id)
         results["success"] = False
+        results["error"] = f"{type(e).__name__}: {e}"
 
     finally:
         results["duration_seconds"] = round(time.monotonic() - start_time, 2)
@@ -181,7 +190,63 @@ def run_pipeline():
     )
     logger.info("=" * 60)
 
+    # Operational health ping: a hard failure or a pass that returned an error stat
+    # must reach a human — otherwise a silent pipeline death means no alerts and no
+    # one knows. Best-effort and isolated so it can never break the run.
+    try:
+        _notify_health(results)
+    except Exception:
+        logger.exception("Failed to emit pipeline health notification")
+
     return results
+
+
+# Ordered stages we expect to complete; used to name the failure point in a health ping.
+_PIPELINE_STAGES = ["pass_a", "pass_b", "pass_c", "pass_d", "pass_e", "run_snapshot", "pass_f"]
+
+
+def _collect_degradations(results: dict) -> list[str]:
+    """Human-readable problems found in a run's per-pass stats (empty if all clean)."""
+    problems: list[str] = []
+    for stage, stats in results.items():
+        if not isinstance(stats, dict):
+            continue
+        if stats.get("error"):
+            problems.append(f"{stage}: {stats['error']}")
+        failed = stats.get("events_failed")
+        if isinstance(failed, int) and failed > 0:
+            problems.append(f"{stage}: {failed} event(s) failed")
+    return problems
+
+
+def _notify_health(results: dict) -> None:
+    """Send an ops alert when the run failed hard or a pass reported an error stat."""
+    from src.services.ops_notifier import send_ops_alert
+
+    degradations = _collect_degradations(results)
+    hard_failure = not results.get("success")
+    # `error` keys are real pass failures; per-event `events_failed` alone is routine
+    # noise and should not page on its own — only surface it alongside a real problem.
+    has_pass_error = any(": " in d and "event(s) failed" not in d for d in degradations)
+    if not hard_failure and not has_pass_error:
+        return
+
+    if hard_failure:
+        # The first stage still None is where we stopped making progress.
+        failed_stage = next(
+            (s for s in _PIPELINE_STAGES if results.get(s) is None), "init/teardown"
+        )
+        header = f"❌ Run {results.get('run_id')} FAILED at {failed_stage}"
+    else:
+        header = f"⚠️ Run {results.get('run_id')} completed DEGRADED"
+
+    lines = [header, f"duration: {results.get('duration_seconds')}s"]
+    if results.get("error"):
+        lines.append(f"error: {results['error']}")
+    if degradations:
+        lines.append("issues:")
+        lines.extend(f"  • {d}" for d in degradations)
+    send_ops_alert("\n".join(lines))
 if __name__ == "__main__":
     if "--weekly" in sys.argv:
         logger.info("Weekly forecast execution triggered via CLI parameter.")

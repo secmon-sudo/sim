@@ -1,0 +1,38 @@
+name: SIM Dead-Man's Switch
+
+# Independent of the main pipeline so it can detect the pipeline NOT running at all.
+# Hourly is well inside the 3h staleness threshold (pipeline runs every 2h).
+on:
+  schedule:
+    - cron: '30 * * * *'   # Hourly, offset 30m from the 2-hour pipeline
+  workflow_dispatch:
+
+concurrency:
+  group: sim-deadman
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL:            ${{ secrets.DATABASE_URL }}
+  TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  DEADMAN_MAX_AGE_HOURS:   '3'
+
+jobs:
+  deadman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install psycopg[binary] httpx
+
+      - name: Check pipeline freshness
+        run: python -m scripts.deadman_check

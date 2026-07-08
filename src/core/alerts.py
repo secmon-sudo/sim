@@ -22,8 +22,8 @@ class AlertTier:
 
 
 TIERS = {
-    "CRITICAL": AlertTier("CRITICAL", "#DC2626", ["telegram", "email", "sms"]),
-    "ALERT":    AlertTier("ALERT",    "#EA580C", ["telegram", "email"]),
+    "CRITICAL": AlertTier("CRITICAL", "#DC2626", ["telegram"]),
+    "ALERT":    AlertTier("ALERT",    "#EA580C", ["telegram"]),
     "WATCH":    AlertTier("WATCH",    "#CA8A04", ["telegram"]),
 }
 

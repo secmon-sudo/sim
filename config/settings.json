@@ -63,27 +63,25 @@
     "suppression_ttl_hours": 4,
     "new_activity_window_hours": 24,
     "alert_max_age_days": 2,
+    "storyline_quiet_hours": 12,
     "tiers": {
       "CRITICAL": {
         "severity_min": 80,
         "confidence_min": 0.8,
         "anchor_confidence": ["HIGH"],
-        "time_certainty_exclude": ["unknown"],
-        "channels": ["telegram", "email", "sms"]
+        "time_certainty_exclude": ["unknown"]
       },
       "ALERT": {
         "severity_min": 65,
         "confidence_min": 0.65,
         "anchor_confidence": ["HIGH", "MEDIUM"],
-        "time_certainty_exclude": ["unknown"],
-        "channels": ["telegram", "email"]
+        "time_certainty_exclude": ["unknown"]
       },
       "WATCH": {
         "severity_min": 45,
         "confidence_min": 0.5,
         "anchor_confidence": ["HIGH", "MEDIUM", "LOW"],
-        "time_certainty_include": ["same_day", "previous_day"],
-        "channels": ["telegram"]
+        "time_certainty_include": ["same_day", "previous_day"]
       }
     }
   },
