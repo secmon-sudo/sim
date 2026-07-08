@@ -185,6 +185,9 @@ def run_storyline_narratives(db_conn, router) -> dict:
                 prompt=build_narrative_prompt(events),
                 system_prompt=NARRATIVE_SYSTEM_PROMPT,
                 max_tokens=400,
+                # Prose narrative — NOT JSON. Forcing Groq's json_object mode here
+                # returns HTTP 400 (validator requires "json" in the prompt).
+                json_mode=False,
             )
             narrative = (result.get("content") or "").strip()
             if not narrative:

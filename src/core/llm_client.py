@@ -69,8 +69,15 @@ def _parse_retry_after(response: httpx.Response) -> float | None:
         rs.outcome.exception(),
     ),
 )
-def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024) -> httpx.Response:
-    """Single request to a specific account. Retries on connection errors only."""
+def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024,
+                  json_mode: bool = True) -> httpx.Response:
+    """Single request to a specific account. Retries on connection errors only.
+
+    json_mode=True forces a JSON-object response (for classifiers/forecasters that
+    json.loads the reply). Prose callers (e.g. the storyline narrator) MUST pass
+    json_mode=False: Groq's json_object validator requires the word "json" in the
+    conversation, so a prose prompt without it returns HTTP 400.
+    """
     headers = {
         "Authorization": f"Bearer {acct.api_key}",
         "Content-Type": "application/json",
@@ -90,7 +97,7 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # for all its models; we skip it for OpenRouter where some free models 400 on it.
     # (The prompt already instructs "Respond ONLY with valid JSON", satisfying the
     # OpenAI-compat requirement that the word "json" appear in the conversation.)
-    if acct.provider == "groq":
+    if acct.provider == "groq" and json_mode:
         payload["response_format"] = {"type": "json_object"}
         # qwen3 slots are reasoning models: in thinking mode they burn the whole token
         # budget on reasoning and emit an empty final message, which trips Groq's
@@ -110,7 +117,8 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     return response
 
 
-def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, max_tokens: int = 1024) -> dict[str, Any]:
+def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, max_tokens: int = 1024,
+             json_mode: bool = True) -> dict[str, Any]:
     """
     Try all available accounts in priority order.
 
@@ -145,7 +153,7 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
 
         try:
             t0 = time.monotonic()
-            resp = _send_request(acct, messages, max_tokens=max_tokens)
+            resp = _send_request(acct, messages, max_tokens=max_tokens, json_mode=json_mode)
             latency_ms = int((time.monotonic() - t0) * 1000)
 
             data = resp.json()

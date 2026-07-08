@@ -152,6 +152,12 @@ Extract the following fields:
      "Odesa" (not "Odessa"), "Aleppo", "Sanaa".
    - Order the tokens LOCATION → ACTOR → ACTION every time, so paraphrases converge.
    - If several places are named, use the PRIMARY target/impact location only.
+   - NEVER merge a multi-word proper noun into one token. Write "China Coast Guard"
+     as three words, "Al Shabaab" as two — never "chinacoastguard"/"alshabaab". The
+     hint doubles as a live news-search query, and glued tokens match nothing.
+   - Use plain, searchable words: real place/actor/action terms only. Do NOT invent
+     compounds, hashtags, or codes, and do not pad with filler like "situation",
+     "update", "news", or "crisis".
 8. confidence: Your confidence in the classification (0.0 to 1.0)
 9. casualties: If mentioned, extract {"deaths": int, "injuries": int, "missing": int}. If unknown, null.
 10. relevance_score: Integer 0-100 from Step 1

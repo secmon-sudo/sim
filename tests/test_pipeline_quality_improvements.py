@@ -85,6 +85,32 @@ def test_build_search_queries_with_active_storylines():
     assert "London Security Breach" not in query_texts
 
 
+def test_build_search_queries_caps_dynamic_and_prioritizes_by_severity():
+    """Dynamic queries are capped at MAX_DYNAMIC_QUERIES; highest severity wins the slots."""
+    from src.pipeline.pass_a_ingest import MAX_DYNAMIC_QUERIES
+
+    db = MagicMock()
+    now = datetime.now(timezone.utc)
+
+    # More active storylines than the cap. All recent (within their windows). Severity
+    # ascending with the index so the LOW-severity ones must be the ones dropped.
+    n = MAX_DYNAMIC_QUERIES + 5
+    rows = [
+        (f"Location{i} Actor Action Jun9", now - timedelta(hours=1), 40 + i, 2)
+        for i in range(n)
+    ]
+    db.execute().fetchall.return_value = rows
+
+    queries = build_search_queries(db)
+    dynamic = [q["query"] for q in queries if q.get("dynamic")]
+
+    # Capped
+    assert len(dynamic) == MAX_DYNAMIC_QUERIES
+    # Highest-severity storylines kept, lowest dropped
+    assert f"Location{n - 1} Actor Action" in dynamic   # top severity
+    assert "Location0 Actor Action" not in dynamic       # bottom severity
+
+
 # 4. Test Telegram notifier formatting
 @patch("src.services.telegram_notifier._post_telegram")
 @patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "mock_token", "TELEGRAM_ALERTS_CHAT_ID": "mock_chat"})

@@ -51,6 +51,11 @@ PROMPT_INJECTION_PATTERNS = re.compile(
 # to let Google serve regionally mixed results.  We still force hl=en.
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
 
+# Max dynamic (active-storyline) search queries per run. Dynamic queries run first and
+# eat into MAX_QUERIES_PER_RUN (50); capping them leaves room for static-tier discovery
+# so tracking existing storylines never fully starves finding NEW ones.
+MAX_DYNAMIC_QUERIES = 15
+
 # GDELT 2.0 Article List API
 GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
@@ -462,18 +467,31 @@ def build_search_queries(db_conn=None) -> list[dict]:
     active_queries = []
     if db_conn is not None:
         try:
-            # Query recent storylines from last 14 days
+            # Dynamic queries track *developing* storylines. Discipline (each rule keeps
+            # noise from permanently occupying a search slot and the LLM quota downstream):
+            #   - HAVING COUNT(*) >= 2: a storyline backed by a single article never earns
+            #     a recurring search. Singletons are usually one-off/low-quality and were
+            #     the main way junk storylines self-perpetuated (search → same article →
+            #     re-score → search again).
+            #   - The window is measured from the LAST event time, so a storyline that
+            #     stops producing new events ages out of its window automatically (early
+            #     retirement — no cron needed).
             with db_conn.transaction():
                 rows = db_conn.execute(
-                    """SELECT storyline_hint, MAX(occurred_at_est) as last_update, MAX(severity_score) as max_severity
+                    """SELECT storyline_hint,
+                              MAX(occurred_at_est) AS last_update,
+                              MAX(severity_score)  AS max_severity,
+                              COUNT(*)             AS event_count
                        FROM events
                        WHERE status IN ('scored', 'reconciled')
                          AND storyline_hint IS NOT NULL
                          AND occurred_at_est > NOW() - INTERVAL '14 days'
-                       GROUP BY storyline_id, storyline_hint"""
+                       GROUP BY storyline_id, storyline_hint
+                       HAVING COUNT(*) >= 2"""
                 ).fetchall()
 
             now = datetime.now(timezone.utc)
+            candidates = []  # (clean_query, max_severity, last_update)
             for row in rows:
                 hint = row[0]
                 last_update = row[1]
@@ -497,7 +515,13 @@ def build_search_queries(db_conn=None) -> list[dict]:
                     # Clean the hint (strip the date hint from the end, e.g. " Jun9")
                     clean_query = re.sub(r'\s+[A-Z][a-z]{2}\d{1,2}$', '', hint)
                     if clean_query:
-                        active_queries.append(clean_query)
+                        candidates.append((clean_query, max_severity, last_update))
+
+            # Cap dynamic queries so they can't crowd out static-tier discovery in the
+            # per-run MAX_QUERIES_PER_RUN budget. Priority: higher severity first, then
+            # most recently active.
+            candidates.sort(key=lambda c: (c[1], c[2]), reverse=True)
+            active_queries = [c[0] for c in candidates[:MAX_DYNAMIC_QUERIES]]
         except Exception:
             logger.exception("Error building dynamic search queries from active storylines")
 
