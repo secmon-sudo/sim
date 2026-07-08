@@ -15,7 +15,7 @@ from datetime import datetime as dt, timedelta, timezone
 from pathlib import Path
 
 from src.core.heartbeat import HeartbeatWorker
-from src.core.llm_client import call_llm, log_llm_telemetry
+from src.core.llm_client import LLMAllThrottled, call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
 from src.pipeline.pass_a_ingest import (
     _HIGH_SIGNAL_TERMS,
@@ -619,8 +619,15 @@ Text: {canonical_text[:3000]}"""
             db_conn.rollback()
         return None
 
+    except LLMAllThrottled as e:
+        # Every slot is momentarily on a TPM/cooldown window — expected under
+        # free-tier pacing: run_pass_c waits for the refill and retries this event.
+        # INFO, not ERROR: nothing failed, no request was even sent.
+        logger.info("All LLM slots throttled, deferring to pacing: %s", e)
+        raise
+
     except RuntimeError as e:
-        # All LLM accounts exhausted (every account on cooldown / rate-limited).
+        # All LLM accounts exhausted after real attempts (requests sent and failed).
         # Propagate so run_pass_c breaks the loop instead of hammering call_llm for
         # every remaining event and spamming the log while nothing can succeed.
         logger.error("All LLM accounts exhausted: %s", e)

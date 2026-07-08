@@ -24,6 +24,16 @@ PROVIDER_ENDPOINTS = {
 }
 
 
+class LLMAllThrottled(RuntimeError):
+    """Every account is on cooldown/rate-limited; no request was even attempted.
+
+    Expected flow under free-tier TPM pacing (per-minute token windows drained) —
+    callers like run_pass_c wait for the soonest refill and retry. Distinct from
+    the generic "exhausted after real attempts" RuntimeError, which signals actual
+    request failures. Subclasses RuntimeError so existing catchers keep working.
+    """
+
+
 def _parse_retry_after(response: httpx.Response) -> float | None:
     """Extract a backoff hint (seconds) from a 429 response.
 
@@ -134,7 +144,8 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
         - latency_ms: int
         - content: extracted text content
 
-    Raises RuntimeError if all accounts are exhausted.
+    Raises LLMAllThrottled if every account is on cooldown before any attempt,
+    or RuntimeError if all accounts were tried and failed.
     """
     messages = []
     if system_prompt:
@@ -201,7 +212,7 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             logger.exception("LLM %s unexpected error", acct.display_name)
 
     if not attempted:
-        raise RuntimeError("All LLM accounts on cooldown/rate-limited; no request attempted")
+        raise LLMAllThrottled("All LLM accounts on cooldown/rate-limited; no request attempted")
     raise RuntimeError(f"All LLM accounts exhausted. Last error: {last_error}")
 
 
