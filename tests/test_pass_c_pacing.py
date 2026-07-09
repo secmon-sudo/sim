@@ -12,7 +12,10 @@ import src.pipeline.pass_c_classify as pc
 
 
 def _run(router, classify_side_effect, events=("e1", "e2", "e3")):
-    with patch.object(pc, "get_events_for_classification", return_value=list(events)), \
+    # BATCH_CLASSIFY_SIZE=1 pins the classic per-event path these tests exercise;
+    # the batched path has its own tests in test_pass_c_batch.py.
+    with patch.object(pc, "BATCH_CLASSIFY_SIZE", 1), \
+         patch.object(pc, "get_events_for_classification", return_value=list(events)), \
          patch.object(pc, "classify_single_event", side_effect=classify_side_effect), \
          patch.object(pc, "log_llm_telemetry", lambda *a, **k: None), \
          patch("time.sleep", lambda s: None):

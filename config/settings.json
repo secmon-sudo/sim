@@ -15,15 +15,16 @@
   },
   "classification": {
     "deterministic_prescreen_enabled": true,
-    "deterministic_skip_floor": 15
+    "deterministic_skip_floor": 15,
+    "llm_batch_size": 6
   },
   "dedup": {
     "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
-    "content_similarity_threshold": 0.50,
+    "content_similarity_threshold": 0.5,
     "title_similarity_threshold": 0.65,
     "title_token_jaccard_threshold": 0.72,
-    "content_shingle_threshold": 0.40
+    "content_shingle_threshold": 0.4
   },
   "scoring": {
     "proximity_bonus": 30,
@@ -68,20 +69,36 @@
       "CRITICAL": {
         "severity_min": 80,
         "confidence_min": 0.8,
-        "anchor_confidence": ["HIGH"],
-        "time_certainty_exclude": ["unknown"]
+        "anchor_confidence": [
+          "HIGH"
+        ],
+        "time_certainty_exclude": [
+          "unknown"
+        ]
       },
       "ALERT": {
         "severity_min": 65,
         "confidence_min": 0.65,
-        "anchor_confidence": ["HIGH", "MEDIUM"],
-        "time_certainty_exclude": ["unknown"]
+        "anchor_confidence": [
+          "HIGH",
+          "MEDIUM"
+        ],
+        "time_certainty_exclude": [
+          "unknown"
+        ]
       },
       "WATCH": {
         "severity_min": 45,
         "confidence_min": 0.5,
-        "anchor_confidence": ["HIGH", "MEDIUM", "LOW"],
-        "time_certainty_include": ["same_day", "previous_day"]
+        "anchor_confidence": [
+          "HIGH",
+          "MEDIUM",
+          "LOW"
+        ],
+        "time_certainty_include": [
+          "same_day",
+          "previous_day"
+        ]
       }
     }
   },

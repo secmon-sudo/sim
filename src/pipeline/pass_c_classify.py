@@ -46,6 +46,17 @@ _CLASSIFICATION = _SETTINGS.get("classification", {})
 PRESCREEN_ENABLED = _CLASSIFICATION.get("deterministic_prescreen_enabled", True)
 PRESCREEN_SKIP_FLOOR = _CLASSIFICATION.get("deterministic_skip_floor", 15)
 
+# Batch classification: how many reports to classify per LLM call. The ~2300-token
+# system prompt is paid ONCE per call instead of once per event, and each call burns
+# one RPM slot for N events — the free tier's two scarcest currencies. Sized so a
+# full batch (system + N truncated reports + JSON array output) stays inside Groq's
+# 8K TPM window. 1 disables batching (classic per-event path).
+BATCH_CLASSIFY_SIZE = int(_CLASSIFICATION.get("llm_batch_size", 6))
+# Per-report truncation inside a batch prompt (chars). Tighter than the single-event
+# path's 3000 so the whole batch fits the TPM window; headlines carry most signal.
+BATCH_TEXT_CHARS = 1200
+BATCH_TITLE_CHARS = 300
+
 # Word-boundary pattern for high-signal terms only (subset of the full security
 # pattern). Used to (a) score relevance and (b) override LLM false-negatives —
 # if a hard signal like "explosion"/"airstrike"/"killed" is present we never let
@@ -399,6 +410,40 @@ def update_domain_penalty(db_conn, domain: str, is_noise: int):
         logger.exception("Error updating domain penalty for: %s", domain)
 
 
+def _is_travel_advisory(event: dict) -> bool:
+    source_domain = event.get('source_domain', 'unknown') or 'unknown'
+    return source_domain in ('travel.state.gov', 'gov.uk', 'smartraveller.gov.au')
+
+
+def _try_prescreen_archive(db_conn, event: dict, det: dict) -> bool:
+    """Deterministic pre-screen (zero-LLM, token-positive).
+
+    Archives clearly off-topic articles (no security vocabulary at all) before
+    spending an LLM call; travel advisories always go to the LLM. Returns True
+    if the event was archived. Caller holds (and releases) the lock.
+    """
+    if not PRESCREEN_ENABLED or _is_travel_advisory(event) or det["score"] >= PRESCREEN_SKIP_FLOOR:
+        return False
+    event_id = event["id"]
+    source_domain = event.get('source_domain', 'unknown') or 'unknown'
+    update_domain_penalty(db_conn, source_domain, 1)
+    db_conn.execute(
+        """UPDATE events
+           SET event_type = 'other_aviation_related',
+               llm_parsed_output = %s,
+               status = 'archived',
+               updated_at = NOW()
+           WHERE id = %s""",
+        (json.dumps({"prescreen": det, "archived_reason": "deterministic_prescreen"}), event_id),
+    )
+    db_conn.commit()
+    logger.info(
+        "Event %s prescreen-archived (score=%d, no security signal) — saved 1 LLM call",
+        event_id[:8], det["score"],
+    )
+    return True
+
+
 def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uuid.UUID) -> dict | None:
     """
     Classify a single event using LLM with heartbeat protection.
@@ -418,31 +463,9 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
             source_title = event.get('source_title', '') or ''
             source_domain = event.get('source_domain', 'unknown') or 'unknown'
             canonical_text = event.get('canonical_text', '') or ''
-            
-            # Detect travel advisory sources for special handling
-            is_travel_advisory = source_domain in ('travel.state.gov', 'gov.uk', 'smartraveller.gov.au')
 
-            # ── Deterministic pre-screen (zero-LLM, token-positive) ──
-            # Skip clearly off-topic articles (no security vocabulary at all) before
-            # spending an LLM call. Travel advisories always go to the LLM. The same
-            # signals also guard against LLM false-negatives later (see Tier 1 below).
             det = deterministic_relevance(source_title, canonical_text)
-            if PRESCREEN_ENABLED and not is_travel_advisory and det["score"] < PRESCREEN_SKIP_FLOOR:
-                update_domain_penalty(db_conn, source_domain, 1)
-                db_conn.execute(
-                    """UPDATE events
-                       SET event_type = 'other_aviation_related',
-                           llm_parsed_output = %s,
-                           status = 'archived',
-                           updated_at = NOW()
-                       WHERE id = %s""",
-                    (json.dumps({"prescreen": det, "archived_reason": "deterministic_prescreen"}), event_id),
-                )
-                db_conn.commit()
-                logger.info(
-                    "Event %s prescreen-archived (score=%d, no security signal) — saved 1 LLM call",
-                    event_id[:8], det["score"],
-                )
+            if _try_prescreen_archive(db_conn, event, det):
                 release_lock(db_conn, event_id, worker_id)
                 return {"event_type": "other_aviation_related", "_prescreen_skipped": True}
 
@@ -452,7 +475,7 @@ Headline: {source_title[:500]}
 Source: {source_domain}
 Text: {canonical_text[:3000]}"""
 
-            if is_travel_advisory:
+            if _is_travel_advisory(event):
                 prompt += "\n\nIMPORTANT: This is an official government Travel Advisory. Classify as travel_advisory, travel_ban, or embassy_closure as appropriate."
 
             # Call LLM through multi-provider router
@@ -465,147 +488,7 @@ Text: {canonical_text[:3000]}"""
 
             # Parse response
             parsed = validate_and_parse(result.get("content", ""))
-
-            # Graduated relevance handling using LLM's relevance_score
-            event_type = parsed.get("event_type", "other_aviation_related")
-            relevance = _safe_relevance(parsed.get("relevance_score", 50))
-
-            # LLM false-negative guard: if a hard deterministic signal is present
-            # (explosion/airstrike/killed/etc.) but the LLM scored this as noise,
-            # keep it in the pipeline rather than silently archiving. Better a
-            # low-priority event than a missed real incident.
-            if det["has_high_signal"] and relevance < 30:
-                logger.warning(
-                    "Event %s: LLM relevance=%d but high-signal term present — overriding archive, keeping event",
-                    event_id[:8], relevance,
-                )
-                relevance = max(relevance, 30)
-                if event_type == "noise":
-                    event_type = "other_aviation_related"
-                    parsed["event_type"] = event_type
-
-            # Tier 1: Clear noise (relevance < 20) → archive immediately
-            # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'
-            # The original LLM classification is preserved in llm_parsed_output for auditing
-            if relevance < 30 or (event_type == "noise" and relevance < 40):
-                archive_type = "other_aviation_related"  # FK-safe fallback
-                update_domain_penalty(db_conn, source_domain, 1)
-                db_conn.execute(
-                    """UPDATE events
-                       SET event_type = %s,
-                           llm_raw_output = %s,
-                           llm_parsed_output = %s,
-                           llm_provider = %s,
-                           llm_model = %s,
-                           status = 'archived',
-                           updated_at = NOW()
-                       WHERE id = %s""",
-                    (
-                        archive_type,
-                        json.dumps(result.get("response", {})),
-                        json.dumps(parsed),
-                        result.get("provider"),
-                        result.get("model"),
-                        event_id,
-                    ),
-                )
-                db_conn.commit()
-                log_llm_telemetry(db_conn, result, router, success=True)
-                logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
-                            event_id[:8], relevance, event_type,
-                            parsed.get("relevance_reasoning", "")[:80])
-                release_lock(db_conn, event_id, worker_id)
-                return parsed
-
-
-            # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
-            # These events proceed through the pipeline but with reduced priority
-            if relevance < 50 or event_type == "noise":
-                # Re-classify noise with some relevance as other_aviation_related
-                # so it still flows through scoring but won't get high priority
-                if event_type == "noise":
-                    event_type = "other_aviation_related"
-                    parsed["event_type"] = event_type
-                logger.info("Event %s low-relevance (%d) — classifying as %s",
-                            event_id[:8], relevance, event_type)
-
-            # Tier 3: Relevant (40+) → proceed normally with classification
-            update_domain_penalty(db_conn, source_domain, 0)
-
-            # Validate event_type against active catalog
-            active_check = db_conn.execute(
-                "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
-                (event_type,),
-            ).fetchone()
-            if not active_check:
-                event_type = "other_aviation_related"
-
-            # Validate sub_type against active catalog
-            sub_type = parsed.get("sub_type")
-            if sub_type:
-                sub_check = db_conn.execute(
-                    "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
-                    (sub_type,),
-                ).fetchone()
-                if not sub_check:
-                    sub_type = None
-
-            # Sanitize country_iso: must be exactly 2 uppercase ASCII letters
-            raw_iso = parsed.get("country_iso") or ""
-            country_iso = raw_iso.strip().upper()[:2] if raw_iso else None
-            if country_iso and (len(country_iso) != 2 or not country_iso.isalpha()):
-                country_iso = None
-
-            # Parse occurred_at from LLM output into a timestamp
-            occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
-
-            # Update event with classification — psycopg 3 writes dicts to JSONB natively
-            db_conn.execute(
-                """UPDATE events
-                   SET llm_raw_output    = %s,
-                       llm_parsed_output = %s,
-                       event_type        = %s,
-                       sub_type          = %s,
-                       anchor_name_raw   = %s,
-                       country_iso       = %s,
-                       storyline_hint    = %s,
-                       time_certainty    = %s,
-                       occurred_at_est   = COALESCE(%s, occurred_at_est),
-                       llm_provider      = %s,
-                       llm_model         = %s,
-                       status            = 'classified',
-                       updated_at        = NOW()
-                   WHERE id = %s AND lock_owner = %s""",
-                (
-                    json.dumps(result.get("response", {})),
-                    json.dumps(parsed),
-                    event_type,
-                    sub_type,
-                    parsed.get("anchor_name"),
-                    country_iso,
-                    _normalize_storyline_hint(parsed.get("storyline_hint")),
-                    parsed.get("time_certainty", "unknown"),
-                    occurred_at_est,
-                    result.get("provider"),
-                    result.get("model"),
-                    event_id,
-                    str(worker_id),
-                ),
-            )
-            db_conn.commit()
-
-            # Log telemetry
-            log_llm_telemetry(db_conn, result, router, success=True)
-
-            logger.info(
-                "Classified event %s as %s via %s/%s (%.0fms)",
-                event_id[:8],
-                event_type,
-                result.get("provider"),
-                result.get("model", "")[:30],
-                result.get("latency_ms", 0),
-            )
-            return parsed
+            return _apply_llm_classification(db_conn, router, event, det, parsed, result, worker_id)
 
     except LLMParseError as e:
         logger.warning("LLM parse error for event %s: %s", event_id[:8], e)
@@ -644,8 +527,300 @@ Text: {canonical_text[:3000]}"""
         return None
 
     finally:
-        # Idempotent lock release with explicit commit/rollback
-        release_lock(db_conn, event_id, worker_id)
+        # Idempotent lock release with explicit commit/rollback. requeue=True flips a
+        # still-'locked' event back to 'deduped' so the pacing retry (or at worst the
+        # next run) can pick it up without waiting for the orphan sweep.
+        release_lock(db_conn, event_id, worker_id, requeue=True)
+
+
+def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict,
+                              parsed: dict, result: dict, worker_id: uuid.UUID) -> dict | None:
+    """Apply a parsed LLM classification to an event (tiering, validation, DB update).
+
+    Shared by the single-event and batched paths. Caller holds the lock.
+    """
+    event_id = event["id"]
+    source_domain = event.get('source_domain', 'unknown') or 'unknown'
+
+    # Graduated relevance handling using LLM's relevance_score
+    event_type = parsed.get("event_type", "other_aviation_related")
+    relevance = _safe_relevance(parsed.get("relevance_score", 50))
+
+    # LLM false-negative guard: if a hard deterministic signal is present
+    # (explosion/airstrike/killed/etc.) but the LLM scored this as noise,
+    # keep it in the pipeline rather than silently archiving. Better a
+    # low-priority event than a missed real incident.
+    if det["has_high_signal"] and relevance < 30:
+        logger.warning(
+            "Event %s: LLM relevance=%d but high-signal term present — overriding archive, keeping event",
+            event_id[:8], relevance,
+        )
+        relevance = max(relevance, 30)
+        if event_type == "noise":
+            event_type = "other_aviation_related"
+            parsed["event_type"] = event_type
+
+    # Tier 1: Clear noise (relevance < 20) → archive immediately
+    # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'
+    # The original LLM classification is preserved in llm_parsed_output for auditing
+    if relevance < 30 or (event_type == "noise" and relevance < 40):
+        archive_type = "other_aviation_related"  # FK-safe fallback
+        update_domain_penalty(db_conn, source_domain, 1)
+        db_conn.execute(
+            """UPDATE events
+               SET event_type = %s,
+                   llm_raw_output = %s,
+                   llm_parsed_output = %s,
+                   llm_provider = %s,
+                   llm_model = %s,
+                   status = 'archived',
+                   updated_at = NOW()
+               WHERE id = %s""",
+            (
+                archive_type,
+                json.dumps(result.get("response", {})),
+                json.dumps(parsed),
+                result.get("provider"),
+                result.get("model"),
+                event_id,
+            ),
+        )
+        db_conn.commit()
+        log_llm_telemetry(db_conn, result, router, success=True)
+        logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
+                    event_id[:8], relevance, event_type,
+                    parsed.get("relevance_reasoning", "")[:80])
+        return parsed
+
+
+    # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
+    # These events proceed through the pipeline but with reduced priority
+    if relevance < 50 or event_type == "noise":
+        # Re-classify noise with some relevance as other_aviation_related
+        # so it still flows through scoring but won't get high priority
+        if event_type == "noise":
+            event_type = "other_aviation_related"
+            parsed["event_type"] = event_type
+        logger.info("Event %s low-relevance (%d) — classifying as %s",
+                    event_id[:8], relevance, event_type)
+
+    # Tier 3: Relevant (40+) → proceed normally with classification
+    update_domain_penalty(db_conn, source_domain, 0)
+
+    # Validate event_type against active catalog
+    active_check = db_conn.execute(
+        "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
+        (event_type,),
+    ).fetchone()
+    if not active_check:
+        event_type = "other_aviation_related"
+
+    # Validate sub_type against active catalog
+    sub_type = parsed.get("sub_type")
+    if sub_type:
+        sub_check = db_conn.execute(
+            "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
+            (sub_type,),
+        ).fetchone()
+        if not sub_check:
+            sub_type = None
+
+    # Sanitize country_iso: must be exactly 2 uppercase ASCII letters
+    raw_iso = parsed.get("country_iso") or ""
+    country_iso = raw_iso.strip().upper()[:2] if raw_iso else None
+    if country_iso and (len(country_iso) != 2 or not country_iso.isalpha()):
+        country_iso = None
+
+    # Parse occurred_at from LLM output into a timestamp
+    occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
+
+    # Update event with classification — psycopg 3 writes dicts to JSONB natively
+    db_conn.execute(
+        """UPDATE events
+           SET llm_raw_output    = %s,
+               llm_parsed_output = %s,
+               event_type        = %s,
+               sub_type          = %s,
+               anchor_name_raw   = %s,
+               country_iso       = %s,
+               storyline_hint    = %s,
+               time_certainty    = %s,
+               occurred_at_est   = COALESCE(%s, occurred_at_est),
+               llm_provider      = %s,
+               llm_model         = %s,
+               status            = 'classified',
+               updated_at        = NOW()
+           WHERE id = %s AND lock_owner = %s""",
+        (
+            json.dumps(result.get("response", {})),
+            json.dumps(parsed),
+            event_type,
+            sub_type,
+            parsed.get("anchor_name"),
+            country_iso,
+            _normalize_storyline_hint(parsed.get("storyline_hint")),
+            parsed.get("time_certainty", "unknown"),
+            occurred_at_est,
+            result.get("provider"),
+            result.get("model"),
+            event_id,
+            str(worker_id),
+        ),
+    )
+    db_conn.commit()
+
+    # Log telemetry
+    log_llm_telemetry(db_conn, result, router, success=True)
+
+    logger.info(
+        "Classified event %s as %s via %s/%s (%.0fms)",
+        event_id[:8],
+        event_type,
+        result.get("provider"),
+        result.get("model", "")[:30],
+        result.get("latency_ms", 0),
+    )
+    return parsed
+
+
+# Appended to the system prompt for batched calls. json_object mode requires an
+# object at the top level, so the per-report results ride in a "results" array.
+BATCH_SYSTEM_SUFFIX = """
+
+BATCH MODE: You will receive several numbered news reports in one message.
+Classify EACH report INDEPENDENTLY using the schema above.
+Respond ONLY with valid JSON of the form:
+{"results": [{"report": 1, ...all fields...}, {"report": 2, ...}, ...]}
+Include exactly one object per report, carrying its "report" number."""
+
+
+def _batch_prompt(llm_events: list[dict]) -> str:
+    blocks = [f"Classify each of these {len(llm_events)} news reports:"]
+    for i, event in enumerate(llm_events, 1):
+        title = (event.get('source_title', '') or '')[:BATCH_TITLE_CHARS]
+        domain = event.get('source_domain', 'unknown') or 'unknown'
+        text = (event.get('canonical_text', '') or '')[:BATCH_TEXT_CHARS]
+        block = f"REPORT {i}:\nHeadline: {title}\nSource: {domain}\nText: {text}"
+        if _is_travel_advisory(event):
+            block += ("\nIMPORTANT: This is an official government Travel Advisory. "
+                      "Classify as travel_advisory, travel_ban, or embassy_closure as appropriate.")
+        blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+def _parse_batch_response(content: str, expected: int) -> dict[int, dict]:
+    """Parse a batch response into {report_number: parsed_item}.
+
+    Outer-JSON failures raise LLMParseError (whole batch stays queued);
+    per-item defects just drop that item — its event stays queued.
+    """
+    parsed = validate_and_parse(content)  # reuses markdown/trailing-comma repair
+    results = parsed.get("results")
+    if not isinstance(results, list):
+        raise LLMParseError("Batch response missing 'results' array")
+    items: dict[int, dict] = {}
+    for pos, item in enumerate(results, 1):
+        if not isinstance(item, dict):
+            continue
+        try:
+            report_no = int(item.get("report", pos))
+        except (TypeError, ValueError):
+            report_no = pos
+        if 1 <= report_no <= expected and report_no not in items:
+            item.setdefault("event_type", "other_aviation_related")
+            items[report_no] = item
+    return items
+
+
+def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_id: uuid.UUID) -> dict:
+    """Classify a chunk of events with ONE LLM call (plus zero-cost prescreens).
+
+    Returns {"classified": int, "failed": int}. Events whose lock can't be
+    acquired (already handled by an earlier attempt of this chunk) are skipped
+    without counting. On throttle/exhaustion the LLM-pending locks are released
+    with requeue so run_pass_c's pacing retry can re-acquire them, then the
+    exception propagates — mirroring the single-event contract.
+    """
+    stats = {"classified": 0, "failed": 0}
+    llm_events: list[dict] = []
+
+    for event in events:
+        event_id = event["id"]
+        if not acquire_lock(db_conn, event_id, worker_id):
+            continue  # already archived/classified (e.g. pre-retry) or raced
+        try:
+            det = deterministic_relevance(
+                event.get('source_title', '') or '',
+                event.get('canonical_text', '') or '',
+            )
+            event["_det"] = det
+            if _try_prescreen_archive(db_conn, event, det):
+                stats["classified"] += 1
+                release_lock(db_conn, event_id, worker_id)
+            else:
+                llm_events.append(event)  # lock intentionally kept for the LLM leg
+        except Exception:
+            db_conn.rollback()
+            logger.exception("Batch prescreen failed for event %s", event_id[:8])
+            stats["failed"] += 1
+            release_lock(db_conn, event_id, worker_id, requeue=True)
+
+    if not llm_events:
+        return stats
+
+    def _release_pending(requeue: bool):
+        for ev in llm_events:
+            release_lock(db_conn, ev["id"], worker_id, requeue=requeue)
+
+    try:
+        result = call_llm(
+            router,
+            prompt=_batch_prompt(llm_events),
+            system_prompt=CLASSIFICATION_SYSTEM_PROMPT + BATCH_SYSTEM_SUFFIX,
+            max_tokens=280 * len(llm_events) + 200,
+        )
+        items = _parse_batch_response(result.get("content", ""), expected=len(llm_events))
+    except LLMAllThrottled:
+        _release_pending(requeue=True)
+        raise
+    except RuntimeError as e:
+        logger.error("All LLM accounts exhausted: %s", e)
+        _release_pending(requeue=True)
+        raise
+    except LLMParseError as e:
+        # Whole-batch parse failure: leave the events queued for the pacing retry /
+        # next run rather than mislabeling all of them.
+        logger.warning("Batch parse error (%d events left queued): %s", len(llm_events), e)
+        _release_pending(requeue=True)
+        stats["failed"] += len(llm_events)
+        return stats
+    except Exception:
+        db_conn.rollback()
+        logger.exception("Unexpected batch classification error (%d events)", len(llm_events))
+        _release_pending(requeue=True)
+        stats["failed"] += len(llm_events)
+        return stats
+
+    for i, event in enumerate(llm_events, 1):
+        item = items.get(i)
+        try:
+            if item is None:
+                logger.warning("Batch response missing report %d (event %s) — left queued",
+                               i, event["id"][:8])
+                stats["failed"] += 1
+                continue
+            if _apply_llm_classification(db_conn, router, event, event["_det"], item, result, worker_id):
+                stats["classified"] += 1
+            else:
+                stats["failed"] += 1
+        except Exception:
+            db_conn.rollback()
+            logger.exception("Failed applying batch classification to event %s", event["id"][:8])
+            stats["failed"] += 1
+        finally:
+            release_lock(db_conn, event["id"], worker_id, requeue=(item is None))
+
+    return stats
 
 
 # Pacing bounds — cap a single wait for a token-window refill, and the cumulative pacing
@@ -706,17 +881,28 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
     # wait for the soonest refill and retry rather than aborting the whole pass — TPM is
     # far tighter than RPM on the free tier, so a backlog otherwise stops after a handful
     # of events. Bounded per-wait and per-run so a genuine outage still fails fast.
+    #
+    # Batching: BATCH_CLASSIFY_SIZE > 1 classifies whole chunks per LLM call. A paced
+    # retry re-runs the same chunk; events its first attempt already completed fail
+    # acquire_lock and are skipped, so nothing is double-counted or re-billed.
+    chunk_size = max(1, BATCH_CLASSIFY_SIZE)
     paced_total = 0.0
     exhausted = False
-    for event in events:
+    for start in range(0, len(events), chunk_size):
+        chunk = events[start:start + chunk_size]
         while True:
             try:
-                result = classify_single_event(db_conn, router, event, worker_id)
-                if result:
-                    stats["events_classified"] += 1
+                if chunk_size > 1:
+                    batch = classify_event_batch(db_conn, router, chunk, worker_id)
+                    stats["events_classified"] += batch["classified"]
+                    stats["events_failed"] += batch["failed"]
                 else:
-                    stats["events_failed"] += 1
-                break  # this event is done → move on
+                    result = classify_single_event(db_conn, router, chunk[0], worker_id)
+                    if result:
+                        stats["events_classified"] += 1
+                    else:
+                        stats["events_failed"] += 1
+                break  # this chunk is done → move on
             except RuntimeError:
                 wait = router.seconds_until_available()
                 if (wait is None

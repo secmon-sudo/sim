@@ -123,14 +123,25 @@ def acquire_lock(db_conn, event_id: str, worker_id: uuid.UUID) -> bool:
         return False
 
 
-def release_lock(db_conn, event_id: str, worker_id: uuid.UUID):
+def release_lock(db_conn, event_id: str, worker_id: uuid.UUID, requeue: bool = False):
     """
     Idempotent lock release — 0 rows updated is NOT an error.
+
+    requeue=True additionally flips a still-'locked' event back to 'deduped' so a
+    paced retry within the SAME run can re-acquire it. Without this, an event whose
+    LLM call was aborted (throttle/exhaustion) stays status='locked' until the next
+    run's orphan requeue — a silent 2h delay. Events whose status already advanced
+    (classified/archived) are untouched thanks to the CASE guard.
     """
+    status_sql = (
+        "status = CASE WHEN status = 'locked' THEN 'deduped' ELSE status END,"
+        if requeue else ""
+    )
     try:
         result = db_conn.execute(
-            """UPDATE events
-               SET classification_lock = FALSE,
+            f"""UPDATE events
+               SET {status_sql}
+                   classification_lock = FALSE,
                    lock_owner = NULL
                WHERE id = %s AND lock_owner = %s""",
             (event_id, str(worker_id)),
