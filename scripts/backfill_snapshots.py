@@ -22,14 +22,13 @@ import os
 import sys
 from datetime import datetime, timezone
 
-import psycopg
-
 from src.pipeline.pass_f_archive import (
     _EVENT_COLUMNS,
     _rows_to_event_dicts,
     generate_jsonl_and_hash,
     upload_to_cloudflare_r2,
 )
+from src.services.supabase_client import close_pool, get_connection, put_connection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("sim.backfill")
@@ -38,7 +37,7 @@ logger = logging.getLogger("sim.backfill")
 CHUNK_SIZE = 500
 
 
-def fetch_classified_events(db_url: str, since: datetime) -> list[dict]:
+def fetch_classified_events(since: datetime) -> list[dict]:
     query = f"""
         SELECT {", ".join(_EVENT_COLUMNS)}
         FROM events
@@ -46,8 +45,15 @@ def fetch_classified_events(db_url: str, since: datetime) -> list[dict]:
           AND storyline_id IS NOT NULL
         ORDER BY updated_at ASC
     """
-    with psycopg.connect(db_url) as conn:
+    # Use the pipeline's pool: it auto-switches the Supabase pooler from 5432
+    # (Session Mode, can block indefinitely) to 6543 (Transaction Mode) and
+    # disables prepared statements. A raw psycopg.connect on 5432 hung in CI.
+    conn = get_connection()
+    try:
         rows = conn.execute(query, (since,)).fetchall()
+    finally:
+        put_connection(conn)
+        close_pool()
     return _rows_to_event_dicts(rows)
 
 
@@ -57,13 +63,12 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Fetch and report only, no upload")
     args = parser.parse_args()
 
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
+    if not os.environ.get("DATABASE_URL"):
         logger.error("DATABASE_URL is not set")
         return 1
 
     since = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    events = fetch_classified_events(db_url, since)
+    events = fetch_classified_events(since)
     logger.info("Fetched %d classified events updated since %s", len(events), args.since)
     if not events:
         return 0
