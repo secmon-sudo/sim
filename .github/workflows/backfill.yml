@@ -1,0 +1,44 @@
+name: SIM Snapshot Backfill
+
+# One-off, manually triggered: re-exports classified events to R2 for a period
+# whose per-run snapshots were broken (see scripts/backfill_snapshots.py).
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Re-export events updated since this date (YYYY-MM-DD, UTC)"
+        required: true
+        default: "2026-07-06"
+      dry_run:
+        description: "Dry run (fetch and report only, no upload)"
+        type: boolean
+        default: true
+
+env:
+  DATABASE_URL:         ${{ secrets.DATABASE_URL }}
+  R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backfill
+        run: >-
+          python -m scripts.backfill_snapshots
+          --since "${{ inputs.since }}"
+          ${{ inputs.dry_run && '--dry-run' || '' }}
