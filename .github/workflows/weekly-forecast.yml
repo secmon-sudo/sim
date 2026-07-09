@@ -14,6 +14,7 @@ env:
   GROQ_API_KEY_B:       ${{ secrets.GROQ_API_KEY_B }}
   OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
   OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
+  GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}

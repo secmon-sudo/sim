@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 PROVIDER_ENDPOINTS = {
     "groq": "https://api.groq.com/openai/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    # Google AI Studio's OpenAI-compatibility layer — same chat/completions shape.
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
 }
 
 
@@ -107,7 +109,7 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # for all its models; we skip it for OpenRouter where some free models 400 on it.
     # (The prompt already instructs "Respond ONLY with valid JSON", satisfying the
     # OpenAI-compat requirement that the word "json" appear in the conversation.)
-    if acct.provider == "groq" and json_mode:
+    if acct.provider in ("groq", "gemini") and json_mode:
         payload["response_format"] = {"type": "json_object"}
         # Reasoning models in thinking mode burn the whole token budget on hidden
         # reasoning and emit an empty final message, which trips Groq's json_object

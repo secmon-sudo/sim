@@ -23,6 +23,11 @@ from src.pipeline.pass_a_ingest import (
     is_noise,
 )
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
+from src.services.ops_notifier import send_ops_alert
+
+# Pending 'deduped' events above this pages ops: at ~40 ingested/run it means the
+# queue is more than two full runs behind even at the raised per-run limit.
+QUEUE_DEPTH_ALERT_THRESHOLD = 400
 
 logger = logging.getLogger(__name__)
 
@@ -671,6 +676,27 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
 
     events = get_events_for_classification(db_conn, limit=limit)
     stats["events_available"] = len(events)
+
+    # Queue-depth telemetry: a saturated batch (available == limit) means events
+    # are waiting more than one run for classification. Surface it every run and
+    # page ops past the alert threshold, so a growing backlog is seen on the
+    # first run — not days later via a stale dashboard.
+    try:
+        row = db_conn.execute(
+            "SELECT COUNT(*) FROM events WHERE status = 'deduped' AND classification_lock = FALSE"
+        ).fetchone()
+        queue_depth = int(row[0]) if row else 0
+        stats["queue_depth"] = queue_depth
+        if queue_depth > QUEUE_DEPTH_ALERT_THRESHOLD:
+            logger.warning("Pass C queue depth %d exceeds threshold %d", queue_depth, QUEUE_DEPTH_ALERT_THRESHOLD)
+            send_ops_alert(
+                f"Pass C classification queue depth is {queue_depth} "
+                f"(threshold {QUEUE_DEPTH_ALERT_THRESHOLD}, per-run limit {limit}). "
+                "Ingest is outpacing LLM classification capacity.",
+                title="SIM PASS C BACKLOG",
+            )
+    except Exception:
+        logger.exception("Pass C: queue-depth check failed (non-fatal)")
 
     if not events:
         logger.info("Pass C: No events to classify")

@@ -304,7 +304,26 @@ def build_llm_router() -> LLMRouter:
             rpm=20, rpd=200,
             bucket=TokenBucket(rate_per_minute=20, daily_limit=200, burst=DEFAULT_BURST),
         ),
-        # ⑦ Reserved for future model slot (Blueprint V20.1 §4.5.2)
+        # ⑦ Gemini — üçüncü bağımsız sağlayıcı (AI Studio free tier, OpenAI-compat).
+        # Groq/OpenRouter kesintilerinden etkilenmez; 250K TPM ile Groq'un 8K TPM
+        # duvarı burada yok. Limitler proje+model başına, o yüzden tek anahtar iki
+        # slot açar. Free tier 2026-07 itibariyle (Aralık 2025 kota indiriminden
+        # sonra): gemini-3-flash 10 RPM / 1500 RPD, gemini-2.5-flash-lite 15 RPM /
+        # 1000 RPD. Kotalar Pasifik gece yarısında sıfırlanır.
+        LLMAccount(
+            provider="gemini", account_id="A",
+            model="gemini-3-flash",
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
+            rpm=10, rpd=1500,
+            bucket=TokenBucket(rate_per_minute=10, daily_limit=1500, burst=DEFAULT_BURST),
+        ),
+        LLMAccount(
+            provider="gemini", account_id="A",
+            model="gemini-2.5-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
+            rpm=15, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=1000, burst=DEFAULT_BURST),
+        ),
         # ⑧ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
         # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli
         # artık 1K RPD üstüne çıkmıyor (2026-06-17 Groq deprecation).
@@ -319,7 +338,7 @@ def build_llm_router() -> LLMRouter:
     # Filter out accounts with empty API keys
     active = [a for a in accounts if a.api_key]
     if not active:
-        logger.critical("No LLM API keys configured! Set GROQ_API_KEY_A/B and/or OPENROUTER_API_KEY_A/B")
+        logger.critical("No LLM API keys configured! Set GROQ_API_KEY_A/B, OPENROUTER_API_KEY_A/B and/or GEMINI_API_KEY")
     return LLMRouter(_share_buckets(active))
 
 

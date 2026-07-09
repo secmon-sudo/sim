@@ -106,8 +106,11 @@ def run_pipeline():
         results["pass_b"] = run_pass_b(db_conn)
 
         # Pass C: LLM Classification
+        # limit=200: at the default 50 the queue saturated (Jul 6-9 backlog) and
+        # fresh events slipped 1-2 runs behind. Pass C's TPM pacing keeps a bigger
+        # batch inside the free-tier budget, and the 2h run window has time to spare.
         logger.info("--- PASS C: LLM Classification ---")
-        results["pass_c"] = run_pass_c(db_conn, router)
+        results["pass_c"] = run_pass_c(db_conn, router, limit=200)
 
         # Pass D: Scoring & Storyline
         logger.info("--- PASS D: Scoring & Storyline ---")
