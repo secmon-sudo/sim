@@ -300,14 +300,22 @@ def run_pass_f(db_conn) -> dict:
 
 
 def get_run_events(db_conn, run_started_at: datetime) -> list[dict]:
-    """Select events ingested during this pipeline run (newest first)."""
+    """Select events that finished processing during this pipeline run.
+
+    Keyed on updated_at (not ingested_at): when the Pass C backlog exceeds its
+    per-run cap, events are classified 1-2 runs after ingestion, and a snapshot
+    of "ingested this run" would export raw rows without storyline_id — which
+    the storyboard worker silently drops. Requiring storyline_id also keeps
+    prescreen-archived noise out of the export.
+    """
     query = """
         SELECT id, source_url, source_title, canonical_text, event_type,
                alert_tier, severity_score, anchor_name_norm, country_iso,
                occurred_at_est, ingested_at, llm_parsed_output, storyline_id
         FROM events
-        WHERE ingested_at >= %s
-        ORDER BY severity_score DESC NULLS LAST, ingested_at DESC
+        WHERE updated_at >= %s
+          AND storyline_id IS NOT NULL
+        ORDER BY severity_score DESC NULLS LAST, updated_at DESC
         LIMIT %s
     """
     try:
@@ -328,7 +336,7 @@ def run_run_snapshot(db_conn, run_started_at: datetime) -> dict:
 
     events = get_run_events(db_conn, run_started_at)
     if not events:
-        logger.info("Run snapshot: no events ingested this run, skipping.")
+        logger.info("Run snapshot: no classified events this run, skipping.")
         return stats
 
     content, manifest_hash = generate_jsonl_and_hash(events)
