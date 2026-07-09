@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
+from src.core.storyline import strip_date_hint
 from src.services.telegram_notifier import _post_telegram
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,11 @@ def send_flash_update_telegram(
     )
 
     for ev in events[:3]:
-        title = html.escape(ev.get("source_title") or ev.get("storyline_hint") or "Unknown Event")
+        title = html.escape(
+            ev.get("source_title")
+            or strip_date_hint(ev.get("storyline_hint") or "")
+            or "Unknown Event"
+        )
         flash_text += f"- <code>[{ev.get('event_type', 'INCIDENT')}]</code> {title}\n"
 
     if r2_url:

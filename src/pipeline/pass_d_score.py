@@ -427,17 +427,21 @@ def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
 
 
 def run_storyline_closures(db_conn) -> int:
-    """Emit a 'storyline quiet' note for each alerted storyline that has gone silent.
+    """Close each alerted storyline that has gone silent. Log-only by user request
+    (2026-07-09): the 'storyline quiet' note used to go to Telegram, but internal
+    lifecycle chatter must not reach the alert channel — closures live in the log.
 
     Best-effort and idempotent: `find_and_close_quiet` atomically flips each storyline to
     closed as it returns it, so re-running (or a concurrent pass) never double-closes.
     """
     from src.core.storyline_alert_state import find_and_close_quiet
-    from src.services.telegram_notifier import send_storyline_closure
 
     closed = find_and_close_quiet(db_conn, STORYLINE_QUIET_HOURS)
     for c in closed:
-        send_storyline_closure(c["peak_tier"], c["label"], STORYLINE_QUIET_HOURS)
+        logger.info(
+            "Storyline quiet after %sh (peaked %s): %s",
+            STORYLINE_QUIET_HOURS, c["peak_tier"], c["label"],
+        )
     if closed:
         logger.info("Closed %d quiet storyline(s)", len(closed))
     return len(closed)

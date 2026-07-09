@@ -10,6 +10,8 @@ import logging
 import os
 
 import httpx
+
+from src.core.storyline import strip_date_hint
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 logger = logging.getLogger(__name__)
@@ -85,7 +87,9 @@ def send_telegram_alert(event: dict) -> bool:
     safe_type = html.escape(_humanize(event.get("event_type")))
     safe_anchor = html.escape(str(event.get("anchor_name_norm") or "Unknown"))
     safe_country = html.escape(str(event.get("country_iso") or ""))
-    safe_hint = html.escape(str(event.get("storyline_hint") or "").lstrip("#"))
+    # strip_date_hint: pre-2026-07-09 rows carry a fabricated "MonDD" token
+    # ("nov20") the old prompt forced the LLM to invent — never show it.
+    safe_hint = html.escape(strip_date_hint(str(event.get("storyline_hint") or "").lstrip("#")))
     safe_url = html.escape(str(event.get("source_url") or ""), quote=True)
 
     location = f"{safe_anchor} · {safe_country}" if safe_country else safe_anchor
@@ -167,41 +171,6 @@ def send_telegram_alert(event: dict) -> bool:
         return False
 
 
-def send_storyline_closure(peak_tier: str, label: str, quiet_hours: float) -> bool:
-    """Emit a single 'storyline quiet' note when an alerted storyline stops producing
-    activity — the counterpart to the escalation cue, so a thread has a clear close."""
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
-    if not bot_token or not chat_id:
-        logger.warning("Storyline closure skipped: missing Telegram credentials")
-        return False
-
-    safe_label = html.escape(str(label or "storyline"))
-    safe_peak = html.escape(str(peak_tier or "—"))
-    try:
-        hours = f"{float(quiet_hours):.0f}"
-    except (TypeError, ValueError):
-        hours = str(quiet_hours)
-
-    message = (
-        "🟢 <b>STORYLINE QUIET</b>\n"
-        f"{_DIVIDER}\n"
-        f"<b>{safe_label}</b>\n\n"
-        f"No new activity for {hours}h · peaked at {safe_peak}.\n"
-        f"{_DIVIDER}"
-    )
-    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        _post_telegram(
-            api_url,
-            payload={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-        )
-        return True
-    except Exception as e:
-        logger.error("Failed to send storyline closure: %s", e)
-        return False
+# NOTE: send_storyline_closure was removed 2026-07-09 — 'storyline quiet' notes are
+# log-only now (see pass_d_score.run_storyline_closures); Telegram carries incident
+# alerts exclusively.

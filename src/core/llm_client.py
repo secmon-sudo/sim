@@ -111,13 +111,17 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # OpenAI-compat requirement that the word "json" appear in the conversation.)
     if acct.provider in ("groq", "gemini") and json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if json_mode:
         # Reasoning models in thinking mode burn the whole token budget on hidden
         # reasoning and emit an empty final message, which trips Groq's json_object
-        # validator (HTTP 400 json_validate_failed, failed_generation=""). Minimize
-        # reasoning so the model returns the JSON answer directly — this also cuts
-        # per-request token usage, easing the 8K TPM ceiling that drives the 429 cascade.
+        # validator (HTTP 400 json_validate_failed, failed_generation="") and on
+        # OpenRouter (no response_format) surfaces as an unparseable empty reply.
+        # Minimize reasoning so the model returns the JSON answer directly — this
+        # also cuts per-request token usage, easing the 8K TPM ceiling on Groq.
         # qwen3.6 accepts "none"; gpt-oss supports only low/medium/high (Groq rejects
-        # "none" for it with a 400), so use the lowest valid effort there.
+        # "none" for it with a 400), so use the lowest valid effort there. Applies to
+        # every provider: reasoning_effort is OpenAI-compat and OpenRouter passes it
+        # through to gpt-oss hosts.
         if acct.model.startswith("qwen"):
             payload["reasoning_effort"] = "none"
         elif "gpt-oss" in acct.model:

@@ -17,16 +17,16 @@ from pathlib import Path
 from src.core.heartbeat import HeartbeatWorker
 from src.core.llm_client import LLMAllThrottled, call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
+from src.core.storyline import strip_date_hint
 from src.pipeline.pass_a_ingest import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
     is_noise,
 )
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
-from src.services.ops_notifier import send_ops_alert
 
-# Pending 'deduped' events above this pages ops: at ~40 ingested/run it means the
-# queue is more than two full runs behind even at the raised per-run limit.
+# Pending 'deduped' events above this logs a WARNING: at ~40 ingested/run it means
+# the queue is more than two full runs behind even at the raised per-run limit.
 QUEUE_DEPTH_ALERT_THRESHOLD = 400
 
 logger = logging.getLogger(__name__)
@@ -145,19 +145,20 @@ Extract the following fields:
 4. country_iso: 2-letter ISO country code (e.g. "US", "EG", "GB", "NG", "ML", "SO"). If unknown, null.
 5. occurred_at: Best estimate of when the event occurred (ISO 8601 format), or null
 6. time_certainty: One of: same_day, previous_day, this_week, approximate, unknown
-7. storyline_hint: A STRICTLY ENGLISH, structured 4-6 word identifier for grouping related articles about the EXACT same event.
-   Format: "[LOCATION] [ACTOR/ENTITY] [ACTION] [DATE-HINT]"
+7. storyline_hint: A STRICTLY ENGLISH, structured 3-5 word identifier for grouping related articles about the EXACT same event.
+   Format: "[LOCATION] [ACTOR/ENTITY] [ACTION]"
    Examples:
-   - "Istanbul Ataturk bomb threat Jun8"
-   - "Delta DL54 emergency Atlanta Jun7"
-   - "Sahel JNIM convoy ambush Jun6"
-   - "Tehran drone strike refinery Jun8"
-   - "Somalia Shabaab base attack Jun5"
+   - "Istanbul Ataturk bomb threat"
+   - "Delta DL54 emergency Atlanta"
+   - "Sahel JNIM convoy ambush"
+   - "Tehran drone strike refinery"
+   - "Somalia Shabaab base attack"
    Rules:
    - ALWAYS in English regardless of source language
    - MUST include location name (city/airport/base)
    - MUST include the specific actor, flight number, or entity if known
-   - MUST include a short date hint (MonDD format, e.g. Jun8, May15)
+   - Do NOT include any date or time token — event timing is captured separately
+     in occurred_at, never in the hint
    - NEVER use generic phrases like "emergency landing" or "bomb threat" alone
    - Two articles about the SAME event MUST produce the SAME hint
    Consistency rules (critical — the hint is used to group multi-source reports):
@@ -260,13 +261,12 @@ def _normalize_storyline_hint(hint: str | None) -> str | None:
     import re as _re
     hint = _re.sub(r'\s+', ' ', hint.strip().lower())
     hint = _re.sub(r'[^\w\s-]', '', hint)
-    # Drop a malformed date-hint when the LLM had no day (it is required to append a
-    # "MonDD" token, e.g. "Jun8", but emits "JunUnknown"/"JunTBD" when the day is
-    # unknown). Left in place it both uglifies the title and pollutes Jaccard with a
-    # "jununknown" token. Well-formed "jun8" hints are untouched here and are handled
-    # by the tokenizer's date-token filter.
-    _months = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
-    hint = _re.sub(rf'\b(?:{_months})(?:unknown|tbd)\b', '', hint)
+    # Drop date-hint tokens entirely ("jun8", "nov20", "jununknown", "juntbd").
+    # The prompt no longer asks for them (since 2026-07-09), but when the article
+    # stated no date the LLM used to FABRICATE one from training memory — which then
+    # showed up verbatim in Telegram cards. The token was never used for matching
+    # anyway (the Jaccard tokenizer filters date tokens); time lives in occurred_at.
+    hint = strip_date_hint(hint)
     hint = _re.sub(r'\bunknown\b', '', hint)
     hint = _re.sub(r'\s+', ' ', hint).strip()
     return hint if hint else None
@@ -853,9 +853,10 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
     stats["events_available"] = len(events)
 
     # Queue-depth telemetry: a saturated batch (available == limit) means events
-    # are waiting more than one run for classification. Surface it every run and
-    # page ops past the alert threshold, so a growing backlog is seen on the
-    # first run — not days later via a stale dashboard.
+    # are waiting more than one run for classification. Log-only by user request
+    # (2026-07-09): internal pipeline chatter must not reach Telegram — the channel
+    # is for incident alerts. The backlog is still visible in stats/telemetry and
+    # this WARNING line.
     try:
         row = db_conn.execute(
             "SELECT COUNT(*) FROM events WHERE status = 'deduped' AND classification_lock = FALSE"
@@ -863,12 +864,10 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
         queue_depth = int(row[0]) if row else 0
         stats["queue_depth"] = queue_depth
         if queue_depth > QUEUE_DEPTH_ALERT_THRESHOLD:
-            logger.warning("Pass C queue depth %d exceeds threshold %d", queue_depth, QUEUE_DEPTH_ALERT_THRESHOLD)
-            send_ops_alert(
-                f"Pass C classification queue depth is {queue_depth} "
-                f"(threshold {QUEUE_DEPTH_ALERT_THRESHOLD}, per-run limit {limit}). "
-                "Ingest is outpacing LLM classification capacity.",
-                title="SIM PASS C BACKLOG",
+            logger.warning(
+                "Pass C classification queue depth is %d (threshold %d, per-run limit %d) "
+                "— ingest is outpacing LLM classification capacity",
+                queue_depth, QUEUE_DEPTH_ALERT_THRESHOLD, limit,
             )
     except Exception:
         logger.exception("Pass C: queue-depth check failed (non-fatal)")

@@ -58,19 +58,19 @@ class TestEscalationCardRendering:
         assert "Escalated" not in text
 
 
-class TestClosureNote:
-    def test_closure_message_shape(self):
+class TestClosureLogOnly:
+    def test_closure_never_touches_telegram(self):
+        """'Storyline quiet' notes are log-only (2026-07-09): the closure sweep must
+        close storylines without importing or calling any Telegram sender."""
+        from src.pipeline import pass_d_score
+
+        closed_rows = [{"peak_tier": "CRITICAL", "label": "Strike on base · KYIV UA"}]
+        with patch("src.core.storyline_alert_state.find_and_close_quiet",
+                   return_value=closed_rows):
+            with patch("src.services.telegram_notifier._post_telegram") as post:
+                assert pass_d_score.run_storyline_closures(db_conn=None) == 1
+        post.assert_not_called()
+
+    def test_send_storyline_closure_removed(self):
         import src.services.telegram_notifier as t
-        captured = {}
-
-        def fake_post(api_url, payload):
-            captured.update(payload)
-            return object()
-
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "x", "TELEGRAM_ALERTS_CHAT_ID": "y"}):
-            with patch.object(t, "_post_telegram", fake_post):
-                ok = t.send_storyline_closure("CRITICAL", "Strike on base · KYIV UA", 12)
-        assert ok is True
-        assert "STORYLINE QUIET" in captured["text"]
-        assert "peaked at CRITICAL" in captured["text"]
-        assert "12h" in captured["text"]
+        assert not hasattr(t, "send_storyline_closure")

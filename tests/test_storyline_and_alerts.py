@@ -126,9 +126,14 @@ class TestDateHintPollution:
         from src.pipeline.pass_c_classify import _normalize_storyline_hint
         assert _normalize_storyline_hint("Philippines school shooting JunUnknown") == \
             "philippines school shooting"
-        # A real day must be preserved, and month-like words must not be over-stripped.
+        # Since 2026-07-09 well-formed MonDD tokens are stripped too: the old prompt
+        # forced the LLM to append one, so it FABRICATED dates for undated articles
+        # ("nov20" in Telegram cards). Time lives in occurred_at, never in the hint.
         assert _normalize_storyline_hint("Istanbul Ataturk bomb threat Jun8") == \
-            "istanbul ataturk bomb threat jun8"
+            "istanbul ataturk bomb threat"
+        assert _normalize_storyline_hint("Omsk refinery Ukraine drone strike Nov20") == \
+            "omsk refinery ukraine drone strike"
+        # Month-like WORDS must not be over-stripped.
         assert _normalize_storyline_hint("Junction City may riot") == "junction city may riot"
 
 

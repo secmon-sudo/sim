@@ -36,6 +36,23 @@ _DATE_TOKEN = re.compile(
     r"^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:\d{0,2}|unknown|tbd)$|^\d{1,4}$"
 )
 
+# In-text variant of _DATE_TOKEN (word-boundary, month+suffix only — bare numbers
+# like flight "54" are left alone). Used to scrub the fabricated date hints older
+# classifications baked into storyline_hint before showing them to users.
+_DATE_HINT_IN_TEXT = re.compile(
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:\d{1,2}|unknown|tbd)\b",
+    re.IGNORECASE,
+)
+
+
+def strip_date_hint(text: str) -> str:
+    """Remove LLM date-hint tokens ("Jun8", "nov20", "JunUnknown") from a
+    storyline hint. The pre-2026-07-09 classifier prompt REQUIRED a MonDD token
+    and the model fabricated one when the article stated no date; the token was
+    never part of the matching signal (see _DATE_TOKEN above), so dropping it is
+    purely cosmetic-safe."""
+    return re.sub(r"\s+", " ", _DATE_HINT_IN_TEXT.sub("", text)).strip()
+
 
 def tokenize_storyline_hint(text: str) -> Set[str]:
     """

@@ -40,6 +40,13 @@ DEFAULT_BURST = 8
 # Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.6-27b all list 8K).
 # This — not RPM — is the binding constraint; modeling it stops a burst from tripping 429.
 GROQ_TPM = 8000
+# OpenRouter free-model limits are ACCOUNT-wide, not per model: 20 RPM across all
+# :free models, and 1000 requests/day when the account holds ≥$10 in credits
+# (key A, funded 2026-07-09) vs 50/day unfunded (key B). All :free slots on one
+# key must therefore share a single TokenBucket — see build_llm_router().
+OPENROUTER_FREE_RPM = 20
+OPENROUTER_FREE_RPD_FUNDED = 1000
+OPENROUTER_FREE_RPD_UNFUNDED = 50
 
 
 class ProviderStatus(Enum):
@@ -89,13 +96,15 @@ class LLMRouter:
 
     @property
     def total_daily_quota(self) -> int:
-        """Sum of all account RPD limits."""
-        return sum(a.rpd for a in self._accounts)
+        """Sum of RPD limits over distinct buckets (slots sharing an account-wide
+        bucket, e.g. OpenRouter :free models on one key, count once)."""
+        return sum({id(a.bucket): a.rpd for a in self._accounts}.values())
 
     @property
     def total_daily_used(self) -> int:
-        """Sum of all account daily usage."""
-        return sum(a.bucket.daily_used for a in self._accounts)
+        """Sum of daily usage over distinct buckets."""
+        seen: dict[int, int] = {id(a.bucket): a.bucket.daily_used for a in self._accounts}
+        return sum(seen.values())
 
     @property
     def accounts(self) -> list[LLMAccount]:
@@ -253,58 +262,85 @@ def reset_bucket_registry() -> None:
 def build_llm_router() -> LLMRouter:
     """
     Initialize all LLM accounts from environment variables.
-    Cascade order: Groq-A (smart) → Groq-B (throughput) → OpenRouter → Groq bulk.
+    Cascade order: OpenRouter-A free (smartest) → Groq A/B → OpenRouter-B → Gemini → Groq bulk.
     """
+    # OpenRouter :free limits are account-wide (20 RPM / 1000 RPD funded), so BOTH
+    # key-A free slots below must drain this one bucket — separate buckets would let
+    # them jointly issue 2× the real quota. No TPM ceiling on OpenRouter free tier.
+    openrouter_a_free_bucket = TokenBucket(
+        rate_per_minute=OPENROUTER_FREE_RPM,
+        daily_limit=OPENROUTER_FREE_RPD_FUNDED,
+        burst=DEFAULT_BURST,
+    )
     accounts = [
-        # ① Groq-A Primary — en akıllı
-        LLMAccount(
-            provider="groq", account_id="A",
-            model="openai/gpt-oss-120b",
-            api_key=os.environ.get("GROQ_API_KEY_A", ""),
-            rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
-        ),
-        # ② Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
-        LLMAccount(
-            provider="groq", account_id="A",
-            model="qwen/qwen3.6-27b",
-            api_key=os.environ.get("GROQ_API_KEY_A", ""),
-            rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
-        ),
-        # ③ Groq-B Throughput — en yüksek TPM (eski llama-4-scout yerine)
-        LLMAccount(
-            provider="groq", account_id="B",
-            model="openai/gpt-oss-120b",
-            api_key=os.environ.get("GROQ_API_KEY_B", ""),
-            rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
-        ),
-        # ④ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
-        LLMAccount(
-            provider="groq", account_id="B",
-            model="qwen/qwen3.6-27b",
-            api_key=os.environ.get("GROQ_API_KEY_B", ""),
-            rpm=30, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
-        ),
-        # ⑤ OpenRouter-A Emergency — 405B
+        # ① OpenRouter-A Primary — Nemotron 3 Super: free listedeki en iyi
+        # zekâ/güvenilirlik dengesi (468B haftalık token, 1M ctx). Hesap fonlu
+        # (≥$10) olduğu için 1000 istek/gün. Slug models API'den doğrulandı
+        # (2026-07-09); çıplak "nemotron-3-super" yok, boyut ekli kimlik gerekiyor.
         LLMAccount(
             provider="openrouter", account_id="A",
-            model="nousresearch/hermes-3-llama-3.1-405b:free",
+            model="nvidia/nemotron-3-super-120b-a12b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
-            rpm=20, rpd=200,
-            bucket=TokenBucket(rate_per_minute=20, daily_limit=200, burst=DEFAULT_BURST),
+            rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
+            bucket=openrouter_a_free_bucket,
         ),
-        # ⑥ OpenRouter-B Mirror — cross-provider yedek
+        # ② OpenRouter-A Secondary — gpt-oss-120b: prompt'larımızın Groq'ta
+        # kanıtlandığı model ailesi; Nemotron endpoint'i tökezlerse sıfır uyum
+        # maliyetiyle devralır. ① ile AYNI hesap kotasını (bucket) paylaşır.
+        LLMAccount(
+            provider="openrouter", account_id="A",
+            model="openai/gpt-oss-120b:free",
+            api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
+            rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
+            bucket=openrouter_a_free_bucket,
+        ),
+        # ③ Groq-A — en akıllı Groq slotu
+        LLMAccount(
+            provider="groq", account_id="A",
+            model="openai/gpt-oss-120b",
+            api_key=os.environ.get("GROQ_API_KEY_A", ""),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
+        ),
+        # ④ Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
+        LLMAccount(
+            provider="groq", account_id="A",
+            model="qwen/qwen3.6-27b",
+            api_key=os.environ.get("GROQ_API_KEY_A", ""),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
+        ),
+        # ⑤ Groq-B Throughput — en yüksek TPM (eski llama-4-scout yerine)
+        LLMAccount(
+            provider="groq", account_id="B",
+            model="openai/gpt-oss-120b",
+            api_key=os.environ.get("GROQ_API_KEY_B", ""),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
+        ),
+        # ⑥ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
+        LLMAccount(
+            provider="groq", account_id="B",
+            model="qwen/qwen3.6-27b",
+            api_key=os.environ.get("GROQ_API_KEY_B", ""),
+            rpm=30, rpd=1000,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
+        ),
+        # ⑦ OpenRouter-B Mirror — cross-key yedek. Hesap fonsuz → 50 istek/gün.
+        # (Eski Hermes-3-405B slotu kaldırıldı: key A'nın kotası artık hesap
+        # genelinde paylaşıldığından üçüncü bir key-A free slotu kota eklemiyordu.)
         LLMAccount(
             provider="openrouter", account_id="B",
             model="openai/gpt-oss-120b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_B", ""),
-            rpm=20, rpd=200,
-            bucket=TokenBucket(rate_per_minute=20, daily_limit=200, burst=DEFAULT_BURST),
+            rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_UNFUNDED,
+            bucket=TokenBucket(
+                rate_per_minute=OPENROUTER_FREE_RPM,
+                daily_limit=OPENROUTER_FREE_RPD_UNFUNDED,
+                burst=DEFAULT_BURST,
+            ),
         ),
-        # ⑦ Gemini — üçüncü bağımsız sağlayıcı (AI Studio free tier, OpenAI-compat).
+        # ⑧ Gemini — üçüncü bağımsız sağlayıcı (AI Studio free tier, OpenAI-compat).
         # Groq/OpenRouter kesintilerinden etkilenmez; 250K TPM ile Groq'un 8K TPM
         # duvarı burada yok. RPD değerleri hesabın AI Studio rate-limit panelinden
         # doğrulandı (2026-07-09) — web kaynaklarının yazdığı 1000-1500 RPD gerçek
@@ -327,7 +363,7 @@ def build_llm_router() -> LLMRouter:
             rpm=5, rpd=20,
             bucket=TokenBucket(rate_per_minute=5, daily_limit=20, burst=DEFAULT_BURST),
         ),
-        # ⑧ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
+        # ⑨ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
         # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli
         # artık 1K RPD üstüne çıkmıyor (2026-06-17 Groq deprecation).
         LLMAccount(
