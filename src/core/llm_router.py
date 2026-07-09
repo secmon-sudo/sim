@@ -312,7 +312,8 @@ def build_llm_router() -> LLMRouter:
         # 1000 RPD. Kotalar Pasifik gece yarısında sıfırlanır.
         LLMAccount(
             provider="gemini", account_id="A",
-            model="gemini-3-flash",
+            # "-preview" şart: çıplak "gemini-3-flash" API'de 404 döndürüyor (2026-07).
+            model="gemini-3-flash-preview",
             api_key=os.environ.get("GEMINI_API_KEY", ""),
             rpm=10, rpd=1500,
             bucket=TokenBucket(rate_per_minute=10, daily_limit=1500, burst=DEFAULT_BURST),
