@@ -306,24 +306,31 @@ def build_llm_router() -> LLMRouter:
         ),
         # ⑦ Gemini — üçüncü bağımsız sağlayıcı (AI Studio free tier, OpenAI-compat).
         # Groq/OpenRouter kesintilerinden etkilenmez; 250K TPM ile Groq'un 8K TPM
-        # duvarı burada yok. Limitler proje+model başına, o yüzden tek anahtar iki
-        # slot açar. Free tier 2026-07 itibariyle (Aralık 2025 kota indiriminden
-        # sonra): gemini-3-flash 10 RPM / 1500 RPD, gemini-2.5-flash-lite 15 RPM /
-        # 1000 RPD. Kotalar Pasifik gece yarısında sıfırlanır.
+        # duvarı burada yok. RPD değerleri hesabın AI Studio rate-limit panelinden
+        # doğrulandı (2026-07-09) — web kaynaklarının yazdığı 1000-1500 RPD gerçek
+        # değil; metin modellerinde kota çoğunlukla 20 RPD, istisnası 3.1-flash-lite
+        # (500 RPD). Kotalar Pasifik gece yarısında sıfırlanır.
         LLMAccount(
             provider="gemini", account_id="A",
+<<<<<<< HEAD
             # "-preview" şart: çıplak "gemini-3-flash" API'de 404 döndürüyor (2026-07).
             model="gemini-3-flash-preview",
+=======
+            model="gemini-3.1-flash-lite",
+>>>>>>> 5580b3f (fix(llm): set Gemini slots from the account's real AI Studio quotas)
             api_key=os.environ.get("GEMINI_API_KEY", ""),
-            rpm=10, rpd=1500,
-            bucket=TokenBucket(rate_per_minute=10, daily_limit=1500, burst=DEFAULT_BURST),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
         ),
         LLMAccount(
             provider="gemini", account_id="A",
-            model="gemini-2.5-flash-lite",
+            # Acil yedek: yalnızca 20 RPD — bucket yerelde durdurur, 429'a sürmez.
+            # Çıplak "gemini-3-flash" 404 döndürüyor; doğru kimlik "-preview" ekli
+            # (deprecated ama kapanış tarihi yok).
+            model="gemini-3-flash-preview",
             api_key=os.environ.get("GEMINI_API_KEY", ""),
-            rpm=15, rpd=1000,
-            bucket=TokenBucket(rate_per_minute=15, daily_limit=1000, burst=DEFAULT_BURST),
+            rpm=5, rpd=20,
+            bucket=TokenBucket(rate_per_minute=5, daily_limit=20, burst=DEFAULT_BURST),
         ),
         # ⑧ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
         # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli
