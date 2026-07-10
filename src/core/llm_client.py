@@ -119,12 +119,14 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
         # Minimize reasoning so the model returns the JSON answer directly — this
         # also cuts per-request token usage, easing the 8K TPM ceiling on Groq.
         # qwen3.6 accepts "none"; gpt-oss supports only low/medium/high (Groq rejects
-        # "none" for it with a 400), so use the lowest valid effort there. Applies to
+        # "none" for it with a 400), so use the lowest valid effort there. Nemotron 3
+        # also reasons by default (burned its whole batch budget on thinking in the
+        # 2026-07-10 run — every Pass C batch came back empty/truncated). Applies to
         # every provider: reasoning_effort is OpenAI-compat and OpenRouter passes it
-        # through to gpt-oss hosts.
+        # through to the underlying hosts.
         if acct.model.startswith("qwen"):
             payload["reasoning_effort"] = "none"
-        elif "gpt-oss" in acct.model:
+        elif "gpt-oss" in acct.model or "nemotron" in acct.model:
             payload["reasoning_effort"] = "low"
 
     response = httpx.post(

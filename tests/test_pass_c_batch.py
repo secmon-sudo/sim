@@ -118,7 +118,7 @@ def test_batch_parse_error_leaves_events_queued():
     patches, mocks = _patch_batch(call_llm=call)
     with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
         stats = pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
-    assert stats == {"classified": 0, "failed": 2}
+    assert stats == {"classified": 0, "failed": 2, "parse_error": True}
     assert not mocks["_apply_llm_classification"].called
 
 
@@ -155,3 +155,46 @@ def test_run_pass_c_chunks_events_through_batches():
     assert seen_chunks == [3, 3, 1]
     assert stats["events_classified"] == 7
     assert stats["llm_exhausted"] is False
+
+
+def test_run_pass_c_aborts_after_consecutive_parse_errors():
+    # 30 events / batch size 3 → 10 chunks, but every batch fails to parse:
+    # the pass must stop after PASS_C_MAX_CONSECUTIVE_PARSE_ERRORS chunks
+    # instead of grinding until the workflow timeout.
+    events = [_event(i) for i in range(1, 31)]
+    calls = []
+
+    def fake_batch(db, router, chunk, worker_id):
+        calls.append(len(chunk))
+        return {"classified": 0, "failed": len(chunk), "parse_error": True}
+
+    with patch.object(pc, "BATCH_CLASSIFY_SIZE", 3), \
+         patch.object(pc, "get_events_for_classification", return_value=events), \
+         patch.object(pc, "classify_event_batch", side_effect=fake_batch):
+        stats = pc.run_pass_c(MagicMock(), MagicMock(), limit=50)
+
+    assert len(calls) == pc.PASS_C_MAX_CONSECUTIVE_PARSE_ERRORS
+    assert stats["aborted_on_parse_errors"] is True
+
+
+def test_run_pass_c_parse_error_counter_resets_on_success():
+    # parse-fail, success, parse-fail, ... never reaches the consecutive
+    # threshold, so all chunks are attempted.
+    events = [_event(i) for i in range(1, 31)]  # 10 chunks of 3
+    outcomes = []
+
+    def fake_batch(db, router, chunk, worker_id):
+        if len(outcomes) % 2 == 0:
+            result = {"classified": 0, "failed": len(chunk), "parse_error": True}
+        else:
+            result = {"classified": len(chunk), "failed": 0}
+        outcomes.append(result)
+        return result
+
+    with patch.object(pc, "BATCH_CLASSIFY_SIZE", 3), \
+         patch.object(pc, "get_events_for_classification", return_value=events), \
+         patch.object(pc, "classify_event_batch", side_effect=fake_batch):
+        stats = pc.run_pass_c(MagicMock(), MagicMock(), limit=50)
+
+    assert len(outcomes) == 10
+    assert "aborted_on_parse_errors" not in stats

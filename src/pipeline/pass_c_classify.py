@@ -777,7 +777,10 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
             router,
             prompt=_batch_prompt(llm_events),
             system_prompt=CLASSIFICATION_SYSTEM_PROMPT + BATCH_SYSTEM_SUFFIX,
-            max_tokens=280 * len(llm_events) + 200,
+            # 450/event + 512 headroom: a low-effort reasoning preamble plus six full
+            # classification objects overflowed the old 280/event budget, truncating
+            # the JSON mid-string (2026-07-10 run: 21/21 batches unparseable).
+            max_tokens=450 * len(llm_events) + 512,
         )
         items = _parse_batch_response(result.get("content", ""), expected=len(llm_events))
     except LLMAllThrottled:
@@ -793,6 +796,7 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
         logger.warning("Batch parse error (%d events left queued): %s", len(llm_events), e)
         _release_pending(requeue=True)
         stats["failed"] += len(llm_events)
+        stats["parse_error"] = True
         return stats
     except Exception:
         db_conn.rollback()
@@ -827,6 +831,11 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
 # time per run, so a real provider outage still aborts the pass promptly.
 PASS_C_PACING_MAX_WAIT = 30.0
 PASS_C_PACING_TOTAL_BUDGET = 180.0
+
+# Abort the pass after this many whole-batch parse failures in a row: a model that
+# systematically returns unparseable output would otherwise burn ~90s per chunk until
+# the workflow's 30-minute timeout kills the run before Pass D/E and alerting.
+PASS_C_MAX_CONSECUTIVE_PARSE_ERRORS = 3
 
 
 def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
@@ -887,6 +896,7 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
     chunk_size = max(1, BATCH_CLASSIFY_SIZE)
     paced_total = 0.0
     exhausted = False
+    consecutive_parse_errors = 0
     for start in range(0, len(events), chunk_size):
         chunk = events[start:start + chunk_size]
         while True:
@@ -895,6 +905,10 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
                     batch = classify_event_batch(db_conn, router, chunk, worker_id)
                     stats["events_classified"] += batch["classified"]
                     stats["events_failed"] += batch["failed"]
+                    if batch.get("parse_error"):
+                        consecutive_parse_errors += 1
+                    else:
+                        consecutive_parse_errors = 0
                 else:
                     result = classify_single_event(db_conn, router, chunk[0], worker_id)
                     if result:
@@ -918,6 +932,14 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
         if exhausted:
             stats["llm_exhausted"] = True
             logger.error("LLM accounts exhausted, stopping Pass C")
+            break
+        if consecutive_parse_errors >= PASS_C_MAX_CONSECUTIVE_PARSE_ERRORS:
+            stats["aborted_on_parse_errors"] = True
+            logger.error(
+                "Pass C aborted: %d consecutive batch parse failures — LLM output is "
+                "systematically unparseable, leaving remaining events queued",
+                consecutive_parse_errors,
+            )
             break
 
     # Log telemetry
