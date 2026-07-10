@@ -793,7 +793,13 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
     except LLMParseError as e:
         # Whole-batch parse failure: leave the events queued for the pacing retry /
         # next run rather than mislabeling all of them.
-        logger.warning("Batch parse error (%d events left queued): %s", len(llm_events), e)
+        # result is always bound here: LLMParseError is only raised by
+        # _parse_batch_response, after call_llm has returned.
+        logger.warning(
+            "Batch parse error (%d events left queued): %s [model=%s finish_reason=%s head=%r]",
+            len(llm_events), e, result.get("model", "?"),
+            result.get("finish_reason", "?"), (result.get("content") or "")[:160],
+        )
         _release_pending(requeue=True)
         stats["failed"] += len(llm_events)
         stats["parse_error"] = True
