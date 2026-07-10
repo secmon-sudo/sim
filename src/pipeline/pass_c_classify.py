@@ -376,7 +376,11 @@ def validate_and_parse(content: str) -> dict:
     text = re.sub(r'[\x00-\x1f]', lambda m: ' ' if m.group() not in '\n\r\t' else m.group(), text)
 
     try:
-        parsed = json.loads(text)
+        # strict=False tolerates raw control characters INSIDE string values
+        # (e.g. a literal newline in a quoted summary) — the \x00-\x1f regex above
+        # deliberately preserves \n\r\t as inter-token whitespace, so one inside a
+        # string would otherwise fail with "Invalid control character".
+        parsed = json.loads(text, strict=False)
     except json.JSONDecodeError as e:
         raise LLMParseError(f"Invalid JSON: {e}") from e
 
@@ -799,6 +803,12 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
             "Batch parse error (%d events left queued): %s [model=%s finish_reason=%s head=%r]",
             len(llm_events), e, result.get("model", "?"),
             result.get("finish_reason", "?"), (result.get("content") or "")[:160],
+        )
+        # Garbage JSON is a slot-quality signal (degraded :free upstream), not a
+        # prompt problem: sideline the slot so the next chunk rotates to the next
+        # cascade slot instead of feeding the same broken upstream until fail-fast.
+        router.penalize_model_slot(
+            result.get("provider", ""), result.get("account", ""), result.get("model", ""),
         )
         _release_pending(requeue=True)
         stats["failed"] += len(llm_events)

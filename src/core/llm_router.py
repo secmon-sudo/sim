@@ -199,6 +199,20 @@ class LLMRouter:
                         acct.display_name, acct.daily_errors, ERROR_COOLDOWN_SECONDS,
                     )
 
+    def penalize_model_slot(self, provider: str, account_id: str, model: str):
+        """Sideline the slot matching a routing triple, for callers that only have
+        the call_llm result dict.
+
+        Used on response-CONTENT failures the client can't detect (e.g. a batch of
+        structurally broken JSON with finish_reason=stop — OpenRouter :free routes
+        across upstreams of varying quality, and a degraded upstream keeps emitting
+        garbage). Sidelining shifts the next call to the following cascade slot.
+        """
+        for acct in self._accounts:
+            if (acct.provider, acct.account_id, acct.model) == (provider, account_id, model):
+                self.report_failure(acct, hard_error=True)
+                return
+
     def seconds_until_available(self) -> Optional[float]:
         """Seconds until the soonest account can serve again.
 

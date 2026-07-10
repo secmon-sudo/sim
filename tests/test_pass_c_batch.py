@@ -122,6 +122,30 @@ def test_batch_parse_error_leaves_events_queued():
     assert not mocks["_apply_llm_classification"].called
 
 
+def test_batch_parse_error_penalizes_slot():
+    # Garbage JSON must sideline the emitting slot so the next chunk rotates
+    # to another cascade slot instead of re-feeding the degraded upstream.
+    events = [_event(1)]
+    call = MagicMock(return_value={
+        "content": "not json at all", "provider": "openrouter",
+        "account": "A", "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    })
+    router = MagicMock()
+    patches, mocks = _patch_batch(call_llm=call)
+    with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
+        pc.classify_event_batch(MagicMock(), router, events, "wid")
+    router.penalize_model_slot.assert_called_once_with(
+        "openrouter", "A", "nvidia/nemotron-3-super-120b-a12b:free")
+
+
+def test_validate_and_parse_tolerates_control_chars_in_strings():
+    # Raw newline inside a quoted value (seen from degraded :free upstreams)
+    # must parse instead of failing with "Invalid control character".
+    raw = '{"results": [{"report": 1, "event_type": "riot", "note": "line one\nline two"}]}'
+    parsed = pc.validate_and_parse(raw)
+    assert parsed["results"][0]["event_type"] == "riot"
+
+
 def test_batch_prescreen_skips_llm_call():
     events = [_event(1)]
     call = MagicMock()

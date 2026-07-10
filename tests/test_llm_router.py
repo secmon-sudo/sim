@@ -108,6 +108,19 @@ class TestLLMRouter:
         acct2 = router.get_available_account()
         assert acct2.model == "openai/gpt-oss-120b"
 
+    def test_penalize_model_slot_by_triple(self):
+        """Callers holding only the call_llm result dict can sideline a slot."""
+        a1 = make_account(model="qwen/qwen3.6-27b", rpd=1000)
+        a2 = make_account(model="openai/gpt-oss-120b", rpd=1000)
+        router = LLMRouter([a1, a2])
+
+        router.penalize_model_slot(a1.provider, a1.account_id, a1.model)
+        assert a1.status == ProviderStatus.RATE_LIMITED
+        assert a2.status == ProviderStatus.ACTIVE
+
+        # Unknown triple is a no-op, not an error.
+        router.penalize_model_slot("openrouter", "Z", "no/such-model")
+
     def test_report_success_resets(self):
         """Successful call should reset error count and status."""
         a1 = make_account(rpd=1000)

@@ -111,26 +111,23 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # OpenAI-compat requirement that the word "json" appear in the conversation.)
     if acct.provider in ("groq", "gemini") and json_mode:
         payload["response_format"] = {"type": "json_object"}
-    if json_mode:
-        # Reasoning models in thinking mode burn the whole token budget on hidden
-        # reasoning and emit an empty final message, which trips Groq's json_object
-        # validator (HTTP 400 json_validate_failed, failed_generation="") and on
-        # OpenRouter (no response_format) surfaces as an unparseable empty reply.
-        # Minimize reasoning so the model returns the JSON answer directly — this
-        # also cuts per-request token usage, easing the 8K TPM ceiling on Groq.
-        # qwen3.6 accepts "none"; gpt-oss supports only low/medium/high (Groq rejects
-        # "none" for it with a 400), so use the lowest valid effort there. Nemotron 3
-        # also reasons by default and reasoning_effort="low" does NOT tame it — on
-        # OpenRouter max_tokens covers reasoning + answer combined, and low-effort
-        # thinking still ate nearly the whole batch budget (2026-07-10: answers cut
-        # off ~10 tokens in). Nemotron supports a full reasoning toggle, so turn it
-        # off entirely via OpenRouter's unified `reasoning` object.
-        if acct.model.startswith("qwen"):
-            payload["reasoning_effort"] = "none"
-        elif "gpt-oss" in acct.model:
-            payload["reasoning_effort"] = "low"
-        elif "nemotron" in acct.model and acct.provider == "openrouter":
-            payload["reasoning"] = {"enabled": False}
+    # Reasoning models burn the completion budget on hidden thinking: JSON callers
+    # get an empty/truncated reply (Groq 400 json_validate_failed; on OpenRouter an
+    # unparseable answer cut off mid-JSON), and prose callers get an empty message
+    # with finish_reason=length (narrator on gpt-oss-20b, 2026-07-10) — max_tokens
+    # covers reasoning + answer COMBINED everywhere. So minimize reasoning for EVERY
+    # call, json_mode or not; this also cuts token usage against Groq's 8K TPM.
+    # qwen3.6 accepts "none"; gpt-oss supports only low/medium/high (Groq rejects
+    # "none" for it with a 400), so use the lowest valid effort there. Nemotron 3
+    # reasons by default and reasoning_effort="low" does NOT tame it (low-effort
+    # thinking still ate nearly the whole batch budget); it supports a full toggle,
+    # so turn it off entirely via OpenRouter's unified `reasoning` object.
+    if acct.model.startswith("qwen"):
+        payload["reasoning_effort"] = "none"
+    elif "gpt-oss" in acct.model:
+        payload["reasoning_effort"] = "low"
+    elif "nemotron" in acct.model and acct.provider == "openrouter":
+        payload["reasoning"] = {"enabled": False}
 
     response = httpx.post(
         PROVIDER_ENDPOINTS[acct.provider],
