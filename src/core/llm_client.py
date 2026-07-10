@@ -190,6 +190,27 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
                 content = choice.get("message", {}).get("content", "")
                 finish_reason = choice.get("finish_reason") or ""
 
+            # OpenRouter free endpoints fail INSIDE a 200 when the upstream
+            # provider chokes: the body carries an "error" object or an empty
+            # completion (blank content, blank finish_reason, ~2s latency).
+            # Returning that as success surfaces downstream as a bogus parse
+            # error and skips the 8 healthy fallback slots — treat it as a
+            # provider failure instead: sideline the slot and rotate.
+            api_error = data.get("error")
+            if api_error or not content.strip():
+                router.report_failure(acct, hard_error=True)
+                last_error = RuntimeError(
+                    f"unusable HTTP 200 from {acct.display_name}: "
+                    f"{'error body: ' + str(api_error)[:200] if api_error else 'empty completion'}"
+                )
+                logger.warning(
+                    "LLM %s returned %s inside HTTP 200 (finish_reason=%r), rotating...",
+                    acct.display_name,
+                    f"error body {str(api_error)[:200]!r}" if api_error else "an empty completion",
+                    finish_reason,
+                )
+                continue
+
             router.report_success(acct)
             return {
                 "response": data,

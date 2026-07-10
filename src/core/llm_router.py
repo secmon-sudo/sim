@@ -164,8 +164,10 @@ class LLMRouter:
 
         retry_after: seconds from the provider's Retry-After header (429), if any.
         Honored over the default cooldown, clamped to MAX_RATE_LIMIT_COOLDOWN_SECONDS.
-        hard_error: a deterministic client 4xx (not 429) — sideline the slot on a short
-        cooldown so it leaves the rotation instead of being re-picked on burst tokens.
+        hard_error: the slot is returning unusable responses right now — a deterministic
+        client 4xx (not 429), or an empty/error body inside an HTTP 200 (OpenRouter free
+        upstream failures). Sideline it on a short cooldown so it leaves the rotation
+        instead of being re-picked on burst tokens.
         """
         with self._lock:
             if is_rate_limit:
@@ -184,7 +186,7 @@ class LLMRouter:
                 acct.status = ProviderStatus.RATE_LIMITED
                 acct.cooldown_until = time.monotonic() + CLIENT_ERROR_COOLDOWN_SECONDS
                 logger.warning(
-                    "Account %s hard client error (4xx), cooldown %ds",
+                    "Account %s returning unusable responses (4xx or empty-200), cooldown %ds",
                     acct.display_name, CLIENT_ERROR_COOLDOWN_SECONDS,
                 )
             else:
