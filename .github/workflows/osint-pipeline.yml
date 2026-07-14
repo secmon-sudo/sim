@@ -27,7 +27,10 @@ env:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 55: healthy runs already peak at ~27 min; at 30 a slow LLM day or a DB
+    # lock wait got runs SIGKILLed before telemetry was written, which is what
+    # paged the dead-man's switch on 2026-07-13. Still well under the 2h cadence.
+    timeout-minutes: 55
 
     steps:
       - name: Checkout

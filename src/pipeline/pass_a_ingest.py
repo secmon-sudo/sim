@@ -34,6 +34,8 @@ _INGESTION = SETTINGS.get("ingestion", {})
 _DEDUP = SETTINGS.get("dedup", {})
 _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
+_MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
+_GDELT_ENABLED = SETTINGS.get("sources", {}).get("gdelt_enabled", False)
 _CONTENT_SIM_THRESHOLD = _DEDUP.get("content_similarity_threshold", 0.72)
 _TITLE_SIM_THRESHOLD = _DEDUP.get("title_similarity_threshold", 0.78)
 _TITLE_TOKEN_THRESHOLD = _DEDUP.get("title_token_jaccard_threshold", 0.72)
@@ -1305,6 +1307,12 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
                 link = entry.findtext("link", "")
                 pub_date_str = entry.findtext("pubDate", "")
                 description = entry.findtext("description", "")
+                # Google News links are news.google.com redirects; the real
+                # publisher lives in <source url="...">. Without it every Google
+                # query item collapses into one "news.google.com" domain for
+                # dedup, penalties and the per-domain diversity cap.
+                source_elem = entry.find("source")
+                source_feed_url = source_elem.get("url", "") if source_elem is not None else ""
 
             # Parse date
             pub_dt = None
@@ -1331,13 +1339,16 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
                     stats["age_filtered"] += 1
                 continue
 
-            items.append({
+            item = {
                 "title": title,
                 "link": link,
                 "pub_date": pub_date_str,
                 "pub_dt": pub_dt,
                 "description": description,
-            })
+            }
+            if not is_atom and source_feed_url:
+                item["domain"] = extract_domain(source_feed_url)
+            items.append(item)
     except Exception:
         logger.exception("RSS parse error for: %s", url[:80])
 
@@ -1586,6 +1597,40 @@ def check_domain_penalty(db_conn, domain: str) -> float:
 # Main Pass A runner
 # ---------------------------------------------------------------------------
 
+def _interleave_by_domain(items: list[dict]) -> list[dict]:
+    """
+    Round-robin items across source domains, newest first within each domain.
+
+    A plain newest-first fill let whichever story dominated the global news
+    cycle (and got reprinted by every outlet) eat the entire per-run insert
+    budget, crowding out quieter regions. Interleaving guarantees every domain
+    that delivered items gets a first slot before any domain gets a second.
+    """
+    _EPOCH_MIN = datetime.min.replace(tzinfo=timezone.utc)
+    buckets: dict[str, list[dict]] = {}
+    for item in items:
+        domain = item.get("domain") or extract_domain(item.get("link", ""))
+        buckets.setdefault(domain, []).append(item)
+
+    for bucket in buckets.values():
+        bucket.sort(key=lambda x: x.get("pub_dt") or _EPOCH_MIN, reverse=True)
+
+    # Domains with the freshest lead item go first within each round
+    ordered = sorted(
+        buckets.values(),
+        key=lambda b: b[0].get("pub_dt") or _EPOCH_MIN,
+        reverse=True,
+    )
+    interleaved = []
+    depth = 0
+    while True:
+        row = [b[depth] for b in ordered if depth < len(b)]
+        if not row:
+            return interleaved
+        interleaved.extend(row)
+        depth += 1
+
+
 def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     """
     Execute Pass A: Ingest & Canonicalization.
@@ -1609,6 +1654,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "duplicates_skipped": 0,
         "content_duplicates_skipped": 0,
         "domain_penalized": 0,
+        "domain_capped": 0,
         "events_inserted": 0,
         "full_text_fetched": 0,
     }
@@ -1661,30 +1707,29 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     except Exception:
         logger.warning("Nitter fetch skipped due to errors")
 
-    # Fetch from GDELT — non-blocking, fire-and-forget.
-    # GDELT rate-limits cloud IPs aggressively (429).
-    # Strategy: single query, tight timeout, no initial delay.
-    # If it works → bonus data. If not → silently skip.
-    try:
-        gdelt_queries = build_gdelt_queries()
-        # Pick 1 query per run to minimize rate-limit exposure. Rotate by hour so
-        # all regions get coverage over a day (seeding the GLOBAL random module by
-        # minute both polluted other random users and biased the selection).
-        selected = gdelt_queries[datetime.now(timezone.utc).hour % len(gdelt_queries)]
+    # Fetch from GDELT — disabled by default (sources.gdelt_enabled): constant
+    # 429s/errors on cloud IPs made it noise, never signal.
+    if _GDELT_ENABLED:
+        try:
+            gdelt_queries = build_gdelt_queries()
+            # Pick 1 query per run to minimize rate-limit exposure. Rotate by hour so
+            # all regions get coverage over a day (seeding the GLOBAL random module by
+            # minute both polluted other random users and biased the selection).
+            selected = gdelt_queries[datetime.now(timezone.utc).hour % len(gdelt_queries)]
 
-        items = fetch_gdelt_articles(
-            query=selected["query"],
-            max_age_days=_MAX_ARTICLE_AGE_DAYS,
-            tone=selected.get("tone"),
-            source_countries=selected.get("countries"),
-        )
-        if items:
-            all_items.extend(items)
-            stats["queries_executed"] += 1
-            logger.info("GDELT: Got %d articles (bonus)", len(items))
-    except Exception:
-        # GDELT failure is expected on cloud IPs — never block pipeline
-        pass
+            items = fetch_gdelt_articles(
+                query=selected["query"],
+                max_age_days=_MAX_ARTICLE_AGE_DAYS,
+                tone=selected.get("tone"),
+                source_countries=selected.get("countries"),
+            )
+            if items:
+                all_items.extend(items)
+                stats["queries_executed"] += 1
+                logger.info("GDELT: Got %d articles (bonus)", len(items))
+        except Exception:
+            # GDELT failure is expected on cloud IPs — never block pipeline
+            pass
 
     # Fetch official travel advisories (US State Dept + UK FCDO) — Level 3-4 / "do not travel"
     try:
@@ -1711,13 +1756,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         seen_urls.add(norm_url)
         deduped_items.append(item)
 
-    # Sort items by date descending (newest first)
-    deduped_items.sort(key=lambda x: x.get("pub_dt", datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+    # Diversity-aware ordering: round-robin across source domains instead of a
+    # global newest-first sort, so one loud story can't monopolize max_events.
+    deduped_items = _interleave_by_domain(deduped_items)
 
     # Fetch recent events for comparison once
     recent_events = _fetch_recent_events_for_dedup(db_conn)
 
     inserted = 0
+    domain_inserts: dict[str, int] = {}
     for item in deduped_items:
         if inserted >= max_events:
             break
@@ -1759,6 +1806,12 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             stats["domain_penalized"] += 1
             continue
 
+        # Per-domain insert cap — hard ceiling on how much of the run budget a
+        # single outlet can claim, on top of the round-robin ordering.
+        if domain_inserts.get(domain, 0) >= _MAX_EVENTS_PER_DOMAIN:
+            stats["domain_capped"] += 1
+            continue
+
         # Optional: fetch full text
         full_text = ""
         if _FETCH_FULL_TEXT:
@@ -1791,6 +1844,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 if result.rowcount > 0:
                     inserted += 1
                     stats["events_inserted"] += 1
+                    domain_inserts[domain] = domain_inserts.get(domain, 0) + 1
                     # Inline dedup: add to recent_events so later items in this run are compared against it
                     recent_events.insert(0, (item.get("title", ""), canonical))
                     if len(recent_events) > 2500:

@@ -52,6 +52,38 @@ logging.getLogger().addHandler(_file_handler)
 logger = logging.getLogger("sim.orchestrator")
 
 
+def _log_geo_distribution(db_conn, run_started_at) -> dict:
+    """
+    Country histogram of events classified during this run.
+
+    Answers "are we actually capturing geographic diversity, or drowning in one
+    conflict?" with a number per run. Written to system_telemetry as
+    'geo_distribution' so the trend can be queried over weeks.
+    """
+    rows = db_conn.execute(
+        """SELECT COALESCE(country_iso, '??') AS country, COUNT(*) AS n
+           FROM events
+           WHERE updated_at >= %s
+             AND status IN ('scored', 'reconciled', 'alerted')
+           GROUP BY country
+           ORDER BY n DESC""",
+        (run_started_at,),
+    ).fetchall()
+
+    distribution = {row[0]: row[1] for row in rows}
+    total = sum(distribution.values())
+    top = ", ".join(f"{c}={n}" for c, n in list(distribution.items())[:10])
+    logger.info("Geo distribution: %d events across %d countries [%s]",
+                total, len(distribution), top)
+
+    db_conn.execute(
+        "INSERT INTO system_telemetry(event_type, value_json) VALUES ('geo_distribution', %s)",
+        (json.dumps({"total": total, "countries": distribution}),),
+    )
+    db_conn.commit()
+    return distribution
+
+
 def run_pipeline():
     """
     Execute the full SIM pipeline: Pass A → B → C → D → E.
@@ -119,6 +151,14 @@ def run_pipeline():
         # Pass E: Reconciliation
         logger.info("--- PASS E: Reconciliation ---")
         results["pass_e"] = run_pass_e(db_conn)
+
+        # Geographic diversity telemetry — country histogram of this run's
+        # classified events, so source-diversity drift is a weekly metric
+        # instead of a gut feeling. Isolated: must never break the run.
+        try:
+            results["geo_distribution"] = _log_geo_distribution(db_conn, run_started_at)
+        except Exception:
+            logger.exception("Geo distribution telemetry failed, continuing")
 
         # Storyline quiet-closures — page a single "storyline quiet" note for alerted
         # storylines that have gone silent. Isolated so it can never break the run.

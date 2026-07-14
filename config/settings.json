@@ -7,6 +7,7 @@
     "heartbeat_max_consecutive_errors": 5
   },
   "ingestion": {
+    "max_events_per_domain": 8,
     "max_article_age_days": 2,
     "fetch_full_text": false,
     "query_language": "en",
@@ -174,7 +175,21 @@
       "https://news.google.com/rss/search?q=%22airport+attack%22+OR+%22airport+bombing%22+OR+%22airport+explosion%22&hl=en-US&gl=US&ceid=US:en",
       "https://news.google.com/rss/search?q=%22suicide+bombing%22+OR+%22car+bomb%22+OR+%22truck+bomb%22&hl=en-US&gl=US&ceid=US:en",
       "https://news.google.com/rss/search?q=%22terrorist+attack%22+OR+%22terror+attack%22+casualties&hl=en-US&gl=US&ceid=US:en",
-      "https://news.google.com/rss/search?q=%22tourists+killed%22+OR+%22tourist+attack%22+OR+%22tourists+kidnapped%22&hl=en-US&gl=US&ceid=US:en"
+      "https://news.google.com/rss/search?q=%22tourists+killed%22+OR+%22tourist+attack%22+OR+%22tourists+kidnapped%22&hl=en-US&gl=US&ceid=US:en",
+      "https://humanglemedia.com/feed/",
+      "https://www.dailymaverick.co.za/dmrss/",
+      "https://thediplomat.com/feed/",
+      "https://www.scmp.com/rss/4/feed",
+      "https://www.dawn.com/feeds/home",
+      "https://insightcrime.org/feed/",
+      "https://www.rfa.org/english/rss2.xml",
+      "https://news.google.com/rss/search?q=Sahel+OR+Mali+OR+%22Burkina+Faso%22+OR+Niger+attack+militants&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=Myanmar+OR+Rakhine+junta+airstrike+OR+attack&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=Balochistan+OR+%22Khyber+Pakhtunkhwa%22+attack+OR+militants&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=Haiti+gang+violence+OR+kidnapping&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=Mexico+OR+Ecuador+cartel+violence+OR+attack&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=%22South+China+Sea%22+OR+Taiwan+military+incursion+OR+confrontation&hl=en-US&gl=US&ceid=US:en",
+      "https://news.google.com/rss/search?q=DRC+OR+Congo+OR+Mozambique+rebels+attack&hl=en-US&gl=US&ceid=US:en"
     ],
     "nitter_feeds": [
       "https://nitter.net/ww3mediaa/rss",
@@ -201,7 +216,18 @@
       "https://www.gov.uk/foreign-travel-advice/somalia.atom",
       "https://www.gov.uk/foreign-travel-advice/sudan.atom",
       "https://www.gov.uk/foreign-travel-advice/afghanistan.atom",
-      "https://www.gov.uk/foreign-travel-advice/nigeria.atom"
-    ]
+      "https://www.gov.uk/foreign-travel-advice/nigeria.atom",
+      "https://www.gov.uk/foreign-travel-advice/pakistan.atom",
+      "https://www.gov.uk/foreign-travel-advice/myanmar.atom",
+      "https://www.gov.uk/foreign-travel-advice/haiti.atom",
+      "https://www.gov.uk/foreign-travel-advice/venezuela.atom",
+      "https://www.gov.uk/foreign-travel-advice/burkina-faso.atom",
+      "https://www.gov.uk/foreign-travel-advice/niger.atom",
+      "https://www.gov.uk/foreign-travel-advice/ethiopia.atom",
+      "https://www.gov.uk/foreign-travel-advice/democratic-republic-of-the-congo.atom",
+      "https://www.gov.uk/foreign-travel-advice/libya.atom",
+      "https://www.gov.uk/foreign-travel-advice/mozambique.atom"
+    ],
+    "gdelt_enabled": false
   }
 }
