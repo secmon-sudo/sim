@@ -15,6 +15,7 @@ import httpx
 import tenacity
 
 from src.core.llm_router import LLMAccount, LLMRouter
+from src.core.model_profiles import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,16 @@ class LLMAllThrottled(RuntimeError):
     callers like run_pass_c wait for the soonest refill and retry. Distinct from
     the generic "exhausted after real attempts" RuntimeError, which signals actual
     request failures. Subclasses RuntimeError so existing catchers keep working.
+    """
+
+
+class LLMRequestTooLarge(RuntimeError):
+    """THIS request exceeds every account's per-request size ceiling.
+
+    A fault of the request, not of the accounts: retrying the same payload can
+    never succeed, so callers must drop/shrink the item and move on — waiting
+    (LLMAllThrottled) or aborting the whole stage (generic RuntimeError) are both
+    wrong responses. Subclasses RuntimeError so unaware catchers stay safe.
     """
 
 
@@ -104,30 +115,16 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
         "temperature": 0.1,
         "max_tokens": max_tokens,
     }
-    # Force a JSON object so reasoning models (gpt-oss / qwen3.6) can't return an
-    # empty or prose-wrapped message that then fails json.loads. Groq supports this
-    # for all its models; we skip it for OpenRouter where some free models 400 on it.
-    # (The prompt already instructs "Respond ONLY with valid JSON", satisfying the
-    # OpenAI-compat requirement that the word "json" appear in the conversation.)
-    if acct.provider in ("groq", "gemini") and json_mode:
+    # All per-model quirks (json_mode support, reasoning-minimizing params) are
+    # declared in src/core/model_profiles.py — see its checklist before adding a
+    # model slot. json_mode forces a JSON object so reasoning models can't return
+    # an empty or prose-wrapped message that then fails json.loads. (The prompt
+    # already instructs "Respond ONLY with valid JSON", satisfying the OpenAI-compat
+    # requirement that the word "json" appear in the conversation.)
+    profile = get_profile(acct.provider, acct.model)
+    if profile.supports_json_mode and json_mode:
         payload["response_format"] = {"type": "json_object"}
-    # Reasoning models burn the completion budget on hidden thinking: JSON callers
-    # get an empty/truncated reply (Groq 400 json_validate_failed; on OpenRouter an
-    # unparseable answer cut off mid-JSON), and prose callers get an empty message
-    # with finish_reason=length (narrator on gpt-oss-20b, 2026-07-10) — max_tokens
-    # covers reasoning + answer COMBINED everywhere. So minimize reasoning for EVERY
-    # call, json_mode or not; this also cuts token usage against Groq's 8K TPM.
-    # qwen3.6 accepts "none"; gpt-oss supports only low/medium/high (Groq rejects
-    # "none" for it with a 400), so use the lowest valid effort there. Nemotron 3
-    # reasons by default and reasoning_effort="low" does NOT tame it (low-effort
-    # thinking still ate nearly the whole batch budget); it supports a full toggle,
-    # so turn it off entirely via OpenRouter's unified `reasoning` object.
-    if acct.model.startswith("qwen"):
-        payload["reasoning_effort"] = "none"
-    elif "gpt-oss" in acct.model:
-        payload["reasoning_effort"] = "low"
-    elif "nemotron" in acct.model and acct.provider == "openrouter":
-        payload["reasoning"] = {"enabled": False}
+    payload.update(profile.payload_extras)
 
     response = httpx.post(
         PROVIDER_ENDPOINTS[acct.provider],
@@ -165,11 +162,27 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
     # burst of requests can't blow the (much tighter than RPM) TPM ceiling.
     est_tokens = sum(len(m["content"]) for m in messages) // 4 + max_tokens
 
+    # Pre-send size guard: skip accounts whose per-request ceiling this call would
+    # blow (Groq answers HTTP 413) — without spending the account's bucket tokens
+    # or, worse, its 4xx cooldown. Accounts that DID answer 413 anyway (the ~4
+    # chars/token estimate undershot) join the same skip set so one oversized
+    # payload can't be re-sent to the slot that just rejected it.
+    skip_for_size: set[str] = set()
+
+    def _fits(acct: LLMAccount) -> bool:
+        if acct.display_name in skip_for_size:
+            return False
+        limit = get_profile(acct.provider, acct.model).max_request_tokens
+        if limit is not None and est_tokens > limit:
+            skip_for_size.add(acct.display_name)
+            return False
+        return True
+
     last_error = None
     attempted = False
 
     for _ in range(len(router.accounts)):
-        acct = router.get_available_account(est_tokens=est_tokens)
+        acct = router.get_available_account(est_tokens=est_tokens, predicate=_fits)
         if acct is None:
             break
         attempted = True
@@ -221,6 +234,18 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
+            if status == 413:
+                # Payload too large is THIS request's fault, not the slot's: don't
+                # cooldown the account (that starves every later, normal-sized call —
+                # narrator outage of 2026-07-16). Just never re-send this payload here.
+                skip_for_size.add(acct.display_name)
+                last_error = e
+                logger.warning(
+                    "LLM %s rejected request as too large (HTTP 413, est %d tokens), "
+                    "skipping slot for this call only",
+                    acct.display_name, est_tokens,
+                )
+                continue
             is_429 = status == 429
             # Other 4xx are deterministic (bad model/param/key) — sideline the slot so it
             # isn't re-picked this loop. 5xx stays on the soft error path (transient).
@@ -245,7 +270,16 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             logger.exception("LLM %s unexpected error", acct.display_name)
 
     if not attempted:
+        if len(skip_for_size) >= len(router.accounts):
+            raise LLMRequestTooLarge(
+                f"Request (~{est_tokens} tokens) exceeds every account's size ceiling"
+            )
         raise LLMAllThrottled("All LLM accounts on cooldown/rate-limited; no request attempted")
+    if skip_for_size and isinstance(last_error, httpx.HTTPStatusError) \
+            and last_error.response.status_code == 413:
+        raise LLMRequestTooLarge(
+            f"Request (~{est_tokens} tokens) rejected as too large by all remaining accounts"
+        )
     raise RuntimeError(f"All LLM accounts exhausted. Last error: {last_error}")
 
 

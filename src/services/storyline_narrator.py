@@ -19,7 +19,7 @@ import json
 import logging
 from pathlib import Path
 
-from src.core.llm_client import call_llm
+from src.core.llm_client import LLMRequestTooLarge, call_llm
 from src.core.storyline_narrative import build_timeline, summarize_timeline
 
 logger = logging.getLogger(__name__)
@@ -221,6 +221,11 @@ def run_storyline_narratives(db_conn, router) -> dict:
             stats["generated"] += 1
             logger.info("Narrator: storyline %s narrated (%d events)", sid[:8], len(events))
 
+        except LLMRequestTooLarge as e:
+            # This storyline's prompt is the problem, not the accounts — skip it
+            # and keep narrating the rest instead of aborting the whole stage.
+            logger.warning("Narrator: storyline %s skipped: %s", sid[:8], e)
+            stats["failed"] += 1
         except RuntimeError as e:
             logger.warning("Narrator: LLM exhausted, stopping: %s", e)
             break

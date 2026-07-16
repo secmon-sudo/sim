@@ -15,7 +15,7 @@ from datetime import datetime as dt, timedelta, timezone
 from pathlib import Path
 
 from src.core.heartbeat import HeartbeatWorker
-from src.core.llm_client import LLMAllThrottled, call_llm, log_llm_telemetry
+from src.core.llm_client import LLMAllThrottled, LLMRequestTooLarge, call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
 from src.core.storyline import strip_date_hint
 from src.pipeline.pass_a_ingest import (
@@ -932,6 +932,14 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
                     else:
                         stats["events_failed"] += 1
                 break  # this chunk is done → move on
+            except LLMRequestTooLarge as e:
+                # This chunk's payload is the problem, not the accounts — a paced
+                # retry of the identical prompt can never succeed. Leave the events
+                # queued (locks were released with requeue) and move to the next chunk.
+                logger.error("Pass C chunk of %d skipped, request too large: %s",
+                             len(chunk), e)
+                stats["events_failed"] += len(chunk)
+                break
             except RuntimeError:
                 wait = router.seconds_until_available()
                 if (wait is None

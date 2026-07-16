@@ -110,16 +110,21 @@ class LLMRouter:
     def accounts(self) -> list[LLMAccount]:
         return self._accounts
 
-    def get_available_account(self, est_tokens: int = 0) -> Optional[LLMAccount]:
+    def get_available_account(self, est_tokens: int = 0,
+                              predicate=None) -> Optional[LLMAccount]:
         """Return the highest-priority account that can accept a request.
 
         est_tokens: estimated tokens for this call (prompt + max_tokens), charged
         against each account's TPM window so a burst can't blow the per-minute token
-        ceiling. Returns None if all accounts are exhausted or in cooldown.
+        ceiling. predicate: optional per-call filter — accounts it rejects are passed
+        over without any state change or bucket spend (e.g. the request-size guard).
+        Returns None if all accounts are exhausted, in cooldown, or filtered out.
         """
         with self._lock:
             now = time.monotonic()
             for acct in self._accounts:
+                if predicate is not None and not predicate(acct):
+                    continue
                 # Active and not in cooldown → try to acquire
                 if acct.status == ProviderStatus.ACTIVE and acct.cooldown_until <= now:
                     try:
