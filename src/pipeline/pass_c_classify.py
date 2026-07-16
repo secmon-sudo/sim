@@ -18,7 +18,7 @@ from src.core.heartbeat import HeartbeatWorker
 from src.core.llm_client import LLMAllThrottled, LLMRequestTooLarge, call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
 from src.core.storyline import strip_date_hint
-from src.pipeline.pass_a_ingest import (
+from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
     is_noise,

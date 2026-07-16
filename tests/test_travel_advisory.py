@@ -9,9 +9,9 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-import src.pipeline.pass_a_ingest as pa
+import src.pipeline.ingest_sources as pa
 from src.core.alerts import evaluate_alert_tier
-from src.pipeline.pass_a_ingest import (
+from src.pipeline.ingest_sources import (
     _is_advisory_worth_ingesting,
     _parse_advisory_level,
     fetch_travel_advisories,

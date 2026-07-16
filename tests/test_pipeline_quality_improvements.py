@@ -16,7 +16,7 @@ def test_translate_to_english_if_needed_no_translation():
     text = "Airplane crash reported at airport."
     assert translate_to_english_if_needed(text) == text
 
-@patch("src.pipeline.pass_a_ingest.google_translate")
+@patch("src.pipeline.ingest_sources.google_translate")
 def test_translate_to_english_if_needed_arabic(mock_translate):
     mock_translate.return_value = "Red Sea blockade"
     text = "حصار البحر الأحمر"
@@ -24,7 +24,7 @@ def test_translate_to_english_if_needed_arabic(mock_translate):
     assert res == "Red Sea blockade"
     mock_translate.assert_called_once_with(text, target="en")
 
-@patch("src.pipeline.pass_a_ingest.google_translate")
+@patch("src.pipeline.ingest_sources.google_translate")
 def test_translate_to_english_if_needed_hebrew(mock_translate):
     mock_translate.return_value = "Attack at airport"
     text = "פיגוע בשדה התעופה"
