@@ -14,16 +14,19 @@ from typing import Any, Dict, List, Optional
 from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
 from src.services.sitrep_generator import (
+    MAX_WEB_ENRICH_CLUSTERS,
     WINDOW_HOURS,
     build_sitrep_clusters,
     fetch_penalized_domains,
     fetch_sitrep_events,
     fetch_spillover_events,
+    relabel_cluster,
     run_sitrep_llm,
     select_sitrep_countries,
     split_strategic,
     validate_sitrep,
 )
+from src.services.sitrep_web_enrich import apply_web_enrichment, resolve_cluster_urls
 from src.services.telegram_report_notifier import send_sitrep_telegram
 
 logger = logging.getLogger(__name__)
@@ -82,12 +85,6 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     logger.info("SITREP %s (%s): window %s — %s", country_iso, country_name, window_start, window_end)
 
     events = fetch_sitrep_events(db_conn, country_iso, window_start, window_end)
-    if not events:
-        logger.info("SITREP %s: no scored events in window — saving empty report", country_iso)
-        _save_sitrep(db_conn, country_iso, window_start, window_end,
-                     status="empty", report_text=EMPTY_REPORT_TEXT, clusters=[])
-        return {"country_iso": country_iso, "status": "empty", "event_count": 0}
-
     penalized = fetch_penalized_domains(db_conn)
     clusters = build_sitrep_clusters(events, penalized)
     field, strategic = split_strategic(clusters)
@@ -95,12 +92,38 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
                                               window_start, window_end)
     spillover = build_sitrep_clusters(spillover_events, penalized) if spillover_events else []
 
+    # Replace Google News redirect links with the real publisher URLs so the
+    # report's sources are directly usable.
+    resolve_cluster_urls(clusters + spillover)
+
+    # Optional Gemini Google-Search grounding: extra corroborated detail per top
+    # cluster, discovery of incidents the ingest pipeline missed, and a strategic
+    # sweep for BÖLÜM III. Labels are re-derived afterwards so newly found
+    # independent domains upgrade single-source events.
+    enrichment = apply_web_enrichment(field, country_name, MAX_WEB_ENRICH_CLUSTERS)
+    strategic_web = enrichment["strategic"]
+    field = field + enrichment["discovered"]
+    clusters = clusters + enrichment["discovered"]
+    for cluster in field:
+        relabel_cluster(cluster, penalized)
+
+    # Only genuinely quiet after BOTH the events table and web discovery came
+    # back empty (discovery is a no-op without GEMINI_API_KEY).
+    if not clusters and not strategic_web:
+        logger.info("SITREP %s: no events and no web findings — saving empty report", country_iso)
+        _save_sitrep(db_conn, country_iso, window_start, window_end,
+                     status="empty", report_text=EMPTY_REPORT_TEXT, clusters=[])
+        return {"country_iso": country_iso, "status": "empty", "event_count": 0}
+
     try:
         res = run_sitrep_llm(router, country_iso, country_name,
-                             window_start, window_end, field, strategic, spillover)
+                             window_start, window_end, field, strategic, spillover,
+                             strategic_web=strategic_web)
         allowed_urls = [
             s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
         ]
+        if strategic_web:
+            allowed_urls += [s.get("url") for s in strategic_web.get("sources", []) if s.get("url")]
         report_text = validate_sitrep(res["content"], allowed_urls)
     except Exception as e:
         logger.exception("SITREP %s: LLM generation failed", country_iso)
@@ -115,6 +138,12 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         html_doc = _render_sitrep_html(country_name, window_start, window_end, report_text)
         filename = f"sitrep_{country_iso}_{window_end:%Y%m%d}.html"
         r2_url = upload_report_to_r2(filename, html_doc.encode("utf-8"), "text/html")
+        # upload_report_to_r2 falls back to a placeholder public base when
+        # R2_PUBLIC_URL_BASE is unset — that URL doesn't exist (SSL error in
+        # Telegram), so suppress the link rather than publish a dead one.
+        if r2_url and "pub-default.r2.dev" in r2_url:
+            logger.warning("SITREP %s: R2_PUBLIC_URL_BASE not configured; omitting R2 link", country_iso)
+            r2_url = None
     except Exception:
         logger.exception("SITREP %s: R2 upload failed", country_iso)
 

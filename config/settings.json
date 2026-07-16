@@ -236,6 +236,7 @@
     "min_events_threshold": 3,
     "max_clusters_in_prompt": 25,
     "snippet_chars": 600,
-    "language": "tr"
+    "language": "tr",
+    "max_web_enrich_clusters": 8
   }
 }

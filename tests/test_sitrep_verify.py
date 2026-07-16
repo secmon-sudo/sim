@@ -105,3 +105,84 @@ class TestFallbackClusterKey:
 
     def test_missing_fields(self):
         assert fallback_cluster_key({}) == ("", "", "")
+
+
+class TestGoogleNewsDecode:
+    def test_legacy_id_decodes_to_publisher_url(self):
+        import base64
+        from src.services.sitrep_web_enrich import decode_google_news_url
+        # legacy format: base64 payload embeds the article URL directly
+        inner = b"\x08\x13\x22" + bytes([len(b"https://example.com/story-1")]) \
+            + b"https://example.com/story-1" + b"\xd2\x01\x00"
+        token = base64.urlsafe_b64encode(inner).decode().rstrip("=")
+        url = f"https://news.google.com/rss/articles/{token}?oc=5"
+        assert decode_google_news_url(url) == "https://example.com/story-1"
+
+    def test_non_google_url_returns_none(self):
+        from src.services.sitrep_web_enrich import decode_google_news_url
+        assert decode_google_news_url("https://reuters.com/a") is None
+
+    def test_opaque_new_format_returns_none_or_url(self):
+        from src.services.sitrep_web_enrich import decode_google_news_url
+        # new AU_yq… IDs are not offline-decodable; must not crash or return garbage
+        res = decode_google_news_url(
+            "https://news.google.com/rss/articles/CBMihwJBVV95cUxNYTc5?oc=5")
+        assert res is None or res.startswith("http")
+
+
+class TestRelabelCluster:
+    def test_web_source_upgrades_single_to_multi(self):
+        from src.services.sitrep_generator import relabel_cluster
+        cluster = {
+            "verification": LABEL_SINGLE,
+            "sources": [
+                {"name": "almayadeen.net", "url": "https://almayadeen.net/x"},
+                {"name": "reuters.com", "url": "https://vertexaisearch.cloud.google.com/r/1"},
+            ],
+        }
+        relabel_cluster(cluster, [])
+        assert cluster["verification"] == LABEL_MULTI
+
+    def test_official_web_source_upgrades_to_official(self):
+        from src.services.sitrep_generator import relabel_cluster
+        cluster = {
+            "verification": LABEL_SINGLE,
+            "sources": [
+                {"name": "almayadeen.net", "url": "https://almayadeen.net/x"},
+                {"name": "centcom.mil", "url": "https://vertexaisearch.cloud.google.com/r/2"},
+            ],
+        }
+        relabel_cluster(cluster, [])
+        assert cluster["verification"] == LABEL_OFFICIAL
+
+
+class TestDiscoverIncidents:
+    def _fake_gemini(self, text, sources, supports):
+        return {"text": text, "sources": sources, "supports": supports}
+
+    def test_supported_lines_become_clusters(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        text = (
+            "LOKASYON: Erbil | OLAY: ABD Konsolosluğu yakınına füze saldırısı düzenlendi.\n"
+            "LOKASYON: Basra | OLAY: Petrol tesisinde patlama meydana geldi."
+        )
+        sources = [
+            {"name": "reuters.com", "url": "https://v.example/1", "title": "reuters.com"},
+            {"name": "centcom.mil", "url": "https://v.example/2", "title": "centcom.mil"},
+        ]
+        supports = [
+            ("LOKASYON: Erbil | OLAY: ABD Konsolosluğu yakınına füze saldırısı", [0, 1]),
+        ]
+        monkeypatch.setattr(enr, "_call_gemini",
+                            lambda *a, **k: self._fake_gemini(text, sources, supports))
+        clusters = enr.discover_incidents("Iraq", "fake-key", [])
+        # Basra line has no grounding support → dropped; Erbil kept with both sources
+        assert len(clusters) == 1
+        assert clusters[0]["location"] == "Erbil"
+        assert {s["name"] for s in clusters[0]["sources"]} == {"reuters.com", "centcom.mil"}
+
+    def test_no_findings(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        monkeypatch.setattr(enr, "_call_gemini",
+                            lambda *a, **k: self._fake_gemini("EK_BILGI_YOK", [], []))
+        assert enr.discover_incidents("Iraq", "fake-key", []) == []
