@@ -5,8 +5,9 @@ mobile-first HTML report (inline CSS only — delivered as a Telegram document
 and served from R2, so no external assets are allowed).
 
 Parsing contract with the prompt in sitrep_generator:
-  - Section headers:  "YÖNETİCİ ÖZETİ", "BÖLÜM I — …", "BÖLÜM II — …", "BÖLÜM III — …"
-  - Location subheaders: short non-bullet lines inside BÖLÜM I/II
+  - Section headers: short ALL-UPPERCASE lines ("YÖNETİCİ ÖZETİ", "SAHA OLAYLARI", …) —
+    the model picks its own section titles, only the casing/length is contractual
+  - Location subheaders: short non-bullet lines without ending punctuation
   - Event bullets: "• [tarih] detay — Doğruluk Durumu: <label> — Kaynak: name (url), …"
 """
 
@@ -138,17 +139,21 @@ def render_sitrep_html(country_name: str, country_iso: str,
             counts[c["verification"]] += 1
 
     body_parts: List[str] = []
-    in_events_section = False
+    saw_section = False
     for raw in report_text.splitlines():
-        line = _strip_md(raw)
+        line = _strip_md(raw).lstrip("#").strip()
         if not line:
             continue
-        if line.startswith("YÖNETİCİ ÖZETİ") or line.startswith("BÖLÜM"):
+        letters = [ch for ch in line if ch.isalpha()]
+        is_upper_header = (
+            len(line) <= 80 and letters and all(ch == ch.upper() for ch in letters)
+        )
+        if is_upper_header:
             body_parts.append(_section_header(line))
-            in_events_section = line.startswith("BÖLÜM I") or line.startswith("BÖLÜM II")
+            saw_section = True
         elif line.startswith(("•", "- ", "* ")):
             body_parts.append(_render_bullet(line))
-        elif in_events_section and len(line) <= 60 and not line.endswith((".", ":", "!")):
+        elif saw_section and len(line) <= 60 and not line.endswith((".", ":", "!", "?")):
             body_parts.append(
                 f'<h3 style="margin:18px 0 2px;font-size:14px;color:#7db3ff">'
                 f'📍 {_esc(line)}</h3>'

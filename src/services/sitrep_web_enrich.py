@@ -31,6 +31,24 @@ _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:g
 _GOOGLE_NEWS_RE = re.compile(r"news\.google\.com/(?:rss/)?articles/([^?/]+)")
 _URL_IN_BYTES_RE = re.compile(rb"https?://[\x21-\x7e]+")
 
+# Circuit breaker: once the Gemini quota is exhausted (sustained 429s), stop
+# issuing grounded calls for the rest of the process instead of spamming the API.
+_RATE_LIMIT_TRIP_AFTER = 3
+_consecutive_429 = 0
+_quota_exhausted = False
+
+
+def _gemini_retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """Honor the RetryInfo delay Gemini returns on 429; fall back to backoff."""
+    try:
+        for detail in resp.json()["error"]["details"]:
+            delay = detail.get("retryDelay")
+            if delay:
+                return min(float(delay.rstrip("s")), 60.0)
+    except Exception:
+        pass
+    return 5.0 * (2 ** attempt)
+
 
 def decode_google_news_url(url: str) -> Optional[str]:
     """
@@ -145,19 +163,43 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
     One grounded Gemini call. Returns None on failure, else:
     {"text", "sources": [{"name","url","title"}], "supports": [(segment_text, [chunk_idx])]}
     """
+    global _consecutive_429, _quota_exhausted
+    if _quota_exhausted:
+        return None
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens},
     }
     try:
-        resp = httpx.post(
-            _GEMINI_URL.format(model=GEMINI_MODEL),
-            params={"key": api_key},
-            json=body,
-            timeout=30.0,
-        )
+        resp = None
+        for attempt in range(3):
+            resp = httpx.post(
+                _GEMINI_URL.format(model=GEMINI_MODEL),
+                params={"key": api_key},
+                json=body,
+                timeout=30.0,
+            )
+            if resp.status_code != 429:
+                break
+            if attempt < 2:
+                delay = _gemini_retry_delay(resp, attempt)
+                logger.info("Gemini 429, retrying in %.0fs", delay)
+                time.sleep(delay)
+        if resp.status_code == 429:
+            _consecutive_429 += 1
+            if _consecutive_429 >= _RATE_LIMIT_TRIP_AFTER and not _quota_exhausted:
+                _quota_exhausted = True
+                logger.warning(
+                    "Gemini quota exhausted (%d consecutive 429s) — "
+                    "disabling web enrichment for the rest of this run",
+                    _consecutive_429,
+                )
+            else:
+                logger.warning("Gemini grounded call rate-limited (429), giving up")
+            return None
         resp.raise_for_status()
+        _consecutive_429 = 0
         data = resp.json()
         candidate = (data.get("candidates") or [{}])[0]
         text = "".join(
@@ -330,6 +372,8 @@ def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
         logger.info("SITREP web enrichment skipped: GEMINI_API_KEY not set")
         return {"strategic": None, "discovered": []}
     for cluster in clusters[:max_clusters]:
+        if _quota_exhausted:
+            break
         enrich_cluster(cluster, country_name, api_key)
         time.sleep(cooldown_s)
     known = [f'{c.get("location")}: {(c.get("snippet") or "")[:100]}' for c in clusters]
@@ -337,6 +381,9 @@ def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
     time.sleep(cooldown_s)
     sweep = strategic_sweep(country_name, api_key)
     time.sleep(cooldown_s)
+    if _quota_exhausted:
+        logger.warning("SITREP web enrichment for %s ran with exhausted Gemini quota — "
+                       "results may be partial", country_name)
     if discovered:
         logger.info("SITREP web discovery added %d incidents for %s", len(discovered), country_name)
     return {"strategic": sweep, "discovered": discovered}

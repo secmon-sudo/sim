@@ -37,7 +37,7 @@ MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 25))
 SNIPPET_CHARS = int(SITREP_CFG.get("snippet_chars", 600))
 MAX_WEB_ENRICH_CLUSTERS = int(SITREP_CFG.get("max_web_enrich_clusters", 8))
 
-# event_type codes rendered in BÖLÜM III (strategic/political) instead of BÖLÜM I
+# event_type codes treated as strategic/political rather than field events
 STRATEGIC_EVENT_TYPES = {
     "travel_advisory",
     "travel_ban",
@@ -83,7 +83,7 @@ def fetch_spillover_events(db_conn, country_iso: str, country_name: str,
                            window_start: datetime, window_end: datetime) -> List[Dict[str, Any]]:
     """
     Events attributed to OTHER countries whose text mentions this country —
-    regional spillover (e.g. retaliation strikes on neighbors) for BÖLÜM II.
+    regional spillover (e.g. retaliation strikes on neighbors).
     """
     if not country_name or country_name == country_iso.upper():
         return []
@@ -184,7 +184,7 @@ def relabel_cluster(cluster: Dict[str, Any], penalized_domains: List[str]) -> No
 
 
 def split_strategic(clusters: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Split clusters into (field events → BÖLÜM I, strategic items → BÖLÜM III)."""
+    """Split clusters into (field events, strategic/political items)."""
     field = [c for c in clusters if c["event_type"] not in STRATEGIC_EVENT_TYPES]
     strategic = [c for c in clusters if c["event_type"] in STRATEGIC_EVENT_TYPES]
     return field, strategic
@@ -194,28 +194,43 @@ _SYSTEM_PROMPT = (
     "Sen kıdemli bir askeri-siyasi istihbarat analistisin. Sana JSON olarak verilen, "
     "son 24 saate ait doğrulanmış olay kümelerinden TÜRKÇE, kurumsal kalitede bir "
     "GÜNLÜK DURUM RAPORU (SITREP) yazacaksın.\n\n"
-    "RAPOR YAPISI (başlıklar birebir böyle olmalı):\n"
-    "YÖNETİCİ ÖZETİ\n"
-    "  3-5 cümle: genel durum, en kritik gelişmeler, gidişatın yönü. Analitik ve ölçülü bir "
-    "dil kullan; olay listesini tekrarlama, sentezle.\n"
-    "BÖLÜM I — SAHA OLAYLARI\n"
-    "  Olayları verilen 'location' değerine göre grupla; her konum bir alt başlık olsun. "
-    "Her olay için şu format:\n"
-    "  • [tarih] Olayın detaylı anlatımı (snippet ve varsa web_context alanındaki teyitli "
-    "detayları — vurulan tesis, resmi açıklama, can kaybı — akıcı bir paragrafa dönüştür) — "
+    "RAPOR YAPISI:\n"
+    "Rapor 'YÖNETİCİ ÖZETİ' başlığıyla açılır: 4-6 cümlede genel durum, günün en kritik "
+    "gelişmeleri ve gidişatın yönü. Olay listesini tekrarlama; sentezle.\n"
+    "Sonrasında raporu O GÜNÜN verisine en uygun şekilde SEN kurgula: bölümleri coğrafi, "
+    "tematik veya kronolojik olarak düzenleyebilirsin — hangisi günü en iyi anlatıyorsa. "
+    "Sabit bir bölüm şablonu YOK; boş bölüm uydurma, 'veri yok' diye bölüm açma. "
+    "Komşu ülkelere yayılma ('spillover') ve stratejik/siyasi gelişmeleri ('strategic', "
+    "'strategic_web': hava sahası, seyahat uyarıları, yaptırımlar, resmi açıklamalar) "
+    "veri varsa anlamlı başlıklar altında işle; askeri olaylarla iç içe anlatmak daha "
+    "doğalsa öyle yap.\n"
+    "Biçim kuralları (HTML dönüştürücü bunlara göre çalışır):\n"
+    "- Bölüm başlıkları TAMAMI BÜYÜK HARF, tek satır, kısa (ör. 'SAHA OLAYLARI', "
+    "'HAVA SAHASI VE ULAŞIM', 'BÖLGESEL YANSIMALAR').\n"
+    "- Konum alt başlıkları kısa ve tek satır olabilir (ör. 'Bandar Abbas').\n"
+    "- Her somut olay şu kalıpta bir madde olsun:\n"
+    "  • [tarih] Olayın anlatımı (snippet ve varsa web_context alanındaki teyitli detayları "
+    "— vurulan tesis, resmi açıklama, can kaybı — akıcı bir paragrafa dönüştür) — "
     "Doğruluk Durumu: <verification alanı BİREBİR> — Kaynak: <name> (<url>)\n"
-    "BÖLÜM II — BÖLGESEL YAYILMA\n"
-    "  Sadece 'spillover' listesinde öğe varsa yaz; yoksa bu bölümü TAMAMEN atla.\n"
-    "BÖLÜM III — STRATEJİK VE SİYASİ GELİŞMELER\n"
-    "  'strategic' listesindeki öğeler + varsa 'strategic_web' alanındaki taranmış gelişmeler "
-    "(hava sahası, seyahat uyarıları, yaptırımlar, resmi açıklamalar, piyasa etkisi). "
-    "Hiçbiri yoksa şu cümleyi yaz: 'Bu bölüm için doğrulanmış veri bulunmamaktadır.'\n\n"
+    "Rapor doyurucu olsun: önemli olayları tek cümleyle geçiştirme; bağlamı, resmi "
+    "açıklamaları ve operasyonel etkiyi anlat. Ama dolgu cümle ve tekrar da yok.\n\n"
+    "TÜRKÇE KALİTESİ (en sık yapılan hatalar — bunlara özellikle dikkat et):\n"
+    "- Her cümle dilbilgisi açısından KUSURSUZ ve doğal Türkçe olacak; ana dili Türkçe "
+    "olan bir analist gibi yaz, makine çevirisi gibi değil.\n"
+    "- Devrik ve kopuk cümle KURMA. Sebep-sonuç tek akıcı cümlede verilir:\n"
+    "  YANLIŞ: 'Gümüş fiyatları 60 dolara ulaşamadı; İran'da devam eden hava saldırıları "
+    "nedeniyle.'\n"
+    "  DOĞRU: 'İran'da devam eden hava saldırıları nedeniyle gümüş fiyatları 60 dolar "
+    "seviyesine ulaşamadı.'\n"
+    "- Fiil çekimlerini doğru yaz ('gerçekleştirdi', 'düzenledi', 'açıkladı'); yazım "
+    "hatası yapma.\n"
+    "- İngilizce cümle yapısını Türkçeye kopyalama; cümleyi Türkçe kurgusuyla baştan kur.\n"
+    "- Askeri terminolojiyi doğru Türkçe karşılıklarıyla kullan (airstrike=hava saldırısı, "
+    "shelling=topçu atışı, air defense=hava savunması, naval blockade=deniz ablukası).\n\n"
     "KESİN KURALLAR:\n"
     "1. DİL: Verilen veri (snippet, title, web_context) İngilizce, Farsça veya Arapça "
     "olabilir — raporun TAMAMINI TÜRKÇE yaz. Kaynak başlıkları (title) dışında tek bir "
-    "İngilizce cümle bile kurma; yabancı dildeki içeriği Türkçeye çevirerek sentezle. "
-    "Askeri terminolojiyi doğru Türkçe karşılıklarıyla kullan (airstrike=hava saldırısı, "
-    "shelling=topçu atışı, air defense=hava savunması).\n"
+    "İngilizce cümle bile kurma; yabancı dildeki içeriği Türkçeye çevirerek sentezle.\n"
     "2. SADECE verilen veriyi kullan. Olay, rakam, can kaybı sayısı, yer adı UYDURMA.\n"
     "3. 'verification' etiketlerini birebir kopyala; ASLA yükseltme (Doğrulanmamış bir olayı "
     "Onaylandı yapma).\n"
@@ -257,8 +272,8 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
     Server-side guardrails: required section header, URL allowlist, and no
     non-canonical verification labels.
     """
-    if "BÖLÜM I" not in text:
-        raise ValueError("SITREP output missing required 'BÖLÜM I' section header")
+    if "YÖNETİCİ ÖZETİ" not in text:
+        raise ValueError("SITREP output missing required 'YÖNETİCİ ÖZETİ' header")
 
     allowed = {u.strip() for u in allowed_urls if u}
     import re
