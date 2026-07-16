@@ -55,10 +55,25 @@ def compute_signature(events: list[dict]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
+# Cap the timeline lines sent to the LLM. A long-running storyline (e.g. an active
+# war front) can accumulate hundreds of events over the 14-day lookback; the full
+# list blew past Groq's request-size limit (HTTP 413 on both keys, 2026-07-16 07:14),
+# which cooled down every slot and starved the remaining storylines. Keep the opening
+# reports for "how it started" plus the most recent ones for "where it stands".
+NARRATIVE_PROMPT_HEAD_EVENTS = 5
+NARRATIVE_PROMPT_MAX_EVENTS = 60
+
+
 def build_narrative_prompt(events: list[dict]) -> str:
     """Compact prompt: structural summary + the chronological event headlines."""
     summary = summarize_timeline(events)
     timeline = build_timeline(events)
+
+    omitted = 0
+    if len(timeline) > NARRATIVE_PROMPT_MAX_EVENTS:
+        omitted = len(timeline) - NARRATIVE_PROMPT_MAX_EVENTS
+        tail = NARRATIVE_PROMPT_MAX_EVENTS - NARRATIVE_PROMPT_HEAD_EVENTS
+        timeline = timeline[:NARRATIVE_PROMPT_HEAD_EVENTS] + timeline[-tail:]
 
     lines = []
     for e in timeline:
@@ -67,6 +82,12 @@ def build_narrative_prompt(events: list[dict]) -> str:
         title = (e.get("source_title") or e.get("storyline_hint") or "").strip()[:160]
         sev = e.get("severity_score", 0)
         lines.append(f"- [{when_s}] (sev {sev}) {title}")
+
+    if omitted:
+        lines.insert(
+            NARRATIVE_PROMPT_HEAD_EVENTS,
+            f"- … ({omitted} intermediate reports omitted) …",
+        )
 
     countries = ", ".join(summary["countries"]) or "unknown"
     anchors = ", ".join(summary["anchors"]) or "n/a"

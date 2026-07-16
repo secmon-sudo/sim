@@ -45,6 +45,25 @@ class TestPrompt:
         assert "First blast at Kabul airport" in prompt
         assert "peak severity 85" in prompt
 
+    def test_prompt_caps_timeline_for_mega_storylines(self):
+        evs = [_ev(str(i), f"report {i}", _T0 + timedelta(hours=i)) for i in range(200)]
+        prompt = narrator.build_narrative_prompt(evs)
+        report_lines = [l for l in prompt.splitlines() if l.startswith("- ")]
+        # capped lines + 1 omission marker
+        assert len(report_lines) == narrator.NARRATIVE_PROMPT_MAX_EVENTS + 1
+        assert "(140 intermediate reports omitted)" in prompt
+        # keeps the opening reports and the most recent ones
+        assert "report 0" in prompt
+        assert "report 199" in prompt
+        # facts line still reflects the FULL storyline
+        assert "200 reports" in prompt
+
+    def test_prompt_untouched_when_under_cap(self):
+        evs = [_ev(str(i), f"report {i}", _T0 + timedelta(hours=i)) for i in range(10)]
+        prompt = narrator.build_narrative_prompt(evs)
+        assert "omitted" not in prompt
+        assert sum(1 for l in prompt.splitlines() if l.startswith("- ")) == 10
+
 
 # ── Mock DB / router for the run loop ──
 
