@@ -89,7 +89,13 @@ def _fake_call_llm(router, prompt, system_prompt=None, max_tokens=1024, json_mod
 def smoke_db(monkeypatch):
     """Point the pool at the disposable Postgres, run migrations + anchor seed."""
     monkeypatch.setenv("DATABASE_URL", SMOKE_URL)
+    # The maturation window is frozen at pass_b_dedup import time from
+    # SIM_MATURATION_WINDOW_HOURS. In a full-suite run other tests import the
+    # module first (without the env var), so patch the constant itself too —
+    # otherwise fixture events aren't "mature" and Pass C classifies nothing.
     monkeypatch.setenv("SIM_MATURATION_WINDOW_HOURS", "0")
+    from src.pipeline import pass_b_dedup
+    monkeypatch.setattr(pass_b_dedup, "MATURATION_WINDOW_HOURS", 0)
     # Ensure no real provider/notifier secrets leak in from the environment.
     for var in ("GROQ_API_KEY_A", "GROQ_API_KEY_B", "OPENROUTER_API_KEY_A",
                 "OPENROUTER_API_KEY_B", "GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN",
