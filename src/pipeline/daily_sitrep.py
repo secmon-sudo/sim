@@ -26,6 +26,7 @@ from src.services.sitrep_generator import (
     split_strategic,
     validate_sitrep,
 )
+from src.services.sitrep_html import render_sitrep_html
 from src.services.sitrep_web_enrich import apply_web_enrichment, resolve_cluster_urls
 from src.services.telegram_report_notifier import send_sitrep_telegram
 
@@ -53,25 +54,6 @@ def _save_sitrep(db_conn, country_iso: str, window_start, window_end,
          status, llm_provider, llm_model, r2_url, error_message),
     )
     db_conn.commit()
-
-
-def _render_sitrep_html(country_name: str, window_start, window_end, report_text: str) -> str:
-    """Minimal self-contained HTML wrapper for R2 / Telegram document delivery."""
-    import html as _html
-    body = _html.escape(report_text)
-    # linkify escaped URLs
-    import re
-    body = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', body)
-    return (
-        "<!DOCTYPE html><html lang='tr'><head><meta charset='utf-8'>"
-        f"<title>SITREP — {_html.escape(country_name)}</title>"
-        "<style>body{font-family:Georgia,serif;max-width:860px;margin:2rem auto;"
-        "padding:0 1rem;line-height:1.55;color:#1a1a1a;background:#fafaf7}"
-        "pre{white-space:pre-wrap;font:inherit}</style></head><body>"
-        f"<h1>GÜNLÜK DURUM RAPORU (SITREP) — {_html.escape(country_name)}</h1>"
-        f"<p><b>Dönem:</b> {window_start:%Y-%m-%d %H:%M} — {window_end:%Y-%m-%d %H:%M} UTC</p>"
-        f"<pre>{body}</pre></body></html>"
-    )
 
 
 def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
@@ -133,9 +115,13 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         return {"country_iso": country_iso, "status": "failed", "error": str(e)}
 
     # Delivery is best-effort; the report row is the source of truth.
+    html_doc = render_sitrep_html(
+        country_name, country_iso,
+        f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",
+        report_text, field,
+    )
     r2_url = None
     try:
-        html_doc = _render_sitrep_html(country_name, window_start, window_end, report_text)
         filename = f"sitrep_{country_iso}_{window_end:%Y%m%d}.html"
         r2_url = upload_report_to_r2(filename, html_doc.encode("utf-8"), "text/html")
         # upload_report_to_r2 falls back to a placeholder public base when
@@ -159,7 +145,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
             window_start=f"{window_start:%Y-%m-%d %H:%M}",
             window_end=f"{window_end:%Y-%m-%d %H:%M}",
             clusters=clusters,
-            report_text=report_text,
+            html_doc=html_doc,
             r2_url=r2_url,
         )
     except Exception:

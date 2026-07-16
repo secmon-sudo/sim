@@ -385,13 +385,14 @@ def send_sitrep_telegram(
     window_start: str,
     window_end: str,
     clusters: List[Dict[str, Any]],
-    report_text: str,
+    html_doc: str,
     r2_url: Optional[str] = None,
 ) -> Optional[str]:
     """
     Dispatches a daily country SITREP:
     1. Short summary card (sendMessage) with label counts.
-    2. Full Turkish report as a text document attachment (sendDocument).
+    2. The styled HTML report as a document attachment (sendDocument) —
+       opens directly in the phone's browser.
     """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
@@ -435,16 +436,16 @@ def send_sitrep_telegram(
         logger.error("Failed to send Telegram SITREP summary: %s", str(e))
 
     try:
-        file_buffer = io.BytesIO(report_text.encode("utf-8"))
+        file_buffer = io.BytesIO(html_doc.encode("utf-8"))
         date_tag = window_end[:10].replace("-", "")
-        filename = f"sitrep_{country_iso}_{date_tag}.txt"
+        filename = f"sitrep_{country_iso}_{date_tag}.html"
 
         api_url_doc = f"https://api.telegram.org/bot{bot_token}/sendDocument"
         resp_doc = httpx.post(
             api_url_doc,
             data={"chat_id": chat_id,
                   "caption": f"SITREP {country_name} ({window_start} — {window_end} UTC)"},
-            files={"document": (filename, file_buffer, "text/plain")},
+            files={"document": (filename, file_buffer, "text/html")},
             timeout=20.0
         )
         resp_doc.raise_for_status()

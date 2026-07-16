@@ -196,16 +196,23 @@ def enrich_cluster(cluster: Dict[str, Any], country_name: str, api_key: str) -> 
     """
     titles = "; ".join(s.get("title") or "" for s in cluster.get("sources", [])[:2])
     prompt = (
-        "You are verifying a security incident report. Search the web for this event and "
-        "report ONLY facts you can find in search results.\n"
+        "You are verifying a security incident for an intelligence report. Search the web "
+        "for this specific event and report ONLY facts found in actual search results.\n"
         f"Country: {country_name}\nLocation: {cluster.get('location')}\n"
         f"Event type: {cluster.get('event_type')}\nDate: {cluster.get('date')}\n"
         f"Known headlines: {titles}\n\n"
-        "Write 2-4 factual sentences IN TURKISH with any additional confirmed details "
-        "(what was hit, casualties, official statements). If you find nothing about this "
-        "specific event, reply exactly: EK_BILGI_YOK"
+        "Look specifically for:\n"
+        "- the exact facility/target hit (base, port, airport, plant, neighborhood)\n"
+        "- weapon systems used (missile type, drone model, aircraft) if reported\n"
+        "- casualty and damage figures, evacuations, infrastructure/utility outages\n"
+        "- official statements (CENTCOM, defense ministries, governors, state agencies)\n"
+        "- the reported local time of the event, if any source states it explicitly\n"
+        "- operational impact (airspace, ports, roads closed)\n\n"
+        "Write 3-5 factual sentences IN TURKISH synthesizing what you found. Include the "
+        "reported time ONLY if a source states it explicitly. If you find nothing about "
+        "this specific event, reply exactly: EK_BILGI_YOK"
     )
-    res = _call_gemini(prompt, api_key, max_tokens=512)
+    res = _call_gemini(prompt, api_key, max_tokens=768)
     if not res or res["text"].strip().startswith("EK_BILGI_YOK"):
         return
     cluster["web_context"] = res["text"][:1200]
@@ -222,13 +229,19 @@ def strategic_sweep(country_name: str, api_key: str) -> Optional[Dict[str, Any]]
     """
     prompt = (
         f"Search for strategic and political security developments about {country_name} "
-        "in the LAST 24 HOURS only: airspace closures or flight suspensions, travel "
-        "advisories, embassy actions, sanctions, official government or military "
-        "statements, market/currency reaction to the security situation.\n"
-        "Summarize IN TURKISH as short bullet lines, only facts found in search results, "
-        "each bullet on its own line. If nothing significant, reply exactly: EK_BILGI_YOK"
+        "in the LAST 24 HOURS only. Cover each of these areas if reported:\n"
+        "- aviation: airspace closures, flight suspensions/reroutes, EASA/FAA/ICAO notices\n"
+        "- travel advisories and evacuation orders (State Dept, FCDO, other governments)\n"
+        "- embassy/consulate closures, staff drawdowns\n"
+        "- sanctions, UN/NATO/EU decisions, major diplomatic statements\n"
+        "- official military statements about ongoing or planned operations\n"
+        "- maritime/shipping impact (straits, ports, insurance rates)\n"
+        "- market and currency reaction to the security situation\n"
+        "Summarize IN TURKISH, one development per line starting with '• ', each with "
+        "concrete detail (who, what, figures). Only facts found in search results — no "
+        "speculation. If nothing significant, reply exactly: EK_BILGI_YOK"
     )
-    res = _call_gemini(prompt, api_key, max_tokens=768)
+    res = _call_gemini(prompt, api_key, max_tokens=1024)
     if not res or res["text"].strip().startswith("EK_BILGI_YOK"):
         return None
     return {"text": res["text"][:2000], "sources": res["sources"][:6]}
@@ -246,26 +259,36 @@ def discover_incidents(country_name: str, api_key: str,
     """
     known = "\n".join(f"- {s}" for s in known_summaries[:20]) or "- (yok)"
     prompt = (
-        f"Search the web for security incidents in {country_name} in the LAST 24 HOURS: "
-        "airstrikes, missile/drone attacks, explosions, armed clashes, terror attacks, "
-        "major unrest. Check official military sources (e.g. CENTCOM, defense ministries), "
-        "wire services (Reuters, AP) and major outlets.\n\n"
+        f"Search the web for security incidents in {country_name} in the LAST 24 HOURS:\n"
+        "- airstrikes, missile and drone attacks, shelling, explosions\n"
+        "- armed clashes, terror attacks, assassinations, IED attacks\n"
+        "- attacks on military bases, ports, airports, energy and critical infrastructure\n"
+        "- air-defense activations, interceptions, naval incidents\n"
+        "- major unrest, curfews, mass evacuations\n"
+        "Check official military sources (CENTCOM, defense ministries, state agencies), "
+        "wire services (Reuters, AP, AFP), major outlets (BBC, CNN, Al Jazeera) and "
+        "credible regional media. Cover ALL regions of the country, not just the capital.\n\n"
         "ALREADY KNOWN incidents (do NOT repeat these):\n"
         f"{known}\n\n"
         f"Output up to {max_incidents} NEW incidents, one per line, EXACTLY this format "
-        "(no other text):\n"
-        "LOKASYON: <city or area> | OLAY: <2-3 sentence factual summary IN TURKISH>\n"
+        "(no other text, no markdown):\n"
+        "LOKASYON: <city or area> | SAAT: <local time ONLY if a source explicitly states "
+        "it, otherwise 'belirsiz'> | OLAY: <2-4 sentence factual summary IN TURKISH: what "
+        "was hit, weapons used, casualties, official statements — only facts from search "
+        "results>\n"
         "Only include incidents you found in actual search results. "
         "If there are none, reply exactly: EK_BILGI_YOK"
     )
-    res = _call_gemini(prompt, api_key, max_tokens=1536)
+    res = _call_gemini(prompt, api_key, max_tokens=2048)
     if not res or res["text"].strip().startswith("EK_BILGI_YOK"):
         return []
 
     clusters: List[Dict[str, Any]] = []
     for line in res["text"].splitlines():
         line = line.strip().lstrip("•-* ")
-        m = re.match(r"LOKASYON:\s*(.+?)\s*\|\s*OLAY:\s*(.+)", line)
+        m = re.match(
+            r"LOKASYON:\s*(.+?)\s*\|\s*(?:SAAT:\s*(.+?)\s*\|\s*)?OLAY:\s*(.+)", line
+        )
         if not m:
             continue
         # map this line to the grounding chunks that support it
@@ -276,13 +299,17 @@ def discover_incidents(country_name: str, api_key: str,
         line_sources = [res["sources"][i] for i in sorted(idxs) if i < len(res["sources"])]
         if not line_sources:
             continue  # unsupported claim — never report it
+        reported_time = (m.group(2) or "belirsiz").strip()
+        date_label = ("son 24 saat içinde, saat belirsiz"
+                      if reported_time.lower() in ("belirsiz", "unknown", "")
+                      else f"son 24 saat içinde, bildirilen saat: {reported_time}")
         clusters.append({
             "location": m.group(1)[:80],
             "event_type": "web_discovery",
-            "date": "son 24 saat içinde, saat belirsiz",
+            "date": date_label,
             "verification": None,  # caller re-labels from source domains
             "severity": 0,
-            "snippet": m.group(2)[:600],
+            "snippet": m.group(3)[:600],
             "sources": line_sources[:4],
         })
         if len(clusters) >= max_incidents:

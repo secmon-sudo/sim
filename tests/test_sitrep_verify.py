@@ -186,3 +186,35 @@ class TestDiscoverIncidents:
         monkeypatch.setattr(enr, "_call_gemini",
                             lambda *a, **k: self._fake_gemini("EK_BILGI_YOK", [], []))
         assert enr.discover_incidents("Iraq", "fake-key", []) == []
+
+
+class TestHtmlRenderer:
+    def _render(self):
+        from src.services.sitrep_html import render_sitrep_html
+        report = (
+            "YÖNETİCİ ÖZETİ\n"
+            "Gerilim tırmanıyor & durum <kritik>.\n"
+            "BÖLÜM I — SAHA OLAYLARI\n"
+            "Bandar Abbas\n"
+            "• [2026-07-16, saat belirsiz] Komuta merkezleri vuruldu — "
+            "Doğruluk Durumu: Onaylandı (Resmî) — Kaynak: centcom.mil (https://centcom.mil/a)\n"
+            "BÖLÜM III — STRATEJİK VE SİYASİ GELİŞMELER\n"
+            "Bu bölüm için doğrulanmış veri bulunmamaktadır."
+        )
+        clusters = [{"verification": "Onaylandı (Resmî)", "sources": []}]
+        return render_sitrep_html("İran", "IR", "2026-07-15 10:30",
+                                  "2026-07-16 10:30", report, clusters)
+
+    def test_structure_and_badges(self):
+        html_out = self._render()
+        assert "<!DOCTYPE html>" in html_out
+        assert "viewport" in html_out                      # mobile-first
+        assert "BÖLÜM I — SAHA OLAYLARI" in html_out
+        assert "Onaylandı (Resmî)" in html_out             # badge text
+        assert 'href="https://centcom.mil/a"' in html_out  # source chip link
+        assert "📍 Bandar Abbas" in html_out               # location subheader
+
+    def test_escapes_html_in_content(self):
+        html_out = self._render()
+        assert "<kritik>" not in html_out
+        assert "&lt;kritik&gt;" in html_out
