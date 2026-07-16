@@ -50,9 +50,22 @@ def get_pool() -> ConnectionPool:
             min_size=1,
             max_size=20,
             open=True,
-            kwargs={"prepare_threshold": None},  # Disable prepared statements for Supabase pooler
+            # check: don't hand out a pooled connection that died while idle.
+            check=ConnectionPool.check_connection,
+            kwargs={
+                "prepare_threshold": None,  # Disable prepared statements for Supabase pooler
+                # TCP keepalives: runner↔Supabase connections die silently mid-run
+                # (half-open TCP); without probes the client blocks in wait() until
+                # the server's 900s idle-in-transaction reaper kills the session
+                # (failures of 2026-07-15 22:45 and 2026-07-16 06:00). Probe after
+                # 30s idle, every 10s, 3 misses → dead in ~1 min instead of 15.
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 3,
+            },
         )
-        logger.info("Database connection pool created (max_size=20, prepare_threshold=None)")
+        logger.info("Database connection pool created (max_size=20, prepare_threshold=None, tcp_keepalives=on)")
     return _pool
 
 
