@@ -5,9 +5,8 @@ Fetches active conflict zones from EASA and syncs to database.
 Endpoint: https://www.easa.europa.eu/en/domains/air-operations/czibs/export-json
 """
 
-import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 
@@ -103,7 +102,7 @@ def sync_czib_to_db(db_conn) -> dict:
         issued = zone.get("issued_date", "")
         valid_until = zone.get("valid_until_date", "")
         valid_descr = zone.get("field_easa_valid_until_descr", "")
-        updated_time = zone.get("updated", "")
+        zone.get("updated", "")
 
         # Parse issued_date
         issued_dt = None

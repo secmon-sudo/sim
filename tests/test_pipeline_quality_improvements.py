@@ -1,4 +1,3 @@
-import pytest
 import os
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
@@ -6,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from src.services.telegram_notifier import send_telegram_alert
 from src.pipeline.pass_a_ingest import (
     translate_to_english_if_needed,
-    google_translate,
     build_search_queries,
     check_domain_penalty
 )
@@ -264,7 +262,7 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
     db_conn.execute.side_effect = side_effect
     
     # Call score_single_event
-    res = score_single_event(db_conn, "event_123", [])
+    score_single_event(db_conn, "event_123", [])
     
     # Verify send_telegram_alert was called with our flags set to True
     mock_send_tg.assert_called_once()

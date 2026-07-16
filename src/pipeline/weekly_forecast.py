@@ -26,8 +26,7 @@ from src.core.llm_router import LLMRouter
 from src.core.forecast_engine import (
     calculate_tension_index,
     calculate_trajectory,
-    classify_watchlist_and_emergings,
-    get_source_credibility
+    classify_watchlist_and_emergings
 )
 from src.services.forecast_generator import (
     run_g1_selection,
@@ -432,7 +431,7 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
                 )
         logger.info("Weekly report stored successfully in database. ID: %s", report_id)
         
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to store weekly report in database.")
         db_conn.rollback()
         return {"success": False, "reason": "Database insertion error."}

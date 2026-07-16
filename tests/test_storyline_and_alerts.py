@@ -3,7 +3,6 @@ Tests for storyline matching.
 Blueprint V20.1 §PASS D
 """
 
-import pytest
 
 from src.core.storyline import jaccard_similarity, tokenize_storyline_hint
 

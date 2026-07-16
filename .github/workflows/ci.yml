@@ -47,6 +47,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Lint (ruff F-rules + vulture dead code)
+        run: |
+          pip install -q ruff vulture
+          ruff check --select F src/ scripts/ db/ tests/
+          python -m vulture src/ --min-confidence 90 --ignore-names "exc_type,exc_val,exc_tb"
+
       - name: Unit tests
         run: python -m pytest tests/ -q
 

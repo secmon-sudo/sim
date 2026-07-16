@@ -5,7 +5,6 @@ Blueprint V20.1 §4.5.3
 
 import datetime
 import time
-from unittest.mock import patch
 
 import pytest
 

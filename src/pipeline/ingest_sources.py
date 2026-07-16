@@ -828,10 +828,6 @@ def fetch_full_text(url: str) -> str:
     """
     try:
         import trafilatura
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
         # We use a strict timeout for both connection and read
         # trafilatura.fetch_url uses a complex internal download mechanism; 
         # using it directly but being aware of its potential to hang.

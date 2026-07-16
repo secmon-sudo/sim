@@ -2,7 +2,6 @@
 Tests for casualty-based severity bonus.
 """
 
-import pytest
 
 from src.pipeline.pass_d_score import compute_casualty_bonus
 

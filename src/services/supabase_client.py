@@ -8,7 +8,6 @@ Thread-safe connection pool for the pipeline and CLI runs.
 import logging
 import os
 
-import psycopg
 from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)

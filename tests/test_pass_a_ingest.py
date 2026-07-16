@@ -2,14 +2,12 @@
 Tests for Pass A ingestion logic.
 """
 
-import pytest
 
 from src.pipeline.pass_a_ingest import (
     build_search_queries,
     canonicalize_text,
     compute_url_hash,
     is_noise,
-    normalize_title,
     title_similarity,
 )
 

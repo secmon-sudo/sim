@@ -3,7 +3,6 @@ Tests for normalize_anchor.
 Blueprint V20.1 §2.2
 """
 
-import pytest
 
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 

@@ -4,9 +4,7 @@ Blueprint V20.1 QA-09
 """
 
 import time
-from unittest.mock import patch
 
-import pytest
 
 from src.core.llm_router import (
     LLMAccount,

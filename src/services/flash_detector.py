@@ -170,7 +170,7 @@ def check_flash_triggers(
                 triggers.append({
                     "type": "High Volume Escalation",
                     "country_iso": country,
-                    "reason": f"Detected 3+ verified high-confidence events within a 6-hour window.",
+                    "reason": "Detected 3+ verified high-confidence events within a 6-hour window.",
                     "events": verified_evs
                 })
                 break

@@ -9,7 +9,7 @@ and auto-retry mechanisms.
 import json
 import logging
 import re
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from src.core.llm_router import LLMRouter

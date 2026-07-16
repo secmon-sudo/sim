@@ -8,7 +8,7 @@ Two-stage clustering for events:
 """
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Any
 from src.core.storyline import jaccard_similarity
 

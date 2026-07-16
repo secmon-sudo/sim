@@ -12,7 +12,6 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 
 import httpx

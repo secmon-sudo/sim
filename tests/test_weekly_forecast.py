@@ -14,11 +14,10 @@ from src.core.storyline_clusterer import greedy_centrist_cluster, rule_based_pre
 from src.core.forecast_engine import (
     calculate_tension_index,
     calculate_trajectory,
-    classify_watchlist_and_emergings,
-    get_source_credibility
+    classify_watchlist_and_emergings
 )
-from src.services.flash_detector import check_flash_triggers, is_same_location
-from src.services.forecast_generator import validate_g2_assessment, G2CountryAssessment, G2Forecast, G3Spillover, G3GlobalAssessment, run_g3_global_assessment
+from src.services.flash_detector import check_flash_triggers
+from src.services.forecast_generator import validate_g2_assessment, G2CountryAssessment, G2Forecast, run_g3_global_assessment
 
 
 # 1. Test Rule-based pre-filter & Greedy centrist clustering to prevent chaining
@@ -181,7 +180,7 @@ def test_z_score_trajectory_classification():
 
 
 def test_watchlist_and_emerging_classification():
-    dt = datetime.now(timezone.utc)
+    datetime.now(timezone.utc)
     countries_data = [
         # Country 1: Fits Watchlist (ti <= 50, delta > 0, z_score > 0.5)
         {
