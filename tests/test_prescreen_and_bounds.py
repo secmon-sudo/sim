@@ -3,7 +3,7 @@ Tests for Faz 0.3 (occurred_at sanity bounds) and Faz 1.1 (deterministic
 relevance pre-screen) added to Pass C.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.pipeline.pass_c_classify import (
     PRESCREEN_SKIP_FLOOR,
@@ -18,11 +18,11 @@ class TestOccurredAtBounds:
         assert _parse_occurred_at("2019-06-01") is None
 
     def test_future_date_rejected(self):
-        future = (datetime.utcnow() + timedelta(days=10)).strftime("%Y-%m-%d")
+        future = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
         assert _parse_occurred_at(future) is None
 
     def test_recent_date_kept(self):
-        recent = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
+        recent = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
         assert _parse_occurred_at(recent) is not None
 
     def test_garbage_returns_none(self):
