@@ -430,17 +430,17 @@ def _try_prescreen_archive(db_conn, event: dict, det: dict) -> bool:
         return False
     event_id = event["id"]
     source_domain = event.get('source_domain', 'unknown') or 'unknown'
-    update_domain_penalty(db_conn, source_domain, 1)
-    db_conn.execute(
-        """UPDATE events
-           SET event_type = 'other_aviation_related',
-               llm_parsed_output = %s,
-               status = 'archived',
-               updated_at = NOW()
-           WHERE id = %s""",
-        (json.dumps({"prescreen": det, "archived_reason": "deterministic_prescreen"}), event_id),
-    )
-    db_conn.commit()
+    with db_conn.transaction():  # penalty + archive land together (conn is autocommit)
+        update_domain_penalty(db_conn, source_domain, 1)
+        db_conn.execute(
+            """UPDATE events
+               SET event_type = 'other_aviation_related',
+                   llm_parsed_output = %s,
+                   status = 'archived',
+                   updated_at = NOW()
+               WHERE id = %s""",
+            (json.dumps({"prescreen": det, "archived_reason": "deterministic_prescreen"}), event_id),
+        )
     logger.info(
         "Event %s prescreen-archived (score=%d, no security signal) — saved 1 LLM call",
         event_id[:8], det["score"],
@@ -569,27 +569,27 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     # The original LLM classification is preserved in llm_parsed_output for auditing
     if relevance < 30 or (event_type == "noise" and relevance < 40):
         archive_type = "other_aviation_related"  # FK-safe fallback
-        update_domain_penalty(db_conn, source_domain, 1)
-        db_conn.execute(
-            """UPDATE events
-               SET event_type = %s,
-                   llm_raw_output = %s,
-                   llm_parsed_output = %s,
-                   llm_provider = %s,
-                   llm_model = %s,
-                   status = 'archived',
-                   updated_at = NOW()
-               WHERE id = %s""",
-            (
-                archive_type,
-                json.dumps(result.get("response", {})),
-                json.dumps(parsed),
-                result.get("provider"),
-                result.get("model"),
-                event_id,
-            ),
-        )
-        db_conn.commit()
+        with db_conn.transaction():  # penalty + archive land together (conn is autocommit)
+            update_domain_penalty(db_conn, source_domain, 1)
+            db_conn.execute(
+                """UPDATE events
+                   SET event_type = %s,
+                       llm_raw_output = %s,
+                       llm_parsed_output = %s,
+                       llm_provider = %s,
+                       llm_model = %s,
+                       status = 'archived',
+                       updated_at = NOW()
+                   WHERE id = %s""",
+                (
+                    archive_type,
+                    json.dumps(result.get("response", {})),
+                    json.dumps(parsed),
+                    result.get("provider"),
+                    result.get("model"),
+                    event_id,
+                ),
+            )
         log_llm_telemetry(db_conn, result, router, success=True)
         logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
                     event_id[:8], relevance, event_type,

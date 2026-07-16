@@ -252,42 +252,44 @@ def run_pass_f(db_conn) -> dict:
     event_ids = [e["id"] for e in events]
 
     try:
-        # Save manifest telemetry first
-        db_conn.execute(
-            "INSERT INTO system_telemetry(event_type, value_json) VALUES ('archive_manifest', %s)",
-            (json.dumps({
-                "manifest_hash": manifest_hash,
-                "event_count": len(events),
-                "filename": filename,
-                "r2_uploaded": stats.get("r2_uploaded", False),
-                "telegram_message_id": stats.get("telegram_message_id"),
-                "archived_event_ids": event_ids
-            }),),
-        )
+        # Manifest + deletes must land atomically (conn is autocommit): recording
+        # the manifest without the deletes re-archives the same events next run;
+        # deleting without the manifest loses the only pointer to the archive.
+        with db_conn.transaction():
+            db_conn.execute(
+                "INSERT INTO system_telemetry(event_type, value_json) VALUES ('archive_manifest', %s)",
+                (json.dumps({
+                    "manifest_hash": manifest_hash,
+                    "event_count": len(events),
+                    "filename": filename,
+                    "r2_uploaded": stats.get("r2_uploaded", False),
+                    "telegram_message_id": stats.get("telegram_message_id"),
+                    "archived_event_ids": event_ids
+                }),),
+            )
 
-        # Clear alert_suppression rows referencing these events (FK constraint)
-        db_conn.execute(
-            "DELETE FROM alert_suppression WHERE event_id = ANY(%s)",
-            (event_ids,)
-        )
+            # Clear alert_suppression rows referencing these events (FK constraint)
+            db_conn.execute(
+                "DELETE FROM alert_suppression WHERE event_id = ANY(%s)",
+                (event_ids,)
+            )
 
-        # Purge expired suppression entries (housekeeping)
-        db_conn.execute(
-            "DELETE FROM alert_suppression WHERE expires_at < NOW()"
-        )
+            # Purge expired suppression entries (housekeeping)
+            db_conn.execute(
+                "DELETE FROM alert_suppression WHERE expires_at < NOW()"
+            )
 
-        # Then delete events
-        db_conn.execute(
-            "DELETE FROM events WHERE id = ANY(%s)",
-            (event_ids,)
-        )
+            # Then delete events
+            db_conn.execute(
+                "DELETE FROM events WHERE id = ANY(%s)",
+                (event_ids,)
+            )
 
-        # 5. DB Maintenance: Delete old telemetry
-        db_conn.execute(
-            "DELETE FROM system_telemetry WHERE timestamp < NOW() - INTERVAL '90 days'"
-        )
+            # 5. DB Maintenance: Delete old telemetry
+            db_conn.execute(
+                "DELETE FROM system_telemetry WHERE timestamp < NOW() - INTERVAL '90 days'"
+            )
 
-        db_conn.commit()
         stats["events_archived"] = len(events)
         logger.info("Pass F: Successfully archived and deleted %d events.", len(events))
 

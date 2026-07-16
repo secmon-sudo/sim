@@ -404,32 +404,32 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     model_version = router.accounts[0].model if router.accounts else "unknown-model"
 
     try:
-        report_id = db_conn.execute(
-            query_insert_report,
-            (
-                week_end,
-                week_start,
-                week_end,
-                chosen_isos,
-                deteriorating_isos,
-                watchlist,
-                json.dumps(scores_json),
-                json.dumps(llm_assessment_json),
-                html_payload,
-                model_version,
-                "v20.1",
-                config_id
-            )
-        ).fetchone()[0]
-        
-        # Link all processed events during this week to mapping table
-        for ev in events:
-            db_conn.execute(
-                "INSERT INTO report_event_mapping (report_id, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                (report_id, ev["id"])
-            )
-        
-        db_conn.commit()
+        # Report row + its event mappings land atomically (conn is autocommit).
+        with db_conn.transaction():
+            report_id = db_conn.execute(
+                query_insert_report,
+                (
+                    week_end,
+                    week_start,
+                    week_end,
+                    chosen_isos,
+                    deteriorating_isos,
+                    watchlist,
+                    json.dumps(scores_json),
+                    json.dumps(llm_assessment_json),
+                    html_payload,
+                    model_version,
+                    "v20.1",
+                    config_id
+                )
+            ).fetchone()[0]
+
+            # Link all processed events during this week to mapping table
+            for ev in events:
+                db_conn.execute(
+                    "INSERT INTO report_event_mapping (report_id, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    (report_id, ev["id"])
+                )
         logger.info("Weekly report stored successfully in database. ID: %s", report_id)
         
     except Exception as e:

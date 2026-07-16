@@ -54,6 +54,13 @@ def get_pool() -> ConnectionPool:
             check=ConnectionPool.check_connection,
             kwargs={
                 "prepare_threshold": None,  # Disable prepared statements for Supabase pooler
+                # autocommit: single statements commit immediately, so the session
+                # never sits "idle in transaction" during the pipeline's long non-DB
+                # phases (RSS fetch, LLM calls) — the window behind the 900s-reaper
+                # failures of 2026-07-13/15/16. Multi-statement writes use explicit
+                # `with conn.transaction():` blocks; legacy conn.commit() calls are
+                # harmless no-ops in this mode.
+                "autocommit": True,
                 # TCP keepalives: runner↔Supabase connections die silently mid-run
                 # (half-open TCP); without probes the client blocks in wait() until
                 # the server's 900s idle-in-transaction reaper kills the session
