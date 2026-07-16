@@ -53,28 +53,59 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 ### LLM Provider Cascade
 
 ```
-① Groq-A  gpt-oss-120b        (120B — primary)
-② Groq-A  qwen3.6-27b         (27B — secondary)
-③ Groq-B  gpt-oss-120b        (120B — high throughput)
-④ Groq-B  qwen3.6-27b         (27B — burst)
-⑤ OR-A    hermes-3-405b       (405B — emergency)
-⑥ OR-B    gpt-oss-120b:free   (120B — cross-provider)
-⑧ Groq    gpt-oss-20b         (20B — bulk fallback, 1K RPD)
+① OR-A    nemotron-3-super-120b:free  (primary — funded key, 1K RPD account-wide)
+② OR-A    gpt-oss-120b:free           (secondary — shares ①'s account quota)
+③ Groq-A  gpt-oss-120b                (smartest Groq slot)
+④ Groq-A  qwen3.6-27b                 (quality backup)
+⑤ Groq-B  gpt-oss-120b                (throughput)
+⑥ Groq-B  qwen3.6-27b                 (burst)
+⑦ OR-B    gpt-oss-120b:free           (cross-key mirror, 50 RPD unfunded)
+⑧ Gemini  3.1-flash-lite / 3-flash    (third independent provider, 500+20 RPD)
+⑨ Groq-A  gpt-oss-20b                 (last-resort; also the bulk router's model)
 ```
 
-**Total daily capacity:** ~5,400 RPD across 7 model slots.
 _(2026-06-17: Groq retired llama-3.3-70b-versatile, llama-4-scout, qwen3-32b and
-llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore.)_
+llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore.
+2026-07-09: OpenRouter key A funded → Nemotron 3 Super became primary.)_
+
+**Model capability profiles** (`src/core/model_profiles.py`): every provider/model quirk
+lives here as declarative data — whether the provider accepts
+`response_format:json_object` (OpenRouter free models 400 on it), which knob disables
+hidden reasoning (qwen: `reasoning_effort:"none"`; gpt-oss: only `low` is valid; Nemotron
+via OpenRouter needs `reasoning:{enabled:false}` and fails *silently* otherwise), and the
+per-request token ceiling (Groq 413s above its 8K TPM window). `call_llm` consumes the
+profile: it skips accounts the request can't fit **before** sending (no quota spend, no
+cooldown), and treats an HTTP 413 as the *request's* fault rather than sidelining the
+account. A request too large for every slot raises `LLMRequestTooLarge`, which callers
+handle per-item (narrator skips that storyline, Pass C skips that chunk) instead of
+aborting the stage. Adding a new model = answering the checklist at the top of
+`model_profiles.py`; each rule is pinned by `tests/test_model_profiles.py`.
 
 **Rate limiting:** The binding constraint on Groq's free tier is **TPM (8K)**, not RPM
 (30) — a classification is ~2–3K tokens, so only ~3 fit per minute. The router models a
 per-(key, model) TPM window (`TokenBucket.tpm_limit`) and charges each call's estimated
 tokens against it, so a burst can't trip provider 429s and cascade the whole pool into
 cooldown. When every slot is momentarily throttled, Pass C paces (waits for the next token
-refill and retries) instead of aborting. qwen3.6-27b is a reasoning model, so its calls set
-`reasoning_effort:"none"` — otherwise thinking consumes the whole budget and Groq rejects
-the empty JSON with `400 json_validate_failed`. Router instances that share a (key, model)
-pair (main + bulk) share one bucket to keep quota accounting truthful.
+refill and retries) instead of aborting. OpenRouter `:free` limits are account-wide, so all
+`:free` slots on one key share a single bucket; router instances that share a (key, model)
+pair (main + bulk) also share one bucket to keep quota accounting truthful.
+
+### Database Reliability
+
+The pipeline runs 20+ minutes per cycle over WAN to Supabase, which produced a family of
+production failures (Jul 2026: lock-wait hangs, idle-in-transaction reaps, silent
+connection loss). Three layers now defend against it:
+
+- **Autocommit connections** — single statements commit immediately, so the session never
+  sits `idle in transaction` through long non-DB phases (RSS fetch, LLM calls). The
+  genuinely multi-statement writes (Pass F manifest+deletes, weekly report+mappings,
+  archive+domain-penalty pairs) use explicit `with conn.transaction():` blocks.
+- **TCP keepalives + pool checks** (`supabase_client.py`) — a half-open connection is
+  detected in ~1 minute instead of hanging until the server's 900s reaper fires; the pool
+  never hands out a connection that died while idle.
+- **Server-side session timeouts** (migration `015`) — `statement_timeout=120s`,
+  `lock_timeout=30s`, `idle_in_transaction_session_timeout=900s` bound every failure mode
+  that used to burn the whole workflow timeout.
 
 ## Source Coverage
 
@@ -87,10 +118,10 @@ pair (main + bulk) share one bucket to keep quota accounting truthful.
 
 - **Pipeline:** Python 3.12, `httpx`, `tenacity`, `psycopg[binary]`, `trafilatura`
 - **Database:** Supabase PostgreSQL (with `pg_trgm` and Row Level Security policies)
-- **LLM Providers:** Groq (free tier, 2 accounts) + OpenRouter (free tier, 2 accounts)
+- **LLM Providers:** OpenRouter (free tier, 2 keys) + Groq (free tier, 2 accounts) + Google AI Studio (Gemini, free tier)
 - **Delivery:** Telegram Bot API (alert cards, flash updates, weekly HTML reports, archives)
 - **Cold Storage:** Cloudflare R2 + Telegram Bot API
-- **CI/CD:** GitHub Actions (cron every 2 hours)
+- **CI/CD:** GitHub Actions (pipeline cron every 2 hours; lint + tests + real-Postgres e2e smoke on every push/PR)
 
 ---
 
@@ -127,14 +158,16 @@ Automatically dispatches immediate **Flash Alerts** if:
 sim/
 ├── .github/workflows/osint-pipeline.yml   # Regular 2-hour pipeline
 ├── .github/workflows/weekly-forecast.yml  # Weekly strategic forecast
-├── .github/workflows/deadman.yml          # [NEW] Hourly dead-man's switch (pipeline liveness)
+├── .github/workflows/deadman.yml          # Hourly dead-man's switch (pipeline liveness)
+├── .github/workflows/ci.yml               # Lint + unit suite + real-Postgres e2e smoke
 ├── config/
 │   ├── keywords.json                      # Search queries & noise filters
 │   └── settings.json                      # Pipeline configuration
 ├── db/
-│   ├── migrations/                        # SQL migrations (001-009)
+│   ├── migrations/                        # SQL migrations (001-015)
 │   │   ├── 008_weekly_forecast.sql        # Weekly reports schema
-│   │   └── 009_rls_policies.sql           # Supabase RLS security policies
+│   │   ├── 009_rls_policies.sql           # Supabase RLS security policies
+│   │   └── 015_session_timeouts.sql       # statement/lock/idle-in-tx timeouts
 │   ├── anchors.json                       # Airport/location seed data (~80K)
 │   └── seed_anchors.py                    # Seed script
 ├── src/
@@ -142,16 +175,20 @@ sim/
 │   │   ├── alerts.py                      # 3-tier alert system (WATCH/ALERT/CRITICAL)
 │   │   ├── anchor.py                      # IATA/ICAO normalization
 │   │   ├── heartbeat.py                   # Thread-safe heartbeat worker
-│   │   ├── llm_client.py                  # Unified LLM call wrapper
+│   │   ├── llm_client.py                  # Unified LLM call wrapper + size guard
 │   │   ├── llm_router.py                  # Multi-provider failover router
+│   │   ├── model_profiles.py              # Declarative per-model quirks & limits
 │   │   ├── storyline.py                   # Bigram Jaccard storyline linking
-│   │   ├── storyline_clusterer.py         # [NEW] Centrist greedy Jaccard clustering
-│   │   ├── forecast_engine.py             # [NEW] Tension Index & trajectory math
+│   │   ├── storyline_clusterer.py         # Centrist greedy Jaccard clustering
+│   │   ├── forecast_engine.py             # Tension Index & trajectory math
 │   │   └── token_bucket.py                # Per-account rate limiter
 │   ├── pipeline/                          # Pipeline passes
 │   │   ├── orchestrator.py                # Main entry point (supports --weekly)
-│   │   ├── weekly_forecast.py             # [NEW] Weekly forecast pass coordinator
-│   │   ├── pass_a_ingest.py               # Ingestion & user-agent bypass
+│   │   ├── weekly_forecast.py             # Weekly forecast pass coordinator
+│   │   ├── pass_a_ingest.py               # Pass A orchestration + DB persistence
+│   │   ├── ingest_sources.py              # All ingest network I/O (RSS/Nitter/advisories/GDELT)
+│   │   ├── ingest_filters.py              # Pure text filters, canonicalization, dedup
+│   │   ├── ingest_queries.py              # Search-query construction
 │   │   ├── pass_b_dedup.py                # URL dedup & distributed locks
 │   │   ├── pass_c_classify.py             # LLM classification
 │   │   ├── pass_d_score.py                # Scoring + alerts + Telegram
@@ -159,13 +196,15 @@ sim/
 │   │   └── pass_f_archive.py              # R2 + Telegram cold storage
 │   └── services/                          # External integrations
 │       ├── czib_client.py                 # EASA Conflict Zone parser
-│       ├── forecast_generator.py          # [NEW] 3-Pass LLM generation coordinator
-│       ├── flash_detector.py              # [NEW] Flash update event detector
-│       ├── telegram_report_notifier.py    # [NEW] Weekly reports & HTML notifier
-│       ├── supabase_client.py             # Thread-safe connection pool
+│       ├── forecast_generator.py          # 3-Pass LLM generation coordinator
+│       ├── flash_detector.py              # Flash update event detector
+│       ├── ops_notifier.py                # Pipeline health pings (Telegram)
+│       ├── storyline_narrator.py          # Budgeted "story so far" prose (bulk router)
+│       ├── telegram_report_notifier.py    # Weekly reports & HTML notifier
+│       ├── supabase_client.py             # Autocommit pool + TCP keepalives
 │       └── telegram_notifier.py           # Alert card sender
-├── tests/                                 # pytest test suite
-│   └── test_weekly_forecast.py            # [NEW] Weekly forecast test suite
+├── tests/                                 # pytest test suite (300+ tests)
+│   └── test_pipeline_smoke.py             # Real-Postgres e2e smoke test (CI)
 ├── requirements.txt                       # Python dependencies
 └── SIM_Blueprint_V20_EN.md                # Master implementation blueprint
 ```
@@ -228,12 +267,24 @@ python -m src.pipeline.orchestrator --weekly
 
 \*At least one LLM API key is required.
 
-## Tests
+## Tests & CI
 
 ```bash
 # Run full unit tests
 python -m pytest tests/ -v
+
+# End-to-end smoke test against a real PostgreSQL (what CI runs).
+# Only network edges are stubbed (RSS, LLM, Telegram, R2); migrations, seed
+# and Pass A→F run for real. Refuses to run against non-localhost URLs.
+docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=pg postgres:16
+SIM_SMOKE_DATABASE_URL=postgresql://postgres:pg@localhost:5433/postgres \
+    python -m pytest tests/test_pipeline_smoke.py -q
 ```
+
+Every push/PR triggers the **SIM CI** workflow: ruff (F-rules) + vulture dead-code
+lint, the unit suite, then the e2e smoke test against a `postgres:16` service
+container — so DB/transaction regressions are caught before merge, not in the
+2-hourly production run.
 
 ## License
 
