@@ -310,6 +310,33 @@ if __name__ == "__main__":
                     pass
                 close_pool()
         sys.exit(0 if success else 1)
+    elif "--sitrep" in sys.argv:
+        # Daily 24h country SITREP. Optional ISO2 args after the flag
+        # (e.g. `--sitrep IR IQ`); without args, auto-selects by event volume.
+        iso_args = [
+            a.upper() for a in sys.argv[sys.argv.index("--sitrep") + 1:]
+            if len(a) == 2 and a.isalpha()
+        ]
+        logger.info("Daily SITREP execution triggered via CLI (countries=%s).",
+                    iso_args or "auto")
+        db_conn = None
+        success = False
+        try:
+            db_conn = get_connection()
+            router = build_llm_router()
+            from src.pipeline.daily_sitrep import run_daily_sitrep
+            sitrep_result = run_daily_sitrep(db_conn, router, countries=iso_args or None)
+            success = sitrep_result.get("success", False)
+        except Exception:
+            logger.exception("CLI daily SITREP run failed")
+        finally:
+            if db_conn:
+                try:
+                    put_connection(db_conn)
+                except Exception:
+                    pass
+                close_pool()
+        sys.exit(0 if success else 1)
     else:
         result = run_pipeline()
         sys.exit(0 if result.get("success") else 1)

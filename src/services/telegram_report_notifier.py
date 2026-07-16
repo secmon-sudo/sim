@@ -377,3 +377,79 @@ def send_flash_update_telegram(
         logger.error("Failed to send Flash Update message: %s", str(e))
 
     return None
+
+
+def send_sitrep_telegram(
+    country_iso: str,
+    country_name: str,
+    window_start: str,
+    window_end: str,
+    clusters: List[Dict[str, Any]],
+    report_text: str,
+    r2_url: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Dispatches a daily country SITREP:
+    1. Short summary card (sendMessage) with label counts.
+    2. Full Turkish report as a text document attachment (sendDocument).
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        logger.warning("Telegram SITREP skipped: missing configuration.")
+        return None
+
+    label_counts: Dict[str, int] = {}
+    for c in clusters:
+        lbl = c.get("verification", "?")
+        label_counts[lbl] = label_counts.get(lbl, 0) + 1
+
+    summary_text = (
+        f"🗺 <b>GÜNLÜK DURUM RAPORU (SITREP)</b>\n"
+        f"🌍 <b>Ülke:</b> {html.escape(country_name)} (<code>{country_iso}</code>)\n"
+        f"📅 <b>Dönem:</b> <code>{window_start}</code> — <code>{window_end}</code> UTC\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <b>Olay kümesi:</b> {len(clusters)}\n"
+    )
+    for lbl, n in sorted(label_counts.items(), key=lambda kv: -kv[1]):
+        summary_text += f"- {html.escape(lbl)}: {n}\n"
+
+    if r2_url:
+        summary_text += f"\n🔗 <a href='{r2_url}'>Tarayıcıda Oku (CF R2)</a>\n"
+    summary_text += "ℹ️ <i>Tam rapor ekte gönderilmiştir.</i>"
+
+    api_url_msg = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    telegram_message_id = None
+    try:
+        resp = _post_telegram(api_url_msg, {
+            "chat_id": chat_id,
+            "text": summary_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        })
+        res_data = resp.json()
+        if res_data.get("ok"):
+            telegram_message_id = str(res_data["result"]["message_id"])
+    except Exception as e:
+        logger.error("Failed to send Telegram SITREP summary: %s", str(e))
+
+    try:
+        file_buffer = io.BytesIO(report_text.encode("utf-8"))
+        date_tag = window_end[:10].replace("-", "")
+        filename = f"sitrep_{country_iso}_{date_tag}.txt"
+
+        api_url_doc = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+        resp_doc = httpx.post(
+            api_url_doc,
+            data={"chat_id": chat_id,
+                  "caption": f"SITREP {country_name} ({window_start} — {window_end} UTC)"},
+            files={"document": (filename, file_buffer, "text/plain")},
+            timeout=20.0
+        )
+        resp_doc.raise_for_status()
+        logger.info("SITREP document dispatched for %s.", country_iso)
+    except Exception as e:
+        logger.error("Failed to send Telegram SITREP document: %s", str(e))
+
+    return telegram_message_id

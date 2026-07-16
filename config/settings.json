@@ -229,5 +229,13 @@
       "https://www.gov.uk/foreign-travel-advice/mozambique.atom"
     ],
     "gdelt_enabled": false
+  },
+  "sitrep": {
+    "window_hours": 24,
+    "max_countries_per_run": 5,
+    "min_events_threshold": 3,
+    "max_clusters_in_prompt": 25,
+    "snippet_chars": 600,
+    "language": "tr"
   }
 }

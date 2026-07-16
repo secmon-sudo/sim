@@ -1,0 +1,78 @@
+name: Daily Country SITREP
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # Her gün 06:00 UTC (2 saatlik ingest ve haftalık rapor ile çakışmayacak ofset)
+  workflow_dispatch:       # GitHub UI üzerinden el ile tetikleme
+    inputs:
+      countries:
+        description: 'ISO2 ülke kodları (boşlukla ayrılmış, örn: IR IQ). Boş bırakılırsa otomatik seçim.'
+        required: false
+        default: ''
+
+concurrency:
+  group: daily-sitrep
+  cancel-in-progress: false
+
+env:
+  GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
+  GROQ_API_KEY_B:       ${{ secrets.GROQ_API_KEY_B }}
+  OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
+  OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
+  GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+  DATABASE_URL:         ${{ secrets.DATABASE_URL }}
+  TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
+  R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+  R2_PUBLIC_URL_BASE:   ${{ secrets.R2_PUBLIC_URL_BASE }}
+
+jobs:
+  sitrep_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run DB migrations
+        run: |
+          python -c "
+          import os, glob, psycopg
+          db_url = os.environ['DATABASE_URL']
+          conn = psycopg.connect(db_url, autocommit=True)
+          for sql_file in sorted(glob.glob('db/migrations/*.sql')):
+              print(f'Running {sql_file}...')
+              with open(sql_file) as f:
+                  try:
+                      conn.execute(f.read())
+                      print(f'  OK')
+                  except Exception as e:
+                      print(f'  SKIP ({e})')
+          conn.close()
+          print('Migrations complete')
+          "
+
+      - name: Run Daily SITREP Pipeline
+        run: python -m src.pipeline.orchestrator --sitrep ${{ github.event.inputs.countries }}
+
+      - name: Upload telemetry artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitrep-run-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
