@@ -866,15 +866,44 @@ def google_translate(text: str, target: str = "en") -> str:
     return text
 
 
+# Scripts that signal the text itself is not English. One class, findall'd so the
+# trigger can be ratio-based rather than any-single-character.
+_NON_LATIN_CHAR_RE = re.compile(
+    r'[\u0370-\u03FF'   # Greek
+    r'\u0400-\u04FF'    # Cyrillic (Russian, Ukrainian, ...)
+    r'\u0590-\u05FF'    # Hebrew
+    r'\u0600-\u06FF'    # Arabic / Farsi
+    r'\u0900-\u097F'    # Devanagari (Hindi)
+    r'\u0E00-\u0E7F'    # Thai
+    r'\u3040-\u30FF'    # Japanese kana
+    r'\u4E00-\u9FFF'    # CJK unified ideographs (Chinese, Japanese kanji)
+    r'\uAC00-\uD7AF]'   # Hangul (Korean)
+)
+
+# Translate only when at least this share of the LETTERS is non-Latin script.
+# Any-single-character triggering sent already-English headlines to Google
+# Translate whenever Google News appended a foreign outlet name (e.g.
+# "Turkiye marks anniversary \u2026 - \u0634\u0641\u0642 \u0646\u064A\u0648\u0632", seen every run in the logs).
+# 0.3: a long Cyrillic outlet name on a short English headline measures ~0.25
+# ("\u2026 - \u041A\u043E\u0440\u0430\u0431\u0435\u043B\u043E\u0432.\u0406\u041D\u0424\u041E"), genuinely mixed-language text ~0.5, foreign ~1.0.
+_TRANSLATE_MIN_NON_LATIN_RATIO = 0.3
+
+
 def translate_to_english_if_needed(text: str) -> str:
-    """Check if text contains Non-Latin characters (Arabic, Hebrew, Farsi, Cyrillic) and translate if so."""
+    """Translate to English when the text is substantially non-Latin script.
+
+    Ratio-gated (share of letters, not raw chars, so punctuation/digits don't
+    dilute it): a mostly-English headline with a foreign outlet suffix passes
+    through untouched, while a genuinely foreign-language headline \u2014 including
+    CJK/Greek/Thai/Devanagari, which the old 3-range check missed \u2014 is translated.
+    """
     if not text:
         return text
-    # Unicode ranges:
-    # \u0590-\u05FF: Hebrew
-    # \u0600-\u06FF: Arabic/Farsi
-    # \u0400-\u04FF: Cyrillic (Russian, etc.)
-    if re.search(r'[\u0590-\u05FF\u0600-\u06FF\u0400-\u04FF]', text):
+    non_latin = len(_NON_LATIN_CHAR_RE.findall(text))
+    if not non_latin:
+        return text
+    letters = sum(1 for ch in text if ch.isalpha())
+    if letters and non_latin / letters >= _TRANSLATE_MIN_NON_LATIN_RATIO:
         return google_translate(text, target="en")
     return text
 

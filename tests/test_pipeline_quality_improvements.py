@@ -30,6 +30,27 @@ def test_translate_to_english_if_needed_hebrew(mock_translate):
     assert res == "Attack at airport"
     mock_translate.assert_called_once_with(text, target="en")
 
+@patch("src.pipeline.ingest_sources.google_translate")
+def test_english_headline_with_foreign_outlet_suffix_not_translated(mock_translate):
+    # Google News appends the outlet name; a few Arabic/Cyrillic chars must not
+    # send an already-English headline to Google Translate (ratio gate).
+    text = "Turkiye marks 10th anniversary of failed coup at Erbil ceremony - شفق نيوز"
+    assert translate_to_english_if_needed(text) == text
+    text = "Three killed as Odesa hit by a new missile strike - Корабелов.ІНФО"
+    assert translate_to_english_if_needed(text) == text
+    mock_translate.assert_not_called()
+
+@patch("src.pipeline.ingest_sources.google_translate")
+def test_cjk_greek_thai_now_translated(mock_translate):
+    # Scripts the old 3-range check missed entirely.
+    mock_translate.return_value = "translated"
+    for text in ("北京机场发生爆炸事件造成多人伤亡",      # Chinese
+                 "Έκρηξη στο αεροδρόμιο της Αθήνας",  # Greek
+                 "เหตุระเบิดที่สนามบินกรุงเทพ",            # Thai
+                 "공항에서 폭발 사고 발생"):               # Korean
+        assert translate_to_english_if_needed(text) == "translated"
+    assert mock_translate.call_count == 4
+
 
 # 2. Test check_domain_penalty whitelist and minimum events
 def test_check_domain_penalty_whitelist():
