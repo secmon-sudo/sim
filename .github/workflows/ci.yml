@@ -1,0 +1,56 @@
+name: SIM CI
+
+# Unit suite + an end-to-end smoke run against a REAL PostgreSQL service.
+# Every Jul-2026 production failure (lock waits, idle-in-transaction reaps,
+# transaction state) was invisible to the mocked unit tests — the smoke test
+# exercises migrations, seed and Pass A→F against actual DB semantics.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: sim-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pg
+          POSTGRES_DB: simsmoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m pytest tests/ -q
+
+      - name: E2E smoke test (real Postgres)
+        env:
+          SIM_SMOKE_DATABASE_URL: postgresql://postgres:pg@localhost:5432/simsmoke
+        run: python -m pytest tests/test_pipeline_smoke.py -q -rs

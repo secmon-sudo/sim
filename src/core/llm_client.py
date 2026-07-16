@@ -270,7 +270,7 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             logger.exception("LLM %s unexpected error", acct.display_name)
 
     if not attempted:
-        if len(skip_for_size) >= len(router.accounts):
+        if router.accounts and len(skip_for_size) >= len(router.accounts):
             raise LLMRequestTooLarge(
                 f"Request (~{est_tokens} tokens) exceeds every account's size ceiling"
             )
