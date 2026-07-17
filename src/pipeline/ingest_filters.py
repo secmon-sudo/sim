@@ -220,6 +220,96 @@ def _matches_security_keywords(title: str, description: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Ingest priority scoring
+# ---------------------------------------------------------------------------
+# The per-run insert budget and per-domain caps are CONTENT-BLIND: without a
+# ranking, whichever items happen to sit at the top of a feed claim a domain's
+# slots, and a capped-out high-severity item loses to a routine one. This cheap
+# (no LLM, no network) scorer orders candidates so budget cuts fall on the
+# least valuable items. It is a triage heuristic, NOT a severity score — Pass D
+# owns real scoring; nothing downstream may read _priority.
+
+# Terms that almost always indicate a major, actionable incident. Multi-language
+# (en/tr/ar) because scoring runs BEFORE translation.
+_CRITICAL_PRIORITY_TERMS = [
+    # mass-casualty / mass-violence
+    "mass casualty", "mass shooting", "massacre", "dozens killed", "scores killed",
+    "suicide bombing", "suicide bomber", "car bomb", "truck bomb",
+    # strikes & strategic weapons
+    "airstrike", "air strike", "missile strike", "missile attack", "drone strike",
+    "ballistic missile", "cruise missile", "shot down", "intercepted",
+    # WMD / CBRN
+    "nuclear", "chemical attack", "chemical weapon", "nerve agent", "radiological",
+    "dirty bomb",
+    # state-level ruptures
+    "invasion", "coup", "assassination", "assassinated", "declaration of war",
+    "martial law", "state of emergency",
+    # critical infrastructure & transport hubs
+    "airport attack", "airport explosion", "aircraft shot down", "plane shot down",
+    "refinery", "pipeline", "power plant", "power grid", "desalination",
+    "port attack", "tanker attack", "warship",
+    # captivity
+    "hostage", "hijack",
+    # tr
+    "hava saldırısı", "füze saldırısı", "intihar saldırısı", "katliam",
+    "çok sayıda ölü", "suikast", "darbe", "işgal", "rehine", "nükleer",
+    # ar
+    "غارة جوية", "ضربة صاروخية", "تفجير انتحاري", "مجزرة", "اغتيال",
+    "انقلاب", "غزو", "رهينة", "نووي",
+]
+
+_CRITICAL_PRIORITY_PATTERN = re.compile(
+    "|".join(rf"\b{re.escape(t)}\b" for t in _CRITICAL_PRIORITY_TERMS),
+    re.IGNORECASE,
+)
+
+# "N killed/dead/wounded…" — a concrete casualty count is the strongest cheap
+# signal that an article reports a real, current incident.
+_CASUALTY_COUNT_PATTERN = re.compile(
+    r"\b(\d{1,4})\s+(?:people\s+|civilians\s+|soldiers\s+)?"
+    r"(?:killed|dead|deaths|injured|wounded|casualties|fatalities|ölü|yaralı|قتيل|قتلى|جريح)\b",
+    re.IGNORECASE,
+)
+
+_BREAKING_PATTERN = re.compile(
+    r"\b(breaking|urgent|just in|son dakika|عاجل)\b", re.IGNORECASE
+)
+
+
+def priority_score(title: str, description: str) -> int:
+    """Cheap ingest-triage priority for one candidate item. Higher = insert first.
+
+    Components (all word-boundary regex, multi-language):
+      +4 per distinct critical-term hit (capped at 3 hits)
+      +1 per security-keyword hit (capped at 5)
+      +3 if a concrete casualty count is stated (+2 more if >= 10)
+      +1 for breaking/urgent markers
+    """
+    text = f"{title} {description}"
+    score = 0
+
+    critical_hits = {m.group(0).lower() for m in _CRITICAL_PRIORITY_PATTERN.finditer(text)}
+    score += 4 * min(len(critical_hits), 3)
+
+    keyword_hits = {m.group(0).lower() for m in _SECURITY_KEYWORD_PATTERN.finditer(text)}
+    score += min(len(keyword_hits), 5)
+
+    casualty = _CASUALTY_COUNT_PATTERN.search(text)
+    if casualty:
+        score += 3
+        try:
+            if int(casualty.group(1)) >= 10:
+                score += 2
+        except ValueError:
+            pass
+
+    if _BREAKING_PATTERN.search(text):
+        score += 1
+
+    return score
+
+
+# ---------------------------------------------------------------------------
 # Domain / URL helpers
 # ---------------------------------------------------------------------------
 
@@ -306,9 +396,10 @@ def title_token_similarity(title_a: str, title_b: str) -> float:
     return _jaccard(_word_set(title_a), _word_set(title_b))
 
 
-def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, canonical_text: str) -> bool:
+def find_content_duplicate(recent_events: list[tuple[str, str]], title: str,
+                           canonical_text: str) -> int | None:
     """
-    Check if a similar article exists in the provided list of recent events.
+    Return the index of the first similar article in recent_events, else None.
 
     Three complementary signals (any one triggers a dedup):
       1. Title SequenceMatcher  — near-identical headlines (incl. source suffix).
@@ -316,22 +407,30 @@ def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, ca
          that SequenceMatcher's char-ratio misses.
       3. Content word-shingle Jaccard — same body reported by different outlets;
          replaces the old O(N*M) full-text SequenceMatcher (faster, truncation-robust).
+
+    Returning the INDEX (not a bool) lets Pass A credit the surviving event with
+    the duplicate's source as corroboration instead of discarding the signal.
     """
     title_tokens = _word_set(title)
     text_shingles = _shingles(canonical_text) if len(canonical_text) > 100 else None
 
-    for existing_title, existing_text in recent_events:
+    for idx, (existing_title, existing_text) in enumerate(recent_events):
         # Signal 1: char-ratio title similarity (primary)
         if title_similarity(title, existing_title) >= _TITLE_SIM_THRESHOLD:
-            return True
+            return idx
 
         # Signal 2: token-set title similarity (cross-source rephrasing)
         if _jaccard(title_tokens, _word_set(existing_title)) >= _TITLE_TOKEN_THRESHOLD:
-            return True
+            return idx
 
         # Signal 3: content shingle similarity for longer texts
         if text_shingles is not None and len(existing_text) > 100:
             if _jaccard(text_shingles, _shingles(existing_text)) >= _CONTENT_SHINGLE_THRESHOLD:
-                return True
-    return False
+                return idx
+    return None
+
+
+def check_content_duplicate(recent_events: list[tuple[str, str]], title: str, canonical_text: str) -> bool:
+    """Boolean wrapper around find_content_duplicate (historical API)."""
+    return find_content_duplicate(recent_events, title, canonical_text) is not None
 

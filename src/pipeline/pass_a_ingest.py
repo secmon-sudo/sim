@@ -32,8 +32,10 @@ from src.pipeline.ingest_filters import (  # noqa: F401
     check_content_duplicate,
     compute_url_hash,
     extract_domain,
+    find_content_duplicate,
     is_noise,
     normalize_title,
+    priority_score,
     title_similarity,
     title_token_similarity,
 )
@@ -65,27 +67,77 @@ _INGESTION = SETTINGS.get("ingestion", {})
 _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
 _MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
+# Per-domain overrides of the cap above (eTLD+1 → cap). For high-volume,
+# single-source rapid-relay feeds (e.g. OSINT aggregator accounts) that would
+# otherwise claim a disproportionate share of every run's insert budget.
+_PER_DOMAIN_CAPS = {
+    k.lower(): int(v) for k, v in _INGESTION.get("per_domain_caps", {}).items()
+}
 _GDELT_ENABLED = SETTINGS.get("sources", {}).get("gdelt_enabled", False)
 
 # ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
 
-def _fetch_recent_events_for_dedup(db_conn) -> list[tuple[str, str]]:
-    """Fetch recent events once to avoid O(N) database queries during ingestion."""
+def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list[tuple]]:
+    """Fetch recent events once to avoid O(N) database queries during ingestion.
+
+    Returns (texts, meta) as two INDEX-ALIGNED lists: texts feeds the similarity
+    matcher (title, canonical_text); meta carries (event_id, source_domain) so a
+    detected duplicate can be credited back to the surviving event as
+    corroboration.
+    """
     try:
         rows = db_conn.execute(
-            """SELECT source_title, canonical_text
+            """SELECT id, source_domain, source_title, canonical_text
                FROM events
                WHERE ingested_at > NOW() - (%s * INTERVAL '1 day')
                ORDER BY ingested_at DESC
                LIMIT 2000""",
             (_MAX_ARTICLE_AGE_DAYS,),
         ).fetchall()
-        return [(row[0] or "", row[1] or "") for row in rows]
+        texts = [(row[2] or "", row[3] or "") for row in rows]
+        meta = [(row[0], row[1] or "") for row in rows]
+        return texts, meta
     except Exception:
         logger.exception("Failed to fetch recent events for dedup")
-        return []
+        return [], []
+
+
+# Max corroborating sources kept per event — enough for a Çoklu Kaynak/Resmî
+# upgrade; beyond that more entries add bytes, not information.
+_MAX_CORROBORATING_SOURCES = 5
+
+
+def _record_corroboration(db_conn, event_id, event_domain: str,
+                          dup_domain: str, dup_url: str, dup_title: str) -> bool:
+    """Append a dropped duplicate's source to the surviving event's
+    corroborating_sources. Same-registrable-domain duplicates are NOT recorded —
+    an outlet republishing itself proves nothing. Idempotent per domain."""
+    from src.core.sitrep_verify import registrable_domain
+    if event_id is None or not dup_domain:
+        return False
+    if registrable_domain(dup_domain) == registrable_domain(event_domain or ""):
+        return False
+    entry = json.dumps([{"domain": dup_domain, "url": dup_url[:500],
+                         "title": (dup_title or "")[:200]}])
+    probe = json.dumps([{"domain": dup_domain}])
+    try:
+        with db_conn.transaction():
+            result = db_conn.execute(
+                """UPDATE events
+                   SET corroborating_sources = corroborating_sources || %s::jsonb
+                   WHERE id = %s
+                     AND jsonb_array_length(corroborating_sources) < %s
+                     AND NOT corroborating_sources @> %s::jsonb""",
+                (entry, event_id, _MAX_CORROBORATING_SOURCES, probe),
+            )
+            return result.rowcount > 0
+    except Exception:
+        # Pre-migration DBs lack the column — corroboration is a bonus signal,
+        # never worth failing an ingest run over.
+        logger.debug("Corroboration record failed for event %s", event_id)
+        return False
 
 
 def check_domain_penalty(db_conn, domain: str) -> float:
@@ -128,26 +180,37 @@ def check_domain_penalty(db_conn, domain: str) -> float:
 
 def _interleave_by_domain(items: list[dict]) -> list[dict]:
     """
-    Round-robin items across source domains, newest first within each domain.
+    Round-robin items across source domains, highest-priority first within each
+    domain (priority_score; pub_dt breaks ties, newest first).
 
-    A plain newest-first fill let whichever story dominated the global news
-    cycle (and got reprinted by every outlet) eat the entire per-run insert
-    budget, crowding out quieter regions. Interleaving guarantees every domain
-    that delivered items gets a first slot before any domain gets a second.
+    Two failure modes this ordering prevents:
+      - A plain newest-first fill let whichever story dominated the global news
+        cycle (and got reprinted by every outlet) eat the entire per-run insert
+        budget, crowding out quieter regions. Interleaving guarantees every
+        domain that delivered items gets a first slot before any domain gets a
+        second.
+      - Within a domain, feed order used to decide which items survived the
+        per-domain cap — so a routine post could claim a capped domain's slot
+        while a mass-casualty report behind it was dropped. Priority ordering
+        makes budget/cap cuts fall on the least valuable items instead.
     """
     _EPOCH_MIN = datetime.min.replace(tzinfo=timezone.utc)
     buckets: dict[str, list[dict]] = {}
     for item in items:
         domain = item.get("domain") or extract_domain(item.get("link", ""))
+        item["_priority"] = priority_score(item.get("title", ""), item.get("description", ""))
         buckets.setdefault(domain, []).append(item)
 
     for bucket in buckets.values():
-        bucket.sort(key=lambda x: x.get("pub_dt") or _EPOCH_MIN, reverse=True)
+        bucket.sort(
+            key=lambda x: (x["_priority"], x.get("pub_dt") or _EPOCH_MIN),
+            reverse=True,
+        )
 
-    # Domains with the freshest lead item go first within each round
+    # Domains whose lead item is most important go first within each round
     ordered = sorted(
         buckets.values(),
-        key=lambda b: b[0].get("pub_dt") or _EPOCH_MIN,
+        key=lambda b: (b[0]["_priority"], b[0].get("pub_dt") or _EPOCH_MIN),
         reverse=True,
     )
     interleaved = []
@@ -184,6 +247,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "content_duplicates_skipped": 0,
         "domain_penalized": 0,
         "domain_capped": 0,
+        "corroborations_recorded": 0,
         "events_inserted": 0,
         "full_text_fetched": 0,
     }
@@ -225,14 +289,22 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         all_items.extend(filtered_items)
         stats["queries_executed"] += 1
 
-    # Fetch from Nitter (Twitter/X) feeds — with mirror fallback & 3 retries
+    # Fetch from Nitter (Twitter/X) feeds — with mirror fallback & 3 retries.
+    # Same keyword gate as static feeds: the accounts are curated, but if one
+    # drifts off-topic its tweets shouldn't ride in ungated.
     try:
         nitter_items = fetch_nitter_feeds(stats=stats)
-        all_items.extend(nitter_items)
+        kept_nitter = [
+            it for it in nitter_items
+            if _matches_security_keywords(it.get("title", ""), it.get("description", ""))
+        ]
+        stats["noise_filtered"] += len(nitter_items) - len(kept_nitter)
+        all_items.extend(kept_nitter)
         nitter_count = len(SETTINGS.get("sources", {}).get("nitter_feeds", []))
         stats["queries_executed"] += nitter_count
         if nitter_items:
-            logger.info("Nitter: Total %d items from %d accounts", len(nitter_items), nitter_count)
+            logger.info("Nitter: Total %d items (%d kept) from %d accounts",
+                        len(nitter_items), len(kept_nitter), nitter_count)
     except Exception:
         logger.warning("Nitter fetch skipped due to errors")
 
@@ -289,13 +361,25 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     # global newest-first sort, so one loud story can't monopolize max_events.
     deduped_items = _interleave_by_domain(deduped_items)
 
-    # Fetch recent events for comparison once
-    recent_events = _fetch_recent_events_for_dedup(db_conn)
+    # Fetch recent events for comparison once (texts and id/domain meta are
+    # index-aligned; in-run inserts are prepended to both)
+    recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
 
     inserted = 0
     domain_inserts: dict[str, int] = {}
-    for item in deduped_items:
+    # Triage-quality telemetry: what priorities made it in vs. got cut. A high
+    # priority_dropped_max means the budget/caps are cutting into items the
+    # scorer considers important — the signal to revisit cap sizes.
+    inserted_priorities: list[int] = []
+    dropped_priority_max = 0
+    for item_idx, item in enumerate(deduped_items):
         if inserted >= max_events:
+            leftover = deduped_items[item_idx:]
+            if leftover:
+                dropped_priority_max = max(
+                    dropped_priority_max,
+                    max(it.get("_priority", 0) for it in leftover),
+                )
             break
 
         url = item.get("link", "")
@@ -337,8 +421,10 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
         # Per-domain insert cap — hard ceiling on how much of the run budget a
         # single outlet can claim, on top of the round-robin ordering.
-        if domain_inserts.get(domain, 0) >= _MAX_EVENTS_PER_DOMAIN:
+        domain_cap = _PER_DOMAIN_CAPS.get(domain, _MAX_EVENTS_PER_DOMAIN)
+        if domain_inserts.get(domain, 0) >= domain_cap:
             stats["domain_capped"] += 1
+            dropped_priority_max = max(dropped_priority_max, item.get("_priority", 0))
             continue
 
         # Optional: fetch full text
@@ -349,9 +435,16 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 stats["full_text_fetched"] += 1
                 canonical = canonicalize_text(f"{canonical} {full_text}")
 
-        # Content dedup: check if similar title/text already exists
-        if check_content_duplicate(recent_events, item.get("title", ""), canonical):
+        # Content dedup: a similar article already exists → don't re-insert, but
+        # credit its source to the surviving event as corroboration (the dropped
+        # duplicate IS the multi-source verification evidence).
+        dup_idx = find_content_duplicate(recent_events, item.get("title", ""), canonical)
+        if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
+            dup_event_id, dup_event_domain = recent_meta[dup_idx]
+            if _record_corroboration(db_conn, dup_event_id, dup_event_domain,
+                                     domain, url, item.get("title", "")):
+                stats["corroborations_recorded"] += 1
             continue
 
         # Get published_at date
@@ -366,24 +459,36 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                        SELECT %s, %s, %s, %s, %s, %s, 'raw', %s
                        WHERE NOT EXISTS (
                            SELECT 1 FROM events WHERE source_url_hash = %s
-                       )""",
+                       )
+                       RETURNING id""",
                     (url, url_hash, domain, item.get("title", ""),
                      raw_text, canonical, pub_dt, url_hash),
                 )
-                if result.rowcount > 0:
+                new_row = result.fetchone()
+                if new_row:
                     inserted += 1
                     stats["events_inserted"] += 1
+                    inserted_priorities.append(item.get("_priority", 0))
                     domain_inserts[domain] = domain_inserts.get(domain, 0) + 1
-                    # Inline dedup: add to recent_events so later items in this run are compared against it
+                    # Inline dedup: add to recent_events (and aligned meta) so later
+                    # items in this run are compared — and corroborated — against it
                     recent_events.insert(0, (item.get("title", ""), canonical))
+                    recent_meta.insert(0, (new_row[0], domain))
                     if len(recent_events) > 2500:
                         recent_events.pop()
+                        recent_meta.pop()
                 else:
                     stats["duplicates_skipped"] += 1
         except Exception:
             logger.exception("Insert error for URL: %s", url[:80])
             continue
 
+
+    if inserted_priorities:
+        import statistics
+        stats["priority_inserted_max"] = max(inserted_priorities)
+        stats["priority_inserted_median"] = int(statistics.median(inserted_priorities))
+    stats["priority_dropped_max"] = dropped_priority_max
 
     # Log telemetry
     try:

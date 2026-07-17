@@ -273,3 +273,76 @@ class TestHtmlRenderer:
         html_out = self._render()
         assert "<kritik>" not in html_out
         assert "&lt;kritik&gt;" in html_out
+
+
+class TestCorroborationLabeling:
+    def _members(self):
+        return [{
+            "source_domain": "almayadeen.net", "source_url": "https://almayadeen.net/a",
+            "source_title": "strike reported", "canonical_text": "strike reported",
+            "anchor_name_raw": "Basra", "event_type": "missile_strike",
+            "severity_score": 70, "time_certainty": "same_day",
+            "occurred_at_est": "2026-07-17 03:00:00",
+        }]
+
+    def test_corroborating_source_upgrades_single_to_multi(self):
+        from src.services.sitrep_generator import build_sitrep_clusters
+        members = self._members()
+        members[0]["corroborating_sources"] = [
+            {"domain": "reuters.com", "url": "https://reuters.com/x", "title": "same strike"}]
+        clusters = build_sitrep_clusters(members, [])
+        assert clusters[0]["verification"] == LABEL_MULTI
+        assert any(s["name"] == "reuters.com" for s in clusters[0]["sources"])
+
+    def test_official_corroborating_source_upgrades_to_official(self):
+        from src.services.sitrep_generator import build_sitrep_clusters
+        members = self._members()
+        members[0]["corroborating_sources"] = [
+            {"domain": "centcom.mil", "url": "https://centcom.mil/x", "title": "statement"}]
+        clusters = build_sitrep_clusters(members, [])
+        assert clusters[0]["verification"] == LABEL_OFFICIAL
+
+    def test_no_corroboration_stays_single(self):
+        from src.services.sitrep_generator import build_sitrep_clusters
+        clusters = build_sitrep_clusters(self._members(), [])
+        assert clusters[0]["verification"] == LABEL_SINGLE
+
+
+class TestSpilloverAliases:
+    def test_us_search_covers_common_forms(self):
+        from src.services.sitrep_generator import _country_mention_terms
+        terms = _country_mention_terms("US", "United States")
+        assert "U.S." in terms and "American forces" in terms
+        assert "United States" in terms
+
+    def test_no_bare_short_tokens(self):
+        # %US% / %IR% substring-match everything — 1-2 char forms must never be
+        # search terms. 3-char acronyms (IDF, UAE) are allowed: within the
+        # security-filtered events table their substring collision rate is ~0.
+        from src.services.sitrep_generator import _COUNTRY_ALIASES
+        for aliases in _COUNTRY_ALIASES.values():
+            assert all(len(a) >= 3 for a in aliases), aliases
+
+    def test_unknown_country_falls_back_to_display_name(self):
+        from src.services.sitrep_generator import _country_mention_terms
+        assert _country_mention_terms("XX", "Wakanda") == ["Wakanda"]
+
+    def test_spillover_query_binds_all_aliases(self):
+        from datetime import datetime, timezone
+        from src.services.sitrep_generator import fetch_spillover_events
+
+        captured = {}
+        class FakeConn:
+            def execute(self, sql, params):
+                captured["sql"], captured["params"] = sql, params
+                class R:
+                    def fetchall(self): return []
+                return R()
+
+        t0 = datetime(2026, 7, 16, tzinfo=timezone.utc)
+        t1 = datetime(2026, 7, 17, tzinfo=timezone.utc)
+        fetch_spillover_events(FakeConn(), "IR", "Iran", t0, t1)
+        assert "%Tehran%" in captured["params"]
+        assert "%IRGC%" in captured["params"]
+        # placeholder count matches parameter count (2 per term + 3 fixed)
+        assert captured["sql"].count("%s") == len(captured["params"])

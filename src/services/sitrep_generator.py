@@ -36,6 +36,9 @@ MIN_EVENTS_THRESHOLD = int(SITREP_CFG.get("min_events_threshold", 3))
 MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 25))
 SNIPPET_CHARS = int(SITREP_CFG.get("snippet_chars", 600))
 MAX_WEB_ENRICH_CLUSTERS = int(SITREP_CFG.get("max_web_enrich_clusters", 8))
+# A single event at/above this severity (0-100, same scale as alert.severity_min)
+# qualifies its country for a SITREP even below the volume threshold.
+HIGH_SEVERITY_OVERRIDE = int(SITREP_CFG.get("high_severity_override", 80))
 
 # event_type codes treated as strategic/political rather than field events
 STRATEGIC_EVENT_TYPES = {
@@ -52,7 +55,7 @@ _EVENT_COLUMNS = [
     "id", "source_title", "source_url", "source_domain", "event_type", "sub_type",
     "occurred_at_est", "published_at", "time_certainty", "anchor_name_raw",
     "anchor_name_norm", "country_iso", "severity_score", "system_confidence",
-    "storyline_id", "storyline_hint", "canonical_text",
+    "storyline_id", "storyline_hint", "canonical_text", "corroborating_sources",
 ]
 
 _EVENTS_SELECT = f"""
@@ -79,21 +82,67 @@ def fetch_sitrep_events(db_conn, country_iso: str,
     return _rows_to_dicts(rows)
 
 
+# Mention aliases per ISO2 for the spillover search — a bare full-name ILIKE
+# ("United States") misses the forms wire copy actually uses ("U.S. forces",
+# "American base", demonyms, capitals-as-metonyms). Bare 1-3 letter forms ("US",
+# "IR") are deliberately absent: %US% substring-matches everything.
+_COUNTRY_ALIASES: Dict[str, List[str]] = {
+    "US": ["United States", "U.S.", "American forces", "America"],
+    "IR": ["Iran", "Iranian", "Tehran", "IRGC"],
+    "IL": ["Israel", "Israeli", "IDF", "Tel Aviv"],
+    "RU": ["Russia", "Russian", "Moscow", "Kremlin"],
+    "UA": ["Ukraine", "Ukrainian", "Kyiv"],
+    "IQ": ["Iraq", "Iraqi", "Baghdad", "Erbil"],
+    "SY": ["Syria", "Syrian", "Damascus"],
+    "LB": ["Lebanon", "Lebanese", "Beirut", "Hezbollah"],
+    "YE": ["Yemen", "Yemeni", "Houthi", "Sanaa"],
+    "SA": ["Saudi Arabia", "Saudi", "Riyadh"],
+    "KW": ["Kuwait", "Kuwaiti"],
+    "QA": ["Qatar", "Doha"],
+    "AE": ["United Arab Emirates", "UAE", "Emirati", "Abu Dhabi", "Dubai"],
+    "BH": ["Bahrain", "Manama"],
+    "OM": ["Oman", "Muscat"],
+    "JO": ["Jordan", "Jordanian", "Amman"],
+    "EG": ["Egypt", "Egyptian", "Cairo", "Sinai"],
+    "TR": ["Turkey", "Türkiye", "Turkish", "Ankara"],
+    "PK": ["Pakistan", "Pakistani", "Islamabad", "Balochistan"],
+    "AF": ["Afghanistan", "Afghan", "Kabul"],
+    "SD": ["Sudan", "Sudanese", "Khartoum"],
+    "CN": ["China", "Chinese", "Beijing"],
+    "TW": ["Taiwan", "Taipei"],
+}
+
+
+def _country_mention_terms(country_iso: str, country_name: str) -> List[str]:
+    """ILIKE search terms for one country: aliases + the DB display name."""
+    terms = list(_COUNTRY_ALIASES.get(country_iso.upper(), []))
+    if country_name and country_name.lower() not in {t.lower() for t in terms}:
+        terms.insert(0, country_name)
+    return terms[:8]
+
+
 def fetch_spillover_events(db_conn, country_iso: str, country_name: str,
                            window_start: datetime, window_end: datetime) -> List[Dict[str, Any]]:
     """
     Events attributed to OTHER countries whose text mentions this country —
-    regional spillover (e.g. retaliation strikes on neighbors).
+    regional spillover (e.g. retaliation strikes on neighbors). Matches any
+    known alias/demonym/capital, not just the full display name.
     """
     if not country_name or country_name == country_iso.upper():
         return []
+    terms = _country_mention_terms(country_iso, country_name)
+    if not terms:
+        return []
+    mention_sql = " OR ".join(
+        "source_title ILIKE %s OR canonical_text ILIKE %s" for _ in terms
+    )
+    mention_params = [p for t in terms for p in (f"%{t}%", f"%{t}%")]
     rows = db_conn.execute(
         _EVENTS_SELECT
         + " AND country_iso IS DISTINCT FROM %s"
-        + " AND (source_title ILIKE %s OR canonical_text ILIKE %s)"
+        + f" AND ({mention_sql})"
         + " LIMIT 40",
-        (window_start, window_end, country_iso.upper(),
-         f"%{country_name}%", f"%{country_name}%"),
+        (window_start, window_end, country_iso.upper(), *mention_params),
     ).fetchall()
     return _rows_to_dicts(rows)
 
@@ -149,21 +198,44 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
         )
         rep = members[0]
         snippet = (rep.get("canonical_text") or rep.get("source_title") or "")[:SNIPPET_CHARS]
+
+        # Ingest-time duplicates were dropped but their sources were credited to
+        # the surviving event (Pass A corroborating_sources) — they count toward
+        # the verification label and appear as sources, exactly as if the
+        # duplicate article had been inserted.
+        corroborating = []
+        seen_corrob_domains = set()
+        for e in members:
+            for s in (e.get("corroborating_sources") or []):
+                dom = registrable_domain(s.get("domain") or "")
+                if dom and dom not in seen_corrob_domains:
+                    seen_corrob_domains.add(dom)
+                    corroborating.append(s)
+
+        sources = [
+            {
+                "name": registrable_domain(e.get("source_domain") or e.get("source_url") or "") or "bilinmiyor",
+                "url": e.get("source_url"),
+                "title": (e.get("source_title") or "")[:240],
+            }
+            for e in members[:3]
+        ]
+        member_domains = {s["name"] for s in sources}
+        for s in corroborating:
+            dom = registrable_domain(s.get("domain") or "")
+            if dom not in member_domains and len(sources) < 5:
+                sources.append({"name": dom, "url": s.get("url"),
+                                "title": (s.get("title") or "")[:240]})
+
+        label_members = members + [{"source_domain": s.get("domain")} for s in corroborating]
         clusters.append({
             "location": (rep.get("anchor_name_raw") or "Ülke Geneli").strip() or "Ülke Geneli",
             "event_type": rep.get("event_type") or "security_incident",
             "date": _event_date_label(rep),
-            "verification": label_cluster(members, penalized_domains),
+            "verification": label_cluster(label_members, penalized_domains),
             "severity": max((e.get("severity_score") or 0) for e in members),
             "snippet": snippet,
-            "sources": [
-                {
-                    "name": registrable_domain(e.get("source_domain") or e.get("source_url") or "") or "bilinmiyor",
-                    "url": e.get("source_url"),
-                    "title": (e.get("source_title") or "")[:240],
-                }
-                for e in members[:3]
-            ],
+            "sources": sources,
         })
 
     clusters.sort(key=lambda c: -c["severity"])
@@ -292,12 +364,18 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
 
 def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetime) -> List[str]:
     """
-    Auto-target countries for the daily run: highest scored-event volume in the
-    window, above the configured threshold, capped at max_countries_per_run.
+    Auto-target countries for the daily run.
+
+    Volume alone was severity-blind: a country with 2 events could never get a
+    SITREP even if one of them was a mass-casualty strike, while 40 routine
+    events guaranteed a slot. Selection now admits a country EITHER by volume
+    (>= min_events_threshold) OR by a single high-severity event
+    (>= high_severity_override, 0-100 scale), and severity-qualified countries
+    are ranked ahead so volume can't squeeze them out of the per-run cap.
     """
     rows = db_conn.execute(
         """
-        SELECT country_iso, COUNT(*) AS n
+        SELECT country_iso, COUNT(*) AS n, MAX(severity_score) AS max_sev
         FROM events
         WHERE severity_score IS NOT NULL
           AND status IN ('scored', 'reconciled', 'archived')
@@ -305,10 +383,11 @@ def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetim
           AND COALESCE(occurred_at_est, published_at, ingested_at) < %s
           AND country_iso IS NOT NULL
         GROUP BY country_iso
-        HAVING COUNT(*) >= %s
-        ORDER BY n DESC
+        HAVING COUNT(*) >= %s OR MAX(severity_score) >= %s
+        ORDER BY (MAX(severity_score) >= %s) DESC, n DESC
         LIMIT %s
         """,
-        (window_start, window_end, MIN_EVENTS_THRESHOLD, MAX_COUNTRIES_PER_RUN),
+        (window_start, window_end, MIN_EVENTS_THRESHOLD,
+         HIGH_SEVERITY_OVERRIDE, HIGH_SEVERITY_OVERRIDE, MAX_COUNTRIES_PER_RUN),
     ).fetchall()
     return [r[0].strip().upper() for r in rows if r[0]]
