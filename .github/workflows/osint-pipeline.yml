@@ -2,8 +2,15 @@ name: SIM OSINT Pipeline
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours
-  workflow_dispatch:       # Manual trigger
+    - cron: '0 */2 * * *'  # Every 2 hours (unreliable — cron-job.org dispatch is the backstop;
+                           # back-to-back double-triggers are absorbed by the orchestrator's
+                           # 90-min run-spacing guard, see MIN_RUN_SPACING_MINUTES)
+  workflow_dispatch:       # Manual / cron-job.org trigger
+    inputs:
+      force:
+        description: "Spacing guard'ı atla (son koşu yakın olsa bile zorla çalıştır)"
+        type: boolean
+        default: false
 
 concurrency:
   group: sim-pipeline
@@ -25,6 +32,7 @@ env:
   R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
   SIM_MATURATION_WINDOW_HOURS: 0  # Skip maturation wait in CI — classify immediately
+  PIPELINE_FORCE_RUN: ${{ inputs.force && '1' || '0' }}
 
 jobs:
   pipeline:

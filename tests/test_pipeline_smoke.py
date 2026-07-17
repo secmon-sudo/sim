@@ -178,3 +178,4 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
             "SELECT count(*) FROM events WHERE classification_lock = TRUE"
         ).fetchone()[0]
         assert locked == 0
+

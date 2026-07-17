@@ -8,6 +8,7 @@ Designed to run as a GitHub Actions job every 30 minutes.
 
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -49,6 +50,32 @@ _file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
 logging.getLogger().addHandler(_file_handler)
 
 logger = logging.getLogger("sim.orchestrator")
+
+# Double-trigger guard: the pipeline is fired by BOTH the GitHub `schedule` cron
+# (unreliable, but often works) and cron-job.org via workflow_dispatch (the
+# reliable backstop). When both fire, runs land back-to-back and burn LLM quota
+# on a near-empty ingest window. A new run exits early if the last SUCCESSFUL
+# run is fresher than this spacing; a failed last run never blocks (the second
+# trigger then acts as a free retry). PIPELINE_FORCE_RUN=1 bypasses the guard.
+MIN_RUN_SPACING_MINUTES = 90
+
+
+def _last_successful_run_age_minutes(db_conn) -> float | None:
+    """Minutes since the newest successful pipeline_run telemetry row, or None."""
+    try:
+        row = db_conn.execute(
+            """SELECT EXTRACT(EPOCH FROM (NOW() - timestamp)) / 60.0
+               FROM system_telemetry
+               WHERE event_type = 'pipeline_run'
+                 AND value_json ->> 'success' = 'true'
+               ORDER BY timestamp DESC
+               LIMIT 1"""
+        ).fetchone()
+        return float(row[0]) if row else None
+    except Exception:
+        # Guard must never block a run on a telemetry hiccup
+        logger.exception("Run-spacing check failed; proceeding with the run")
+        return None
 
 
 def _log_geo_distribution(db_conn, run_started_at) -> dict:
@@ -114,6 +141,21 @@ def run_pipeline():
     try:
         # Initialize
         db_conn = get_connection()
+
+        # Double-trigger guard (see MIN_RUN_SPACING_MINUTES above)
+        if os.environ.get("PIPELINE_FORCE_RUN") != "1":
+            age_min = _last_successful_run_age_minutes(db_conn)
+            if age_min is not None and age_min < MIN_RUN_SPACING_MINUTES:
+                logger.info(
+                    "Skipping run %s: last successful run was %.0f min ago "
+                    "(< %d min spacing) — duplicate trigger absorbed",
+                    run_id, age_min, MIN_RUN_SPACING_MINUTES,
+                )
+                results["success"] = True
+                results["skipped"] = True
+                results["skip_reason"] = f"last successful run {age_min:.0f} min ago"
+                return results
+
         router = build_llm_router()
 
         logger.info("LLM Router: %d accounts, %d RPD total quota",
@@ -205,12 +247,16 @@ def run_pipeline():
         except Exception:
             logger.exception("Failed to write telemetry JSON to logs/")
 
-        # Log pipeline run telemetry to database
+        # Log pipeline run telemetry to database. Skipped (double-trigger) runs
+        # get their OWN event type: a 'pipeline_run' row for a skip would both
+        # keep refreshing the spacing guard forever and fool the dead-man check
+        # into seeing a healthy run that never actually ingested anything.
+        run_event_type = "pipeline_run_skipped" if results.get("skipped") else "pipeline_run"
         if db_conn:
             try:
                 db_conn.execute(
-                    "INSERT INTO system_telemetry(event_type, value_json) VALUES ('pipeline_run', %s)",
-                    (json.dumps(results, default=str),),
+                    "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",
+                    (run_event_type, json.dumps(results, default=str)),
                 )
                 db_conn.commit()
             except Exception:
