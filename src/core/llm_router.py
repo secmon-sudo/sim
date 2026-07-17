@@ -305,12 +305,14 @@ def build_llm_router() -> LLMRouter:
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
             bucket=openrouter_a_free_bucket,
         ),
-        # ② OpenRouter-A Secondary — gpt-oss-120b: prompt'larımızın Groq'ta
+        # ② OpenRouter-A Secondary — gpt-oss ailesi: prompt'larımızın Groq'ta
         # kanıtlandığı model ailesi; Nemotron endpoint'i tökezlerse sıfır uyum
         # maliyetiyle devralır. ① ile AYNI hesap kotasını (bucket) paylaşır.
+        # NOT: gpt-oss-120b:free 2026-07-17'de OpenRouter'dan kaldırıldı (HTTP
+        # 404) — free katmanda ailenin kalan tek üyesi 20b.
         LLMAccount(
             provider="openrouter", account_id="A",
-            model="openai/gpt-oss-120b:free",
+            model="openai/gpt-oss-20b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
             bucket=openrouter_a_free_bucket,
@@ -349,10 +351,11 @@ def build_llm_router() -> LLMRouter:
         ),
         # ⑦ OpenRouter-B Mirror — cross-key yedek. Hesap fonsuz → 50 istek/gün.
         # (Eski Hermes-3-405B slotu kaldırıldı: key A'nın kotası artık hesap
-        # genelinde paylaşıldığından üçüncü bir key-A free slotu kota eklemiyordu.)
+        # genelinde paylaşıldığından üçüncü bir key-A free slotu kota eklemiyordu.
+        # 120b:free'nin kaldırılmasıyla (2026-07-17) 20b:free'ye düşürüldü.)
         LLMAccount(
             provider="openrouter", account_id="B",
-            model="openai/gpt-oss-120b:free",
+            model="openai/gpt-oss-20b:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_B", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_UNFUNDED,
             bucket=TokenBucket(

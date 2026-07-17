@@ -35,13 +35,13 @@ _GOOD = {"choices": [{"message": {"content": '{"ok": 1}'}, "finish_reason": "sto
 def test_call_llm_rotates_on_empty_200():
     router = LLMRouter([
         _acct("nvidia/nemotron-3-super-120b-a12b:free"),
-        _acct("openai/gpt-oss-120b:free"),
+        _acct("openai/gpt-oss-20b:free"),
     ])
     empty = _resp({"choices": [{"message": {"content": ""}, "finish_reason": None}]})
     with patch.object(llm_client, "_send_request", side_effect=[empty, _resp(_GOOD)]):
         result = llm_client.call_llm(router, "prompt")
     assert result["content"] == '{"ok": 1}'
-    assert result["model"] == "openai/gpt-oss-120b:free"
+    assert result["model"] == "openai/gpt-oss-20b:free"
     # The flaky slot must be sidelined so it isn't re-picked immediately.
     assert router.accounts[0].status == ProviderStatus.RATE_LIMITED
 
@@ -49,13 +49,13 @@ def test_call_llm_rotates_on_empty_200():
 def test_call_llm_rotates_on_error_body_200():
     router = LLMRouter([
         _acct("nvidia/nemotron-3-super-120b-a12b:free"),
-        _acct("openai/gpt-oss-120b:free"),
+        _acct("openai/gpt-oss-20b:free"),
     ])
     err = _resp({"error": {"code": 502, "message": "upstream failure"}, "choices": []})
     with patch.object(llm_client, "_send_request", side_effect=[err, _resp(_GOOD)]):
         result = llm_client.call_llm(router, "prompt")
     assert result["content"] == '{"ok": 1}'
-    assert result["model"] == "openai/gpt-oss-120b:free"
+    assert result["model"] == "openai/gpt-oss-20b:free"
 
 
 def test_call_llm_all_empty_raises_runtime_error():
@@ -102,11 +102,11 @@ def test_oversized_request_skips_groq_without_sending_or_cooldown():
 def test_oversized_request_falls_through_to_unlimited_provider():
     router = LLMRouter([
         _acct("openai/gpt-oss-20b", provider="groq"),
-        _acct("openai/gpt-oss-120b:free", provider="openrouter"),
+        _acct("openai/gpt-oss-20b:free", provider="openrouter"),
     ])
     with patch.object(llm_client, "_send_request", return_value=_resp(_GOOD)) as send:
         result = llm_client.call_llm(router, _OVERSIZED)
-    assert result["model"] == "openai/gpt-oss-120b:free"
+    assert result["model"] == "openai/gpt-oss-20b:free"
     assert send.call_count == 1  # Groq slot never attempted
 
 

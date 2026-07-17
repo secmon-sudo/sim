@@ -22,7 +22,7 @@ class TestJsonMode:
 
     def test_openrouter_free_models_do_not(self):
         # OpenRouter free models 400 on response_format (2026-07-08).
-        assert not get_profile("openrouter", "openai/gpt-oss-120b:free").supports_json_mode
+        assert not get_profile("openrouter", "openai/gpt-oss-20b:free").supports_json_mode
         assert not get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free").supports_json_mode
 
 
@@ -34,7 +34,7 @@ class TestReasoningGate:
         # Groq 400s on reasoning_effort="none" for gpt-oss (2026-07-10).
         for provider, model in [("groq", "openai/gpt-oss-120b"),
                                 ("groq", "openai/gpt-oss-20b"),
-                                ("openrouter", "openai/gpt-oss-120b:free")]:
+                                ("openrouter", "openai/gpt-oss-20b:free")]:
             assert get_profile(provider, model).payload_extras == {"reasoning_effort": "low"}
 
     def test_nemotron_on_openrouter_needs_full_toggle(self):
@@ -49,7 +49,7 @@ class TestRequestSizeCeiling:
         assert get_profile("groq", "openai/gpt-oss-20b").max_request_tokens == GROQ_MAX_REQUEST_TOKENS
 
     def test_openrouter_and_gemini_have_no_ceiling(self):
-        assert get_profile("openrouter", "openai/gpt-oss-120b:free").max_request_tokens is None
+        assert get_profile("openrouter", "openai/gpt-oss-20b:free").max_request_tokens is None
         assert get_profile("gemini", "gemini-3.1-flash-lite").max_request_tokens is None
 
     def test_cerebras_ceiling_and_reasoning_gate(self):
