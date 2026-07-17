@@ -402,6 +402,50 @@ def build_llm_router() -> LLMRouter:
     return LLMRouter(_share_buckets(active))
 
 
+def build_quality_router() -> LLMRouter:
+    """Router for LOW-VOLUME, quality-sensitive prose/judgment work: the SITREP
+    narrator, storyline narratives, and the weekly forecast — every text a human
+    actually reads. Deliberately NOT used for Pass A–E bulk scoring: these slots'
+    rate limits can't carry bulk volume, and swapping bulk models would shift the
+    severity-score calibration the alert thresholds are tuned to.
+
+    Cascade: Mistral large (best Turkish of the free options) → Cerebras
+    gpt-oss-120b (fast, 1M tokens/day) → the full main cascade as fallback, so a
+    missing key or provider outage degrades to exactly the pre-2026-07-17 behavior.
+
+    Limits read off the providers' dashboards (2026-07-17):
+      - Mistral free tier: per-model rate limits only — mistral-large-2512 at
+        250K TPM / 0.07 RPS (~4 RPM). No daily request cap shown; rpd is set to a
+        generous bound just to keep the TokenBucket day-accounting meaningful.
+      - Cerebras free tier: 5 requests/min, 2400/day; 30K tokens/min, 1M/day.
+        The 30K TPM window also acts as the per-request ceiling (model_profiles).
+    """
+    quality_slots = [
+        LLMAccount(
+            provider="mistral", account_id="A",
+            model="mistral-large-2512",
+            api_key=os.environ.get("MISTRAL_API_KEY", ""),
+            rpm=4, rpd=2000,
+            bucket=TokenBucket(rate_per_minute=4, daily_limit=2000, burst=2,
+                               tpm_limit=250_000),
+        ),
+        LLMAccount(
+            provider="cerebras", account_id="A",
+            model="gpt-oss-120b",
+            api_key=os.environ.get("CEREBRAS_API_KEY", ""),
+            rpm=5, rpd=2400,
+            bucket=TokenBucket(rate_per_minute=5, daily_limit=2400, burst=2,
+                               tpm_limit=30_000),
+        ),
+    ]
+    active = [s for s in quality_slots if s.api_key]
+    if not active:
+        logger.warning("Quality router: no MISTRAL_API_KEY/CEREBRAS_API_KEY set, "
+                       "falling back to full router")
+        return build_llm_router()
+    return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
+
+
 def build_bulk_router() -> LLMRouter:
     """Router for low-stakes, high-volume work (e.g. storyline narrative prose).
 

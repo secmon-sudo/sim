@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-from src.core.llm_router import build_llm_router
+from src.core.llm_router import build_llm_router, build_quality_router
 from src.pipeline.pass_a_ingest import run_pass_a
 from src.pipeline.pass_b_dedup import run_pass_b
 from src.pipeline.pass_c_classify import run_pass_c
@@ -167,17 +167,16 @@ def run_pipeline():
         except Exception:
             logger.exception("Storyline closure sweep failed, continuing")
 
-        # Storyline narratives ("story so far") — budgeted, bulk-router, cache-aware.
-        # Isolated failure must never break the pipeline.
+        # Storyline narratives ("story so far") — budgeted, quality-router (user-facing
+        # prose), cache-aware. Isolated failure must never break the pipeline.
         try:
-            from src.core.llm_router import build_bulk_router
             from src.services.storyline_narrator import (
                 NARRATIVE_ENABLED,
                 run_storyline_narratives,
             )
             if NARRATIVE_ENABLED:
                 logger.info("--- STORYLINE NARRATIVES ---")
-                results["narratives"] = run_storyline_narratives(db_conn, build_bulk_router())
+                results["narratives"] = run_storyline_narratives(db_conn, build_quality_router())
         except Exception:
             logger.exception("Storyline narration failed, continuing")
 
@@ -296,7 +295,7 @@ if __name__ == "__main__":
         success = False
         try:
             db_conn = get_connection()
-            router = build_llm_router()
+            router = build_quality_router()
             from src.pipeline.weekly_forecast import run_weekly_forecast
             weekly_result = run_weekly_forecast(db_conn, router)
             success = weekly_result.get("success", False)
@@ -323,7 +322,7 @@ if __name__ == "__main__":
         success = False
         try:
             db_conn = get_connection()
-            router = build_llm_router()
+            router = build_quality_router()
             from src.pipeline.daily_sitrep import run_daily_sitrep
             sitrep_result = run_daily_sitrep(db_conn, router, countries=iso_args or None)
             success = sitrep_result.get("success", False)

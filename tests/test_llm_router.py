@@ -12,6 +12,7 @@ from src.core.llm_router import (
     ProviderStatus,
     build_bulk_router,
     build_llm_router,
+    build_quality_router,
     reset_bucket_registry,
 )
 from src.core.token_bucket import TokenBucket
@@ -205,4 +206,44 @@ class TestSharedBuckets:
         main_120b_a = bucket_for(main, "openai/gpt-oss-120b", "keyA")
         main_120b_b = bucket_for(main, "openai/gpt-oss-120b", "keyB")
         assert main_120b_a is not main_120b_b
+        reset_bucket_registry()
+
+
+class TestQualityRouter:
+    def _clear_env(self, monkeypatch):
+        for var in ("MISTRAL_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY_A",
+                    "OPENROUTER_API_KEY_B", "GEMINI_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("GROQ_API_KEY_A", "keyA")
+        monkeypatch.setenv("GROQ_API_KEY_B", "keyB")
+
+    def test_cascade_order_with_both_keys(self, monkeypatch):
+        reset_bucket_registry()
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("MISTRAL_API_KEY", "mk")
+        monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
+        router = build_quality_router()
+        # quality slots lead the cascade, full main cascade follows as fallback
+        assert router.accounts[0].provider == "mistral"
+        assert router.accounts[0].model == "mistral-large-2512"
+        assert router.accounts[1].provider == "cerebras"
+        assert router.accounts[1].model == "gpt-oss-120b"
+        assert any(a.provider == "groq" for a in router.accounts[2:])
+        reset_bucket_registry()
+
+    def test_falls_back_to_main_router_without_keys(self, monkeypatch):
+        reset_bucket_registry()
+        self._clear_env(monkeypatch)
+        router = build_quality_router()
+        assert all(a.provider not in ("mistral", "cerebras") for a in router.accounts)
+        assert any(a.provider == "groq" for a in router.accounts)
+        reset_bucket_registry()
+
+    def test_single_key_still_prepends(self, monkeypatch):
+        reset_bucket_registry()
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
+        router = build_quality_router()
+        assert router.accounts[0].provider == "cerebras"
+        assert all(a.provider != "mistral" for a in router.accounts)
         reset_bucket_registry()

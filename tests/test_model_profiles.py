@@ -4,13 +4,21 @@ Each assertion pins a rule learned from a production incident (see the
 checklist in src/core/model_profiles.py). If a profile changes, the matching
 incident class reopens — these tests are the regression fence.
 """
-from src.core.model_profiles import GROQ_MAX_REQUEST_TOKENS, get_profile
+from src.core.model_profiles import (
+    CEREBRAS_MAX_REQUEST_TOKENS,
+    GROQ_MAX_REQUEST_TOKENS,
+    get_profile,
+)
 
 
 class TestJsonMode:
     def test_groq_and_gemini_support_json_mode(self):
         assert get_profile("groq", "openai/gpt-oss-120b").supports_json_mode
         assert get_profile("gemini", "gemini-3.1-flash-lite").supports_json_mode
+
+    def test_quality_tier_providers_support_json_mode(self):
+        assert get_profile("mistral", "mistral-large-2512").supports_json_mode
+        assert get_profile("cerebras", "gpt-oss-120b").supports_json_mode
 
     def test_openrouter_free_models_do_not(self):
         # OpenRouter free models 400 on response_format (2026-07-08).
@@ -43,3 +51,14 @@ class TestRequestSizeCeiling:
     def test_openrouter_and_gemini_have_no_ceiling(self):
         assert get_profile("openrouter", "openai/gpt-oss-120b:free").max_request_tokens is None
         assert get_profile("gemini", "gemini-3.1-flash-lite").max_request_tokens is None
+
+    def test_cerebras_ceiling_and_reasoning_gate(self):
+        # Cerebras 30K tokens/min window doubles as the per-request ceiling; its
+        # gpt-oss slot takes the same reasoning_effort knob as Groq's.
+        profile = get_profile("cerebras", "gpt-oss-120b")
+        assert profile.max_request_tokens == CEREBRAS_MAX_REQUEST_TOKENS
+        assert profile.payload_extras == {"reasoning_effort": "low"}
+
+    def test_mistral_large_is_plain_model(self):
+        assert get_profile("mistral", "mistral-large-2512").payload_extras == {}
+        assert get_profile("mistral", "mistral-large-2512").max_request_tokens is None

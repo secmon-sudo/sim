@@ -24,6 +24,9 @@ PROVIDER_ENDPOINTS = {
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     # Google AI Studio's OpenAI-compatibility layer — same chat/completions shape.
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    # Quality-tier providers (2026-07-17): both expose OpenAI-compatible chat/completions.
+    "mistral": "https://api.mistral.ai/v1/chat/completions",
+    "cerebras": "https://api.cerebras.ai/v1/chat/completions",
 }
 
 

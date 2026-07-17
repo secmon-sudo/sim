@@ -23,6 +23,9 @@ from dataclasses import dataclass, field
 
 # Groq's free-tier TPM window doubles as a hard per-request ceiling (HTTP 413).
 GROQ_MAX_REQUEST_TOKENS = 8000
+# Cerebras free tier caps tokens at 30K/minute — a single request above that can
+# never fit its window, so treat it as the per-request ceiling too.
+CEREBRAS_MAX_REQUEST_TOKENS = 30000
 
 
 @dataclass(frozen=True)
@@ -48,8 +51,19 @@ def get_profile(provider: str, model: str) -> ModelProfile:
     else:
         extras = {}
 
+    if provider == "groq":
+        max_request = GROQ_MAX_REQUEST_TOKENS
+    elif provider == "cerebras":
+        max_request = CEREBRAS_MAX_REQUEST_TOKENS
+    else:
+        max_request = None
+
+    # mistral-large is a plain (non-reasoning) model and Mistral's API accepts
+    # response_format json_object. Cerebras serves gpt-oss with the same
+    # reasoning_effort knob as Groq and supports json_object (verify on first
+    # prod run per the checklist — a 400 would sideline the slot, not break it).
     return ModelProfile(
-        supports_json_mode=provider in ("groq", "gemini"),
+        supports_json_mode=provider in ("groq", "gemini", "mistral", "cerebras"),
         payload_extras=extras,
-        max_request_tokens=GROQ_MAX_REQUEST_TOKENS if provider == "groq" else None,
+        max_request_tokens=max_request,
     )
