@@ -2,7 +2,9 @@ name: Daily Country SITREP
 
 on:
   schedule:
-    - cron: '0 6 * * *'    # Her gün 06:00 UTC (2 saatlik ingest ve haftalık rapor ile çakışmayacak ofset)
+    - cron: '30 7 * * *'   # Her gün 07:30 UTC — Gemini RPD kotası 07:00 UTC'de (Pasifik gece
+                           # yarısı) sıfırlanır; 06:00'daki eski saat her gün tükenmiş kotayla
+                           # koşuyordu. 07:30, taze kota + ingest/haftalık rapor çakışmaması demek.
   workflow_dispatch:       # GitHub UI üzerinden el ile tetikleme
     inputs:
       countries:

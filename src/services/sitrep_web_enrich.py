@@ -67,6 +67,21 @@ def _gemini_retry_delay(resp: httpx.Response, attempt: int) -> float:
     return 5.0 * (2 ** attempt)
 
 
+def _gemini_429_reason(resp: httpx.Response) -> str:
+    """Extract WHICH quota tripped from a 429 body (QuotaFailure.quotaId — e.g.
+    ...PerDay... vs ...PerMinute...), so logs distinguish a spent daily quota
+    from mere pacing. Returns the raw error message as fallback."""
+    try:
+        err = resp.json()["error"]
+        for detail in err.get("details", []):
+            for violation in detail.get("violations", []):
+                if violation.get("quotaId"):
+                    return violation["quotaId"]
+        return (err.get("message") or "")[:160]
+    except Exception:
+        return "unparsable 429 body"
+
+
 def decode_google_news_url(url: str) -> Optional[str]:
     """
     Offline decode of legacy Google News article IDs (the base64 payload embeds
@@ -206,24 +221,25 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
                 logger.info("Gemini 429, retrying in %.0fs", delay)
                 time.sleep(delay)
         if resp.status_code == 429:
+            reason = _gemini_429_reason(resp)
             _consecutive_429 += 1
             if _consecutive_429 >= _RATE_LIMIT_TRIP_AFTER:
                 if _key_idx + 1 < len(keys):
                     _key_idx += 1
                     _consecutive_429 = 0
                     logger.warning(
-                        "Gemini key #%d quota exhausted — rotating to backup key #%d",
-                        _key_idx, _key_idx + 1,
+                        "Gemini key #%d quota exhausted (%s) — rotating to backup key #%d",
+                        _key_idx, reason, _key_idx + 1,
                     )
                 else:
                     _quota_exhausted = True
                     logger.warning(
-                        "All %d Gemini key(s) exhausted (sustained 429s) — "
+                        "All %d Gemini key(s) exhausted (last: %s) — "
                         "disabling web enrichment for the rest of this run",
-                        len(keys),
+                        len(keys), reason,
                     )
             else:
-                logger.warning("Gemini grounded call rate-limited (429), giving up")
+                logger.warning("Gemini grounded call rate-limited (429: %s), giving up", reason)
             return None
         resp.raise_for_status()
         _consecutive_429 = 0
