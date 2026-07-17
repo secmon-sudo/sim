@@ -31,11 +31,28 @@ _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:g
 _GOOGLE_NEWS_RE = re.compile(r"news\.google\.com/(?:rss/)?articles/([^?/]+)")
 _URL_IN_BYTES_RE = re.compile(rb"https?://[\x21-\x7e]+")
 
-# Circuit breaker: once the Gemini quota is exhausted (sustained 429s), stop
-# issuing grounded calls for the rest of the process instead of spamming the API.
+# Circuit breaker + key rotation. Sustained 429s mean the CURRENT key's quota is
+# gone (flash-lite RPD is shared with the main router's Gemini fallback slot and
+# resets at Pacific midnight = 07:00 UTC): rotate to the next configured key
+# (GEMINI_API_KEY → GEMINI_API_KEY_2) and only disable grounded calls for the
+# rest of the process once every key is exhausted.
 _RATE_LIMIT_TRIP_AFTER = 3
 _consecutive_429 = 0
 _quota_exhausted = False
+_key_idx = 0
+
+
+def _gemini_keys() -> List[str]:
+    return [k for k in (os.environ.get("GEMINI_API_KEY"),
+                        os.environ.get("GEMINI_API_KEY_2")) if k]
+
+
+def _reset_gemini_state() -> None:
+    """Reset breaker/rotation state (test isolation only)."""
+    global _consecutive_429, _quota_exhausted, _key_idx
+    _consecutive_429 = 0
+    _quota_exhausted = False
+    _key_idx = 0
 
 
 def _gemini_retry_delay(resp: httpx.Response, attempt: int) -> float:
@@ -163,9 +180,11 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
     One grounded Gemini call. Returns None on failure, else:
     {"text", "sources": [{"name","url","title"}], "supports": [(segment_text, [chunk_idx])]}
     """
-    global _consecutive_429, _quota_exhausted
+    global _consecutive_429, _quota_exhausted, _key_idx
     if _quota_exhausted:
         return None
+    keys = _gemini_keys() or [api_key]
+    _key_idx = min(_key_idx, len(keys) - 1)
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
@@ -176,7 +195,7 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
         for attempt in range(3):
             resp = httpx.post(
                 _GEMINI_URL.format(model=GEMINI_MODEL),
-                params={"key": api_key},
+                params={"key": keys[_key_idx]},
                 json=body,
                 timeout=30.0,
             )
@@ -188,13 +207,21 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
                 time.sleep(delay)
         if resp.status_code == 429:
             _consecutive_429 += 1
-            if _consecutive_429 >= _RATE_LIMIT_TRIP_AFTER and not _quota_exhausted:
-                _quota_exhausted = True
-                logger.warning(
-                    "Gemini quota exhausted (%d consecutive 429s) — "
-                    "disabling web enrichment for the rest of this run",
-                    _consecutive_429,
-                )
+            if _consecutive_429 >= _RATE_LIMIT_TRIP_AFTER:
+                if _key_idx + 1 < len(keys):
+                    _key_idx += 1
+                    _consecutive_429 = 0
+                    logger.warning(
+                        "Gemini key #%d quota exhausted — rotating to backup key #%d",
+                        _key_idx, _key_idx + 1,
+                    )
+                else:
+                    _quota_exhausted = True
+                    logger.warning(
+                        "All %d Gemini key(s) exhausted (sustained 429s) — "
+                        "disabling web enrichment for the rest of this run",
+                        len(keys),
+                    )
             else:
                 logger.warning("Gemini grounded call rate-limited (429), giving up")
             return None
@@ -360,27 +387,31 @@ def discover_incidents(country_name: str, api_key: str,
 
 
 def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
-                         max_clusters: int, cooldown_s: float = 2.0) -> Dict[str, Any]:
+                         max_clusters: int, cooldown_s: float = 4.0) -> Dict[str, Any]:
     """
-    Full grounding pass: enrich the top clusters, discover incidents the ingest
-    missed, and run the strategic sweep. Returns
-    {"strategic": {...}|None, "discovered": [cluster, ...]} — both empty when
-    GEMINI_API_KEY is not configured.
+    Full grounding pass, ordered by VALUE so a mid-run quota death costs the
+    least: discovery and the strategic sweep (2 calls, whole-country coverage)
+    run first; per-cluster enrichment (up to max_clusters calls, incremental
+    detail) runs last. Returns {"strategic": {...}|None, "discovered":
+    [cluster, ...]} — both empty when GEMINI_API_KEY is not configured.
+
+    cooldown_s=4.0 caps the call rate at ~15/min even if grounded calls return
+    instantly — flash-lite's free-tier RPM ceiling.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logger.info("SITREP web enrichment skipped: GEMINI_API_KEY not set")
         return {"strategic": None, "discovered": []}
-    for cluster in clusters[:max_clusters]:
-        if _quota_exhausted:
-            break
-        enrich_cluster(cluster, country_name, api_key)
-        time.sleep(cooldown_s)
     known = [f'{c.get("location")}: {(c.get("snippet") or "")[:100]}' for c in clusters]
     discovered = discover_incidents(country_name, api_key, known)
     time.sleep(cooldown_s)
     sweep = strategic_sweep(country_name, api_key)
     time.sleep(cooldown_s)
+    for cluster in clusters[:max_clusters]:
+        if _quota_exhausted:
+            break
+        enrich_cluster(cluster, country_name, api_key)
+        time.sleep(cooldown_s)
     if _quota_exhausted:
         logger.warning("SITREP web enrichment for %s ran with exhausted Gemini quota — "
                        "results may be partial", country_name)

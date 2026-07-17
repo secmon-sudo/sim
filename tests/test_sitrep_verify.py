@@ -188,6 +188,61 @@ class TestDiscoverIncidents:
         assert enr.discover_incidents("Iraq", "fake-key", []) == []
 
 
+class TestGeminiQuotaBreaker:
+    def _make_429(self):
+        class Resp:
+            status_code = 429
+            def json(self): return {"error": {"details": [{"retryDelay": "1s"}]}}
+        return Resp()
+
+    def _run_429_calls(self, enr, monkeypatch, n):
+        monkeypatch.setattr(enr.httpx, "post", lambda *a, **k: self._make_429())
+        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
+        for _ in range(n):
+            assert enr._call_gemini("q", "env-key") is None
+
+    def test_single_key_trips_breaker(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
+        self._run_429_calls(enr, monkeypatch, 3)
+        assert enr._quota_exhausted
+        enr._reset_gemini_state()
+
+    def test_second_key_rotation_before_tripping(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
+        self._run_429_calls(enr, monkeypatch, 3)
+        # first key dead → rotated to backup, breaker NOT tripped yet
+        assert not enr._quota_exhausted
+        assert enr._key_idx == 1
+        self._run_429_calls(enr, monkeypatch, 3)
+        assert enr._quota_exhausted  # backup dead too → now disabled
+        enr._reset_gemini_state()
+
+    def test_enrichment_prioritizes_discovery_and_sweep(self, monkeypatch):
+        """Discovery + strategic sweep must run BEFORE per-cluster enrichment so a
+        mid-run quota death costs the least valuable calls (2026-07-17 incident)."""
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
+        order = []
+        monkeypatch.setattr(enr, "discover_incidents",
+                            lambda *a, **k: order.append("discover") or [])
+        monkeypatch.setattr(enr, "strategic_sweep",
+                            lambda *a, **k: order.append("sweep"))
+        monkeypatch.setattr(enr, "enrich_cluster",
+                            lambda *a, **k: order.append("enrich"))
+        enr.apply_web_enrichment([{"sources": [], "location": "X", "snippet": "s"}],
+                                 "Iraq", max_clusters=3, cooldown_s=0)
+        assert order == ["discover", "sweep", "enrich"]
+        enr._reset_gemini_state()
+
+
 class TestHtmlRenderer:
     def _render(self):
         from src.services.sitrep_html import render_sitrep_html

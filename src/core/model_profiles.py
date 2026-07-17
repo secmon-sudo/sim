@@ -17,6 +17,9 @@ Checklist for adding a NEW model slot:
   3. max_request_tokens — the provider's per-request size ceiling. Groq free tier
      rejects requests above its 8K TPM window with HTTP 413 (2026-07-16); the
      client refuses oversized requests up front instead of burning a real call.
+  4. request_timeout — how long a long completion actually takes on this provider.
+     mistral-large needs >30s for a 4K-token SITREP; the old fixed 30s timeout
+     made every call ReadTimeout and restart generation from scratch (2026-07-17).
 """
 
 from dataclasses import dataclass, field
@@ -38,6 +41,10 @@ class ModelProfile:
     payload_extras: dict = field(default_factory=dict)
     # Per-request token ceiling (estimated prompt + completion); None = no ceiling.
     max_request_tokens: int | None = None
+    # HTTP read timeout for one request. Fast-inference providers finish a 4K-token
+    # completion well under 30s; mistral-large does not (ReadTimeout storm,
+    # 2026-07-17) — and each timeout retry restarts the generation from scratch.
+    request_timeout: float = 30.0
 
 
 def get_profile(provider: str, model: str) -> ModelProfile:
@@ -66,4 +73,5 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         supports_json_mode=provider in ("groq", "gemini", "mistral", "cerebras"),
         payload_extras=extras,
         max_request_tokens=max_request,
+        request_timeout=120.0 if provider == "mistral" else 30.0,
     )

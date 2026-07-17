@@ -133,7 +133,7 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
         PROVIDER_ENDPOINTS[acct.provider],
         headers=headers,
         json=payload,
-        timeout=30.0,
+        timeout=profile.request_timeout,
     )
     response.raise_for_status()
     return response

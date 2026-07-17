@@ -62,3 +62,13 @@ class TestRequestSizeCeiling:
     def test_mistral_large_is_plain_model(self):
         assert get_profile("mistral", "mistral-large-2512").payload_extras == {}
         assert get_profile("mistral", "mistral-large-2512").max_request_tokens is None
+
+
+class TestRequestTimeout:
+    def test_mistral_gets_long_completion_timeout(self):
+        # mistral-large ReadTimeout storm on 4K-token SITREPs (2026-07-17).
+        assert get_profile("mistral", "mistral-large-2512").request_timeout == 120.0
+
+    def test_fast_providers_keep_default(self):
+        assert get_profile("groq", "openai/gpt-oss-20b").request_timeout == 30.0
+        assert get_profile("cerebras", "gpt-oss-120b").request_timeout == 30.0
