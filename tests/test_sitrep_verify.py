@@ -274,6 +274,64 @@ class TestHtmlRenderer:
         assert "<kritik>" not in html_out
         assert "&lt;kritik&gt;" in html_out
 
+    def test_decorative_separator_lines_are_dropped(self):
+        from src.services.sitrep_html import render_sitrep_html
+        report = "YÖNETİCİ ÖZETİ\nDurum sakin.\n---\n***\nBandar Abbas\nDetay yok."
+        html_out = render_sitrep_html("İran", "IR", "2026-07-15 10:30",
+                                      "2026-07-16 10:30", report, [])
+        assert "📍 ---" not in html_out
+        assert ">---<" not in html_out and ">***<" not in html_out
+
+    def test_exec_summary_rendered_as_callout(self):
+        html_out = self._render()
+        assert "📌 YÖNETİCİ ÖZETİ" in html_out
+        assert "Gerilim tırmanıyor" in html_out
+
+    def test_highlights_rank_clusters_by_severity(self):
+        from src.services.sitrep_html import render_sitrep_html
+        clusters = [
+            {"location": "Az Önemli", "severity": 40, "event_type": "protest",
+             "date": "2026-07-17", "verification": "Doğrulanmamış (Tek kaynak)",
+             "snippet": "x", "sources": []},
+            {"location": "Çok Önemli", "severity": 95, "event_type": "missile_strike",
+             "date": "2026-07-17", "verification": "Onaylandı (Resmî)",
+             "snippet": "y", "sources": []},
+        ]
+        html_out = render_sitrep_html("İran", "IR", "2026-07-15 10:30",
+                                      "2026-07-16 10:30", "YÖNETİCİ ÖZETİ\nÖzet.", clusters)
+        assert "GÜNÜN ÖNE ÇIKANLARI" in html_out
+        assert html_out.index("Çok Önemli") < html_out.index("Az Önemli")
+        assert "Füze Saldırısı" in html_out          # TR event-type label
+        assert ">95<" in html_out                     # severity value as text
+        assert "Maks. Şiddet" in html_out             # KPI tile
+
+    def test_appendix_is_collapsible(self):
+        from src.services.sitrep_html import render_sitrep_html
+        clusters = [{"location": "X", "severity": 10, "event_type": "protest",
+                     "date": "2026-07-17", "verification": None,
+                     "snippet": "s", "sources": []}]
+        html_out = render_sitrep_html("İran", "IR", "2026-07-15 10:30",
+                                      "2026-07-16 10:30", "YÖNETİCİ ÖZETİ\nÖzet.", clusters)
+        assert "<details" in html_out and "<summary" in html_out
+
+    def test_appendix_lists_every_cluster_with_sources(self):
+        from src.services.sitrep_html import render_sitrep_html
+        clusters = [
+            {"location": "Çabahar Limanı", "date": "2026-07-17, saat belirsiz",
+             "event_type": "missile_strike", "verification": "Onaylandı (Çoklu kaynak)",
+             "snippet": "Watchtower destroyed at the port.",
+             "sources": [{"name": "reuters.com", "url": "https://reuters.com/x"}]},
+            {"location": "Yezd", "date": "2026-07-17, saat belirsiz",
+             "event_type": "explosion", "verification": "Doğrulanmamış (Tek kaynak)",
+             "snippet": "Blast reported near the city.", "sources": []},
+        ]
+        html_out = render_sitrep_html("İran", "IR", "2026-07-15 10:30",
+                                      "2026-07-16 10:30", "YÖNETİCİ ÖZETİ\nÖzet.", clusters)
+        assert "GÜNLÜK OLAY KÜNYESİ" in html_out
+        assert "Çabahar Limanı" in html_out and "Yezd" in html_out
+        assert 'href="https://reuters.com/x"' in html_out
+        assert "Watchtower destroyed" in html_out
+
 
 class TestCorroborationLabeling:
     def _members(self):

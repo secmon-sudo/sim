@@ -115,10 +115,12 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         return {"country_iso": country_iso, "status": "failed", "error": str(e)}
 
     # Delivery is best-effort; the report row is the source of truth.
+    # Full cluster list (field + strategic + discovered) so the stat cards and
+    # the appendix log cover the complete day, not just field events.
     html_doc = render_sitrep_html(
         country_name, country_iso,
         f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",
-        report_text, field,
+        report_text, clusters,
     )
     r2_url = None
     try:
