@@ -42,9 +42,22 @@ _quota_exhausted = False
 _key_idx = 0
 
 
-def _gemini_keys() -> List[str]:
-    return [k for k in (os.environ.get("GEMINI_API_KEY"),
-                        os.environ.get("GEMINI_API_KEY_2")) if k]
+def _gemini_keys() -> List[tuple]:
+    """
+    (api_key, model) per configured key. The backup key may need a DIFFERENT
+    model: observed 2026-07-18 that a project can carry full model quota yet
+    ZERO Search-grounding quota for the Gemini 3 family (grounded calls 429
+    from the very first request while Gemini 2.5 grounding stays at 1.5K/day).
+    SITREP_GEMINI_MODEL_2 (e.g. gemini-2.5-flash-lite) overrides the model for
+    GEMINI_API_KEY_2; it defaults to the primary model.
+    """
+    pairs = []
+    if os.environ.get("GEMINI_API_KEY"):
+        pairs.append((os.environ["GEMINI_API_KEY"], GEMINI_MODEL))
+    if os.environ.get("GEMINI_API_KEY_2"):
+        pairs.append((os.environ["GEMINI_API_KEY_2"],
+                      os.environ.get("SITREP_GEMINI_MODEL_2", GEMINI_MODEL)))
+    return pairs
 
 
 def _reset_gemini_state() -> None:
@@ -77,7 +90,14 @@ def _gemini_429_reason(resp: httpx.Response) -> str:
             for violation in detail.get("violations", []):
                 if violation.get("quotaId"):
                     return violation["quotaId"]
-        return (err.get("message") or "")[:160]
+        # No QuotaFailure violation in the body. Observed in prod (2026-07-18):
+        # hard 429s while the model's RPD dashboard showed 16/500 used — so the
+        # tripping limit is NOT model RPD (likely the google_search grounding
+        # tool's own quota). Keep the raw details so the next occurrence is
+        # diagnosable from logs alone.
+        msg = (err.get("message") or "")[:120]
+        details = json.dumps(err.get("details", []), ensure_ascii=False)[:400]
+        return f"{msg} | details: {details}" if details not in ("[]", "") else msg
     except Exception:
         return "unparsable 429 body"
 
@@ -198,8 +218,9 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
     global _consecutive_429, _quota_exhausted, _key_idx
     if _quota_exhausted:
         return None
-    keys = _gemini_keys() or [api_key]
+    keys = _gemini_keys() or [(api_key, GEMINI_MODEL)]
     _key_idx = min(_key_idx, len(keys) - 1)
+    active_key, active_model = keys[_key_idx]
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
@@ -209,8 +230,8 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
         resp = None
         for attempt in range(3):
             resp = httpx.post(
-                _GEMINI_URL.format(model=GEMINI_MODEL),
-                params={"key": keys[_key_idx]},
+                _GEMINI_URL.format(model=active_model),
+                params={"key": active_key},
                 json=body,
                 timeout=30.0,
             )
@@ -218,7 +239,8 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
                 break
             if attempt < 2:
                 delay = _gemini_retry_delay(resp, attempt)
-                logger.info("Gemini 429, retrying in %.0fs", delay)
+                logger.info("Gemini 429 (%s), retrying in %.0fs",
+                            _gemini_429_reason(resp), delay)
                 time.sleep(delay)
         if resp.status_code == 429:
             reason = _gemini_429_reason(resp)
@@ -406,7 +428,7 @@ def discover_incidents(country_name: str, api_key: str,
 
 
 def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
-                         max_clusters: int, cooldown_s: float = 4.0) -> Dict[str, Any]:
+                         max_clusters: int, cooldown_s: float = 7.0) -> Dict[str, Any]:
     """
     Full grounding pass, ordered by VALUE so a mid-run quota death costs the
     least: discovery and the strategic sweep (2 calls, whole-country coverage)
@@ -414,8 +436,9 @@ def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
     detail) runs last. Returns {"strategic": {...}|None, "discovered":
     [cluster, ...]} — both empty when GEMINI_API_KEY is not configured.
 
-    cooldown_s=4.0 caps the call rate at ~15/min even if grounded calls return
-    instantly — flash-lite's free-tier RPM ceiling.
+    cooldown_s=7.0 caps the call rate at ~8.5/min even if grounded calls return
+    instantly — under gemini-2.5-flash-lite's free-tier 10 RPM ceiling (the
+    grounding-capable model since Gemini 3 Search grounding went to 0).
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:

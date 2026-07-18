@@ -223,6 +223,33 @@ class TestGeminiQuotaBreaker:
         assert enr._quota_exhausted  # backup dead too → now disabled
         enr._reset_gemini_state()
 
+    def test_backup_key_uses_its_own_model(self, monkeypatch):
+        """Key #2's project has zero Gemini-3 Search-grounding quota (2026-07-18):
+        after rotation, grounded calls must go to SITREP_GEMINI_MODEL_2."""
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
+        monkeypatch.setenv("SITREP_GEMINI_MODEL_2", "gemini-2.5-flash-lite")
+        self._run_429_calls(enr, monkeypatch, 3)  # burn key 1 → rotate
+        assert enr._key_idx == 1
+        seen = {}
+        def fake_post(url, **kw):
+            seen["url"] = url
+            seen["key"] = kw.get("params", {}).get("key")
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+            return R()
+        monkeypatch.setattr(enr.httpx, "post", fake_post)
+        res = enr._call_gemini("q", "k1")
+        assert res and res["text"] == "ok"
+        assert "gemini-2.5-flash-lite" in seen["url"]
+        assert seen["key"] == "k2"
+        enr._reset_gemini_state()
+
     def test_enrichment_prioritizes_discovery_and_sweep(self, monkeypatch):
         """Discovery + strategic sweep must run BEFORE per-cluster enrichment so a
         mid-run quota death costs the least valuable calls (2026-07-17 incident)."""

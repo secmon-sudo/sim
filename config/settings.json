@@ -241,7 +241,7 @@
     "max_clusters_in_prompt": 25,
     "snippet_chars": 600,
     "language": "tr",
-    "max_web_enrich_clusters": 8,
+    "max_web_enrich_clusters": 3,
     "high_severity_override": 80
   }
 }

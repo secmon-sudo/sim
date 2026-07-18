@@ -23,6 +23,12 @@ env:
   OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
   GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
   GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
+  # BOTH keys' projects have zero Search-grounding quota for the Gemini 3
+  # family (free tier, observed 2026-07-18) but 1.5K/day for Gemini 2.5 —
+  # grounded enrichment must use a 2.5 model on every key. The binding limit
+  # then becomes the 2.5-flash-lite MODEL quota: 20 RPD per project.
+  SITREP_GEMINI_MODEL:   gemini-2.5-flash-lite
+  SITREP_GEMINI_MODEL_2: gemini-2.5-flash-lite
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
   CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}
