@@ -250,6 +250,54 @@ class TestGeminiQuotaBreaker:
         assert seen["key"] == "k2"
         enr._reset_gemini_state()
 
+    def _make_perday_429(self):
+        class Resp:
+            status_code = 429
+            def json(self):
+                return {"error": {"details": [{"violations": [
+                    {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                ]}]}}
+        return Resp()
+
+    def test_perday_429_rotates_immediately(self, monkeypatch):
+        """A PerDay quotaId is definitive — rotate on the FIRST such 429 instead
+        of counting failed calls (2026-07-19: flapping daily 429s interleaved
+        with 200s kept resetting the counter, so rotation never fired)."""
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
+        calls = []
+        def fake_post(url, **kw):
+            calls.append(kw.get("params", {}).get("key"))
+            if calls[-1] == "k1":
+                return self._make_perday_429()
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+            return R()
+        monkeypatch.setattr(enr.httpx, "post", fake_post)
+        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
+        res = enr._call_gemini("q", "k1")
+        assert res and res["text"] == "ok"
+        assert calls == ["k1", "k2"]  # no retries burned on the spent key
+        assert enr._key_idx == 1
+        assert not enr._quota_exhausted
+        enr._reset_gemini_state()
+
+    def test_perday_429_single_key_disables(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
+        monkeypatch.setattr(enr.httpx, "post", lambda *a, **k: self._make_perday_429())
+        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
+        assert enr._call_gemini("q", "k1") is None
+        assert enr._quota_exhausted
+        enr._reset_gemini_state()
+
     def test_enrichment_prioritizes_discovery_and_sweep(self, monkeypatch):
         """Discovery + strategic sweep must run BEFORE per-cluster enrichment so a
         mid-run quota death costs the least valuable calls (2026-07-17 incident)."""

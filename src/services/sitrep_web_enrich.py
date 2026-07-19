@@ -36,6 +36,9 @@ _URL_IN_BYTES_RE = re.compile(rb"https?://[\x21-\x7e]+")
 # resets at Pacific midnight = 07:00 UTC): rotate to the next configured key
 # (GEMINI_API_KEY → GEMINI_API_KEY_2) and only disable grounded calls for the
 # rest of the process once every key is exhausted.
+# A 429 whose quotaId contains "PerDay" rotates IMMEDIATELY, bypassing the
+# counter: daily-quota 429s flap (sporadic 200s slip through and reset the
+# counter), which kept rotation from ever firing (observed 2026-07-19).
 _RATE_LIMIT_TRIP_AFTER = 3
 _consecutive_429 = 0
 _quota_exhausted = False
@@ -237,10 +240,29 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
             )
             if resp.status_code != 429:
                 break
+            reason = _gemini_429_reason(resp)
+            if "PerDay" in reason:
+                # Daily quota is spent until the 07:00 UTC reset — retrying
+                # this key (or counting failures) only burns wall-clock time.
+                if _key_idx + 1 < len(keys):
+                    _key_idx += 1
+                    _consecutive_429 = 0
+                    active_key, active_model = keys[_key_idx]
+                    logger.warning(
+                        "Gemini key #%d daily quota spent (%s) — rotating to key #%d",
+                        _key_idx, reason, _key_idx + 1,
+                    )
+                    continue
+                _quota_exhausted = True
+                logger.warning(
+                    "All %d Gemini key(s) daily-exhausted (last: %s) — "
+                    "disabling web enrichment for the rest of this run",
+                    len(keys), reason,
+                )
+                return None
             if attempt < 2:
                 delay = _gemini_retry_delay(resp, attempt)
-                logger.info("Gemini 429 (%s), retrying in %.0fs",
-                            _gemini_429_reason(resp), delay)
+                logger.info("Gemini 429 (%s), retrying in %.0fs", reason, delay)
                 time.sleep(delay)
         if resp.status_code == 429:
             reason = _gemini_429_reason(resp)
