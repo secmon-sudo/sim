@@ -362,7 +362,12 @@ def strategic_sweep(country_name: str, api_key: str) -> Optional[Dict[str, Any]]
     prompt = (
         f"Search for strategic and political security developments about {country_name} "
         "in the LAST 24 HOURS only. Cover each of these areas if reported:\n"
-        "- aviation: airspace closures, flight suspensions/reroutes, EASA/FAA/ICAO notices\n"
+        "- aviation impact of the security situation: WHICH named airlines suspended, "
+        "cancelled, rerouted or resumed flights to/over the country, which airports were "
+        "closed or attacked, which airspace was closed and to whom. Name the carrier and "
+        "the route/airport explicitly (e.g. 'Emirates suspended Tehran flights until X'). "
+        "Ignore routine safety/technical matters (weather delays, maintenance, NOTAMs "
+        "unrelated to the security situation)\n"
         "- travel advisories and evacuation orders (State Dept, FCDO, other governments)\n"
         "- embassy/consulate closures, staff drawdowns\n"
         "- sanctions, UN/NATO/EU decisions, major diplomatic statements\n"

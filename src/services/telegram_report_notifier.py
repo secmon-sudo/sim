@@ -454,3 +454,85 @@ def send_sitrep_telegram(
         logger.error("Failed to send Telegram SITREP document: %s", str(e))
 
     return telegram_message_id
+
+
+def send_digest_telegram(
+    digest: Dict[str, Any],
+    window_start: str,
+    window_end: str,
+    html_doc: str,
+) -> Optional[str]:
+    """
+    Dispatches the daily cross-country digest, sent last so it lands on top of
+    the per-country reports in the chat.
+
+    The message body IS the briefing (overview + country risk lines + aviation
+    impact) — readable on a phone without opening anything. The HTML document
+    follows for the full one-pager.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        logger.warning("Telegram digest skipped: missing configuration.")
+        return None
+
+    risk_icon = {"Kritik": "🔴", "Yüksek": "🟠", "Yükseltilmiş": "🔵", "Normal": "🟢"}
+
+    text = (
+        f"🧭 <b>GÜNLÜK HAP ÖZET</b>\n"
+        f"📅 <code>{window_start}</code> — <code>{window_end}</code> UTC\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{html.escape(digest.get('overview', ''))}\n"
+    )
+
+    countries = digest.get("countries") or []
+    if countries:
+        text += "\n<b>🌍 Ülke Durumu</b>\n"
+        for c in countries:
+            icon = risk_icon.get(c.get("risk", ""), "⚪")
+            text += (f"{icon} <b>{html.escape(c.get('name', ''))}</b> "
+                     f"({html.escape(c.get('risk', ''))}): "
+                     f"{html.escape(c.get('text', ''))}\n")
+
+    aviation = digest.get("aviation") or []
+    if aviation:
+        text += "\n<b>✈️ Havacılık Etkisi</b>\n"
+        for item in aviation:
+            text += f"• {html.escape(item)}\n"
+
+    # Telegram hard-caps sendMessage at 4096 chars; the rest is in the document.
+    if len(text) > 3900:
+        text = text[:3880] + "…\n"
+    text += "\nℹ️ <i>Tam özet ekte gönderilmiştir.</i>"
+
+    telegram_message_id = None
+    try:
+        resp = _post_telegram(f"https://api.telegram.org/bot{bot_token}/sendMessage", {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        })
+        res_data = resp.json()
+        if res_data.get("ok"):
+            telegram_message_id = str(res_data["result"]["message_id"])
+    except Exception as e:
+        logger.error("Failed to send Telegram digest summary: %s", str(e))
+
+    try:
+        file_buffer = io.BytesIO(html_doc.encode("utf-8"))
+        date_tag = window_end[:10].replace("-", "")
+        resp_doc = httpx.post(
+            f"https://api.telegram.org/bot{bot_token}/sendDocument",
+            data={"chat_id": chat_id,
+                  "caption": f"Günlük Hap Özet ({window_start} — {window_end} UTC)"},
+            files={"document": (f"ozet_{date_tag}.html", file_buffer, "text/html")},
+            timeout=20.0,
+        )
+        resp_doc.raise_for_status()
+        logger.info("Digest document dispatched.")
+    except Exception as e:
+        logger.error("Failed to send Telegram digest document: %s", str(e))
+
+    return telegram_message_id

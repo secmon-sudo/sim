@@ -26,9 +26,11 @@ from src.services.sitrep_generator import (
     split_strategic,
     validate_sitrep,
 )
+from src.services.sitrep_digest import build_digest
+from src.services.sitrep_digest_html import render_digest_html
 from src.services.sitrep_html import render_sitrep_html
 from src.services.sitrep_web_enrich import apply_web_enrichment, resolve_cluster_urls
-from src.services.telegram_report_notifier import send_sitrep_telegram
+from src.services.telegram_report_notifier import send_digest_telegram, send_sitrep_telegram
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +157,84 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
 
     logger.info("SITREP %s: completed (%d clusters, model=%s)",
                 country_iso, len(clusters), res.get("model"))
-    return {"country_iso": country_iso, "status": "completed",
-            "event_count": len(events), "cluster_count": len(clusters), "r2_url": r2_url}
+    # report_text/clusters ride along for the run-level digest; run_daily_sitrep
+    # strips them before returning so the pipeline result stays small.
+    return {"country_iso": country_iso, "country_name": country_name,
+            "status": "completed", "event_count": len(events),
+            "cluster_count": len(clusters), "r2_url": r2_url,
+            "report_text": report_text, "clusters": clusters}
+
+
+def _save_digest(db_conn, window_start, window_end, status: str,
+                 digest: Optional[Dict[str, Any]] = None,
+                 r2_url: Optional[str] = None,
+                 error_message: Optional[str] = None) -> None:
+    db_conn.execute(
+        """
+        INSERT INTO sitrep_digests (window_start, window_end, country_isos,
+                                    digest_text, digest_json, status,
+                                    llm_provider, llm_model, r2_url, error_message)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (window_start, window_end,
+         (digest or {}).get("country_isos"),
+         (digest or {}).get("raw_text"),
+         json.dumps(digest, ensure_ascii=False, default=str) if digest else None,
+         status,
+         (digest or {}).get("provider"), (digest or {}).get("model"),
+         r2_url, error_message),
+    )
+    db_conn.commit()
+
+
+def run_digest(db_conn, router: LLMRouter, results: List[Dict[str, Any]],
+               window_start: datetime, window_end: datetime) -> Optional[str]:
+    """
+    Run-level "hap özet": one short executive briefing synthesised from the
+    country SITREPs of this run. Fail-soft — the country reports are already
+    delivered, so a digest failure never fails the run.
+    """
+    ws = f"{window_start:%Y-%m-%d %H:%M}"
+    we = f"{window_end:%Y-%m-%d %H:%M}"
+    try:
+        digest = build_digest(router, results, ws, we)
+    except Exception as e:
+        logger.exception("Digest generation failed")
+        try:
+            _save_digest(db_conn, window_start, window_end, status="failed",
+                         error_message=str(e)[:1000])
+        except Exception:
+            logger.exception("Digest failure row could not be saved")
+        return None
+
+    if digest is None:
+        return None
+
+    html_doc = render_digest_html(digest, ws, we)
+
+    r2_url = None
+    try:
+        r2_url = upload_report_to_r2(f"digest_{window_end:%Y%m%d}.html",
+                                     html_doc.encode("utf-8"), "text/html")
+        if r2_url and "pub-default.r2.dev" in r2_url:
+            r2_url = None
+    except Exception:
+        logger.exception("Digest R2 upload failed")
+
+    try:
+        _save_digest(db_conn, window_start, window_end, status="completed",
+                     digest=digest, r2_url=r2_url)
+    except Exception:
+        logger.exception("Digest row could not be saved")
+
+    try:
+        send_digest_telegram(digest, ws, we, html_doc)
+    except Exception:
+        logger.exception("Digest Telegram dispatch failed")
+
+    logger.info("Digest completed (%d countries, model=%s)",
+                len(digest.get("country_isos") or []), digest.get("model"))
+    return r2_url
 
 
 def run_daily_sitrep(db_conn, router: LLMRouter,
@@ -180,6 +258,11 @@ def run_daily_sitrep(db_conn, router: LLMRouter,
             logger.exception("SITREP run failed hard for %s", iso)
             results.append({"country_iso": iso, "status": "failed", "error": str(e)})
 
+    digest_r2_url = run_digest(db_conn, router, results, window_start, window_end)
+
     completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
-    return {"success": failed == 0, "countries": results, "completed": completed}
+    slim = [{k: v for k, v in r.items() if k not in ("report_text", "clusters")}
+            for r in results]
+    return {"success": failed == 0, "countries": slim, "completed": completed,
+            "digest_r2_url": digest_r2_url}
