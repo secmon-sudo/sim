@@ -244,6 +244,8 @@
     "snippet_chars": 600,
     "language": "tr",
     "max_web_enrich_clusters": 3,
+    "web_enrich_cooldown_s": 7.0,
+    "max_grounded_calls_per_run": 36,
     "high_severity_override": 80
   }
 }

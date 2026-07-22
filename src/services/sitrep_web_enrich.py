@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -27,6 +28,45 @@ logger = logging.getLogger(__name__)
 
 GEMINI_MODEL = os.environ.get("SITREP_GEMINI_MODEL", "gemini-3.1-flash-lite")
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as _f:
+    _SITREP_CFG = json.load(_f).get("sitrep", {})
+
+# Seconds between grounded calls. 7.0 caps the rate at ~8.5/min, under
+# gemini-2.5-flash-lite's free-tier 10 RPM ceiling. A paid tier would make this
+# pacing irrelevant (RPM in the thousands), but grounding is billed per request
+# there, so the project stays on the free tier and keeps the throttle.
+WEB_ENRICH_COOLDOWN_S = float(_SITREP_CFG.get("web_enrich_cooldown_s", 7.0))
+
+# Hard ceiling on grounded (Search-tool) calls per process.
+#
+# The binding constraint is NOT the Search-grounding quota (1.5K/day) but the
+# grounding-capable MODEL's request-per-day limit: on the free tier
+# gemini-2.5-flash-lite allows 20 RPD, and it is the only option — the Gemini 3
+# family has 0 Search-grounding quota, so its far higher 500 RPD is unusable
+# here. 20 calls/day is therefore the whole budget for grounding.
+#
+# The 20 RPD is PER PROJECT, and each configured key is its own project, so the
+# real ceiling is 20 x len(_gemini_keys()) — rotation exists to reach it. With
+# two keys that is 40; the budget sits under it at 36 and a full run needs
+# 5 countries x (2 whole-country calls + 3 cluster enrichments) = 25.
+# Exceeding the budget disables grounding for the rest of the run exactly like a
+# spent quota does — which is what kept later countries from silently losing
+# everything to the first ones.
+# NB: if a key's project lacks the 2.5 model the rotation target 404s and the
+# effective ceiling collapses back to one project's 20.
+MAX_GROUNDED_CALLS_PER_RUN = int(_SITREP_CFG.get("max_grounded_calls_per_run", 36))
+_grounded_calls = 0
+
+# API keys appear in the query string, so raw httpx error strings (404/timeout)
+# carry a live credential into the logs — and CI logs/artifacts of a public repo
+# are world-readable. Never log an unredacted transport error.
+_KEY_IN_URL_RE = re.compile(r"([?&]key=)[\w.\-]+")
+
+
+def _redact(text: str) -> str:
+    return _KEY_IN_URL_RE.sub(r"\1***", text or "")
 
 _GOOGLE_NEWS_RE = re.compile(r"news\.google\.com/(?:rss/)?articles/([^?/]+)")
 _URL_IN_BYTES_RE = re.compile(rb"https?://[\x21-\x7e]+")
@@ -64,11 +104,12 @@ def _gemini_keys() -> List[tuple]:
 
 
 def _reset_gemini_state() -> None:
-    """Reset breaker/rotation state (test isolation only)."""
-    global _consecutive_429, _quota_exhausted, _key_idx
+    """Reset breaker/rotation/budget state (test isolation only)."""
+    global _consecutive_429, _quota_exhausted, _key_idx, _grounded_calls
     _consecutive_429 = 0
     _quota_exhausted = False
     _key_idx = 0
+    _grounded_calls = 0
 
 
 def _gemini_retry_delay(resp: httpx.Response, attempt: int) -> float:
@@ -218,9 +259,17 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
     One grounded Gemini call. Returns None on failure, else:
     {"text", "sources": [{"name","url","title"}], "supports": [(segment_text, [chunk_idx])]}
     """
-    global _consecutive_429, _quota_exhausted, _key_idx
+    global _consecutive_429, _quota_exhausted, _key_idx, _grounded_calls
     if _quota_exhausted:
         return None
+    if _grounded_calls >= MAX_GROUNDED_CALLS_PER_RUN:
+        _quota_exhausted = True
+        logger.warning(
+            "Grounded-call budget spent (%d calls this run) — disabling web "
+            "enrichment for the rest of the run", _grounded_calls,
+        )
+        return None
+    _grounded_calls += 1
     keys = _gemini_keys() or [(api_key, GEMINI_MODEL)]
     _key_idx = min(_key_idx, len(keys) - 1)
     active_key, active_model = keys[_key_idx]
@@ -313,7 +362,7 @@ def _call_gemini(prompt: str, api_key: str, max_tokens: int = 1024) -> Optional[
             return None
         return {"text": text, "sources": sources, "supports": supports}
     except Exception as e:
-        logger.warning("Gemini grounded call failed: %s", str(e)[:200])
+        logger.warning("Gemini grounded call failed: %s", _redact(str(e))[:200])
         return None
 
 
@@ -455,7 +504,8 @@ def discover_incidents(country_name: str, api_key: str,
 
 
 def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
-                         max_clusters: int, cooldown_s: float = 7.0) -> Dict[str, Any]:
+                         max_clusters: int,
+                         cooldown_s: float = WEB_ENRICH_COOLDOWN_S) -> Dict[str, Any]:
     """
     Full grounding pass, ordered by VALUE so a mid-run quota death costs the
     least: discovery and the strategic sweep (2 calls, whole-country coverage)
@@ -466,6 +516,7 @@ def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
     cooldown_s=7.0 caps the call rate at ~8.5/min even if grounded calls return
     instantly — under gemini-2.5-flash-lite's free-tier 10 RPM ceiling (the
     grounding-capable model since Gemini 3 Search grounding went to 0).
+    MAX_GROUNDED_CALLS_PER_RUN is the per-run backstop on top of that.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:

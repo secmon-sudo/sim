@@ -1,5 +1,5 @@
 """
-SIM — Daily SITREP Digest HTML renderer
+SIM — Daily Executive Intelligence Briefing HTML renderer
 
 Deliberately quieter than the per-country report: no verification badges, no
 source chips, no raw event log. Those live in the country SITREPs, which ship
@@ -74,7 +74,7 @@ def _section(title: str, icon: str, items: List[str], accent: str = "#7db3ff",
     return (
         f'<div style="margin-top:22px;{frame}">'
         f'<div style="font-size:12px;font-weight:700;letter-spacing:1.4px;'
-        f'color:{accent};text-transform:uppercase">{icon} {_esc(title)}</div>'
+        f'color:{accent};text-transform:uppercase">{icon}{_esc(title)}</div>'
         f'<ul style="margin:8px 0 0;padding-left:20px;font-size:13px">{bullets}</ul>'
         f"</div>"
     )
@@ -90,7 +90,7 @@ def render_digest_html(digest: Dict[str, Any], window_start: str,
     country_block = (
         f'<div style="margin-top:22px">'
         f'<div style="font-size:12px;font-weight:700;letter-spacing:1.4px;'
-        f'color:#7db3ff;text-transform:uppercase">🌍 ÜLKE DURUMU</div>'
+        f'color:#7db3ff;text-transform:uppercase">ÜLKE DEĞERLENDİRMELERİ</div>'
         f'<div style="margin-top:6px">{country_rows}</div></div>'
         if country_rows else ""
     )
@@ -100,33 +100,33 @@ def render_digest_html(digest: Dict[str, Any], window_start: str,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Günlük Hap Özet — {_esc(window_end[:10])}</title>
+<title>Günlük Yönetici Brifingi — {_esc(window_end[:10])}</title>
 </head>
 <body style="margin:0;background:#0a0f1c;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px">
 <div style="max-width:720px;margin:0 auto;padding:0 16px 40px">
 
 <div style="background:linear-gradient(135deg,#0c1a3a 0%,#12275c 100%);border:1px solid #1e3a6e;border-radius:0 0 16px 16px;padding:22px 18px 18px;margin:0 -4px">
   <div style="font-size:10px;letter-spacing:3px;color:#7db3ff;text-transform:uppercase">SIM · Security Incident Monitor</div>
-  <h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:.5px">GÜNLÜK HAP ÖZET</h1>
-  <div style="font-size:13px;color:#93c5fd">{len(countries)} ülke · tek sayfa yönetici brifingi</div>
-  <div style="margin-top:10px;font-size:12px;color:#8b9cb8">📅 {_esc(window_start)} — {_esc(window_end)} UTC · 24 saatlik pencere</div>
+  <h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:.5px">GÜNLÜK YÖNETİCİ BRİFİNGİ</h1>
+  <div style="font-size:13px;color:#93c5fd">{len(countries)} ülke · konsolide durum değerlendirmesi</div>
+  <div style="margin-top:10px;font-size:12px;color:#8b9cb8">{_esc(window_start)} — {_esc(window_end)} UTC · 24 saatlik pencere</div>
 </div>
 
 <div style="margin-top:16px;background:#101b33;border-left:3px solid #3b82f6;border-radius:0 12px 12px 0;padding:14px 16px">
-  <div style="font-size:12px;font-weight:700;letter-spacing:1.4px;color:#7db3ff;text-transform:uppercase">📌 GÜNÜN TABLOSU</div>
+  <div style="font-size:12px;font-weight:700;letter-spacing:1.4px;color:#7db3ff;text-transform:uppercase">GENEL DURUM DEĞERLENDİRMESİ</div>
   <p style="margin:8px 0 0;line-height:1.7;color:#e2e8f0;font-size:14px">{overview}</p>
 </div>
 
 {country_block}
 
-{_section("HAVACILIK ETKİSİ", "✈️", digest.get("aviation") or [], accent="#93c5fd", highlight=True)}
+{_section("HAVACILIK OPERASYONLARINA ETKİ", "✈ ", digest.get("aviation") or [], accent="#93c5fd", highlight=True)}
 
-{_section("ÖNE ÇIKANLAR", "⚡", digest.get("highlights") or [])}
+{_section("KRİTİK GELİŞMELER", "", digest.get("highlights") or [])}
 
-{_section("İZLEME · 24-72 SAAT", "🔭", digest.get("watch") or [], accent="#8b9cb8")}
+{_section("İZLEME VE BEKLENTİLER · 24-72 SAAT", "", digest.get("watch") or [], accent="#8b9cb8")}
 
 <div style="margin-top:36px;padding-top:14px;border-top:1px solid #1e293b;font-size:11px;color:#5b6b8a;line-height:1.6">
-Bu özet, aynı döneme ait ülke bazlı SITREP raporlarından SIM tarafından otomatik
+Bu brifing, aynı döneme ait ülke bazlı SITREP raporlarından SIM tarafından otomatik
 sentezlenmiştir. Kaynak atıfları, doğrulama etiketleri ve tam olay künyesi ilgili
 ülke raporlarında yer alır. {_esc(window_end)} UTC itibarıyla mevcut açık kaynaklara dayanır.
 </div>

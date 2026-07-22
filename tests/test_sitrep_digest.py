@@ -63,23 +63,23 @@ class TestBuildDigestInputs:
         assert len(rows[0]["report_text"]) == 3500
 
 
-SAMPLE = """GÜNÜN TABLOSU
+SAMPLE = """GENEL DURUM DEĞERLENDİRMESİ
 Bölgede gerilim tırmandı. Havayolları uçuşlarını askıya aldı.
 
-ÜLKE DURUMU
+ÜLKE DEĞERLENDİRMELERİ
 - IR | Çok sayıda tesis vuruldu.
 - BH | Üsse İHA saldırısı düzenlendi.
 - ZZ | Uydurma ülke.
 
-HAVACILIK ETKİSİ
+HAVACILIK OPERASYONLARINA ETKİ
 - Emirates Tahran uçuşlarını askıya aldı.
 - Manama havalimanı kapandı. Kaynak: reuters.com
 - Lufthansa rota değiştirdi. https://example.com/haber
 
-ÖNE ÇIKANLAR
+KRİTİK GELİŞMELER
 - **Bandar Abbas** limanında yangın çıktı.
 
-İZLEME
+İZLEME VE BEKLENTİLER
 - Hürmüz Boğazı'nda seyrüsefer güvenliği.
 """
 
@@ -108,11 +108,11 @@ class TestParseDigest:
         assert p["highlights"][0].startswith("Bandar Abbas")
 
     def test_empty_marker_section_yields_no_items(self):
-        text = "GÜNÜN TABLOSU\nSakin bir gün.\n\nHAVACILIK ETKİSİ\nYOK\n"
+        text = "GENEL DURUM DEĞERLENDİRMESİ\nSakin bir gün.\n\nHAVACILIK OPERASYONLARINA ETKİ\nYOK\n"
         assert parse_digest(text, [])["aviation"] == []
 
     def test_verification_labels_are_stripped(self):
-        text = ("GÜNÜN TABLOSU\nDurum.\n\nÖNE ÇIKANLAR\n"
+        text = ("GENEL DURUM DEĞERLENDİRMESİ\nDurum.\n\nKRİTİK GELİŞMELER\n"
                 "- Üsse saldırı — Doğruluk Durumu: Onaylandı\n")
         assert parse_digest(text, [])["highlights"] == ["Üsse saldırı"]
 
@@ -120,10 +120,10 @@ class TestParseDigest:
 class TestValidateDigest:
     def test_rejects_missing_overview(self):
         with pytest.raises(ValueError, match="overview"):
-            validate_digest(parse_digest("ÖNE ÇIKANLAR\n- bir şey\n", []))
+            validate_digest(parse_digest("KRİTİK GELİŞMELER\n- bir şey\n", []))
 
     def test_accepts_overview_only(self):
-        assert validate_digest(parse_digest("GÜNÜN TABLOSU\nDurum sakin.\n", []))
+        assert validate_digest(parse_digest("GENEL DURUM DEĞERLENDİRMESİ\nDurum sakin.\n", []))
 
 
 class TestBuildDigest:
@@ -138,7 +138,7 @@ class TestBuildDigest:
         # Model narrated only IR; BH had a report and must not vanish silently.
         monkeypatch.setattr(
             "src.services.sitrep_digest.run_digest_llm",
-            lambda *a, **kw: {"content": "GÜNÜN TABLOSU\nDurum.\n\nÜLKE DURUMU\n- IR | Vuruldu.\n",
+            lambda *a, **kw: {"content": "GENEL DURUM DEĞERLENDİRMESİ\nDurum.\n\nÜLKE DEĞERLENDİRMELERİ\n- IR | Vuruldu.\n",
                               "provider": "p", "model": "m"},
         )
         d = build_digest(None, [country("IR", severities=(95,)), country("BH")], "s", "e")
@@ -149,7 +149,7 @@ class TestBuildDigest:
     def test_risk_levels_come_from_severity_not_llm(self, monkeypatch):
         monkeypatch.setattr(
             "src.services.sitrep_digest.run_digest_llm",
-            lambda *a, **kw: {"content": "GÜNÜN TABLOSU\nDurum.\n\nÜLKE DURUMU\n"
+            lambda *a, **kw: {"content": "GENEL DURUM DEĞERLENDİRMESİ\nDurum.\n\nÜLKE DEĞERLENDİRMELERİ\n"
                                          "- IR | Sakin bir gün yaşandı.\n- BH | Kritik durum.\n",
                               "provider": "p", "model": "m"},
         )

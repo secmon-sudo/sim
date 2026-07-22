@@ -480,7 +480,7 @@ def send_digest_telegram(
     risk_icon = {"Kritik": "🔴", "Yüksek": "🟠", "Yükseltilmiş": "🔵", "Normal": "🟢"}
 
     text = (
-        f"🧭 <b>GÜNLÜK HAP ÖZET</b>\n"
+        f"<b>GÜNLÜK YÖNETİCİ BRİFİNGİ</b>\n"
         f"📅 <code>{window_start}</code> — <code>{window_end}</code> UTC\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"{html.escape(digest.get('overview', ''))}\n"
@@ -488,7 +488,7 @@ def send_digest_telegram(
 
     countries = digest.get("countries") or []
     if countries:
-        text += "\n<b>🌍 Ülke Durumu</b>\n"
+        text += "\n<b>ÜLKE DEĞERLENDİRMELERİ</b>\n"
         for c in countries:
             icon = risk_icon.get(c.get("risk", ""), "⚪")
             text += (f"{icon} <b>{html.escape(c.get('name', ''))}</b> "
@@ -497,14 +497,14 @@ def send_digest_telegram(
 
     aviation = digest.get("aviation") or []
     if aviation:
-        text += "\n<b>✈️ Havacılık Etkisi</b>\n"
+        text += "\n<b>HAVACILIK OPERASYONLARINA ETKİ</b>\n"
         for item in aviation:
             text += f"• {html.escape(item)}\n"
 
     # Telegram hard-caps sendMessage at 4096 chars; the rest is in the document.
     if len(text) > 3900:
         text = text[:3880] + "…\n"
-    text += "\nℹ️ <i>Tam özet ekte gönderilmiştir.</i>"
+    text += "\n<i>Brifingin tamamı ekte gönderilmiştir.</i>"
 
     telegram_message_id = None
     try:
@@ -526,8 +526,8 @@ def send_digest_telegram(
         resp_doc = httpx.post(
             f"https://api.telegram.org/bot{bot_token}/sendDocument",
             data={"chat_id": chat_id,
-                  "caption": f"Günlük Hap Özet ({window_start} — {window_end} UTC)"},
-            files={"document": (f"ozet_{date_tag}.html", file_buffer, "text/html")},
+                  "caption": f"Günlük Yönetici Brifingi ({window_start} — {window_end} UTC)"},
+            files={"document": (f"brifing_{date_tag}.html", file_buffer, "text/html")},
             timeout=20.0,
         )
         resp_doc.raise_for_status()

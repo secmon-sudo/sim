@@ -190,7 +190,7 @@ def _save_digest(db_conn, window_start, window_end, status: str,
 def run_digest(db_conn, router: LLMRouter, results: List[Dict[str, Any]],
                window_start: datetime, window_end: datetime) -> Optional[str]:
     """
-    Run-level "hap özet": one short executive briefing synthesised from the
+    Run-level executive briefing: one short cross-country synthesis of the
     country SITREPs of this run. Fail-soft — the country reports are already
     delivered, so a digest failure never fails the run.
     """
@@ -214,7 +214,7 @@ def run_digest(db_conn, router: LLMRouter, results: List[Dict[str, Any]],
 
     r2_url = None
     try:
-        r2_url = upload_report_to_r2(f"digest_{window_end:%Y%m%d}.html",
+        r2_url = upload_report_to_r2(f"brifing_{window_end:%Y%m%d}.html",
                                      html_doc.encode("utf-8"), "text/html")
         if r2_url and "pub-default.r2.dev" in r2_url:
             r2_url = None

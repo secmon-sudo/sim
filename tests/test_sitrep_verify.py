@@ -479,3 +479,58 @@ class TestSpilloverAliases:
         assert "%IRGC%" in captured["params"]
         # placeholder count matches parameter count (2 per term + 3 fixed)
         assert captured["sql"].count("%s") == len(captured["params"])
+
+
+class TestCredentialRedaction:
+    """API keys travel in the query string; CI logs of a public repo are
+    world-readable, so transport errors must never carry a live key."""
+
+    def test_key_param_is_masked(self):
+        from src.services.sitrep_web_enrich import _redact
+        raw = ("Client error '404 Not Found' for url 'https://generativelanguage."
+               "googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"
+               "?key=AQ.Ab8RN6K66GNyvmHAz3qoicsSL'")
+        out = _redact(raw)
+        assert "AQ.Ab8RN6K66GNyvmHAz3qoicsSL" not in out
+        assert "key=***" in out
+
+    def test_non_key_text_untouched(self):
+        from src.services.sitrep_web_enrich import _redact
+        assert _redact("plain error") == "plain error"
+
+
+class TestGroundedCallBudget:
+    """Search grounding is billed per REQUEST, so the call count is the cost
+    driver — the budget must hard-stop grounding, not merely pace it."""
+
+    def test_budget_exhaustion_disables_further_calls(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setattr(enr, "MAX_GROUNDED_CALLS_PER_RUN", 2)
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+        calls = {"n": 0}
+
+        class FakeResp:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self):
+                calls["n"] += 1
+                return {"candidates": [{"content": {"parts": [{"text": "ok"}]},
+                                        "groundingMetadata": {}}]}
+
+        monkeypatch.setattr(enr.httpx, "post", lambda *a, **kw: FakeResp())
+
+        assert enr._call_gemini("p", "test-key") is not None
+        assert enr._call_gemini("p", "test-key") is not None
+        # third call must be refused without touching the network
+        assert enr._call_gemini("p", "test-key") is None
+        assert calls["n"] == 2
+        assert enr._quota_exhausted is True
+        enr._reset_gemini_state()
+
+    def test_reset_clears_budget(self):
+        import src.services.sitrep_web_enrich as enr
+        enr._grounded_calls = 5
+        enr._reset_gemini_state()
+        assert enr._grounded_calls == 0

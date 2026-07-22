@@ -49,6 +49,13 @@ _file_handler.setLevel(logging.DEBUG)
 _file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
 logging.getLogger().addHandler(_file_handler)
 
+# httpx logs every request at INFO with the FULL url — and Telegram/Gemini carry
+# their credentials in the url (bot<token>/sendMessage, ?key=...). These logs are
+# uploaded as CI artifacts from a public repo, i.e. world-readable, so a live
+# token would be published on every run. WARNING keeps transport failures visible
+# without printing request lines.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger("sim.orchestrator")
 
 # Double-trigger guard: the pipeline is fired by BOTH the GitHub `schedule` cron
