@@ -66,6 +66,14 @@ with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
 _INGESTION = SETTINGS.get("ingestion", {})
 _MAX_ARTICLE_AGE_DAYS = _INGESTION.get("max_article_age_days", 4)
 _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
+# Full-text extraction costs ~1s of wall clock per article (measured 2026-07-23:
+# 0.5s to resolve the Google News redirect, 0.5s for trafilatura), and roughly
+# two in five URLs return nothing — paywalls and JS-rendered pages. Running it on
+# every candidate would add minutes to a run for little gain, since most items
+# carry a one-line RSS description that scores 1-2 on the priority triage.
+# Gate on that score and cap the total: the depth goes where it changes a report.
+_FULL_TEXT_MIN_PRIORITY = _INGESTION.get("full_text_min_priority", 3)
+_FULL_TEXT_MAX_PER_RUN = _INGESTION.get("full_text_max_per_run", 80)
 _MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
 # Per-domain overrides of the cap above (eTLD+1 → cap). For high-volume,
 # single-source rapid-relay feeds (e.g. OSINT aggregator accounts) that would
@@ -249,6 +257,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "domain_capped": 0,
         "corroborations_recorded": 0,
         "events_inserted": 0,
+        "full_text_attempted": 0,
         "full_text_fetched": 0,
     }
 
@@ -427,9 +436,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             dropped_priority_max = max(dropped_priority_max, item.get("_priority", 0))
             continue
 
-        # Optional: fetch full text
+        # Optional: fetch full text. canonical_text is what Pass C actually
+        # shows the classifier (truncated to BATCH_TEXT_CHARS), so the body
+        # lands in front of the LLM — an RSS description alone stops at the
+        # headline and never says which route or until when.
         full_text = ""
-        if _FETCH_FULL_TEXT:
+        if (_FETCH_FULL_TEXT
+                and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY
+                and stats["full_text_attempted"] < _FULL_TEXT_MAX_PER_RUN):
+            stats["full_text_attempted"] += 1
             full_text = fetch_full_text(url)
             if full_text:
                 stats["full_text_fetched"] += 1

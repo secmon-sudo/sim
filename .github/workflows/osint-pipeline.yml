@@ -22,6 +22,7 @@ env:
   OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
   OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
   GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+  GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
   CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}

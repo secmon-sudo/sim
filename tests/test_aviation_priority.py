@@ -2,7 +2,7 @@
 Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus).
 """
 
-from src.pipeline.pass_a_ingest import is_noise
+from src.pipeline.pass_a_ingest import _matches_security_keywords, is_noise
 from src.pipeline.pass_d_score import (
     AVIATION_NEXUS_BONUS,
     compute_aviation_bonus,
@@ -45,3 +45,54 @@ class TestAviationNexusBonus:
         # it just doesn't earn the aviation bonus (coverage unchanged, only ranking).
         ev = {"event_type": "civil_unrest", "source_title": "Mass protest grips the capital"}
         assert compute_aviation_bonus(ev, None) == 0
+
+
+class TestFlightDisruptionGate:
+    """The gate that decides whether a flight-disruption headline is ingested.
+
+    An airline is the end customer, so "which carrier stopped flying where" is
+    the highest-value line in a SITREP — but the vocabulary of a security
+    grounding is identical to that of a snowstorm cancellation. Coverage was
+    measured against a live Google News feed on 2026-07-23: before these
+    keywords, 10 of 14 genuine Gulf-conflict disruption headlines were dropped.
+    """
+
+    @staticmethod
+    def _passes(title: str) -> bool:
+        return _matches_security_keywords(title, "") and not is_noise(title)
+
+    def test_carrier_suspension_passes(self):
+        assert self._passes("Emirates suspends all flights to Tehran amid strikes")
+
+    def test_gerund_form_passes(self):
+        # "Airlines Suspending Flights" — the participle is as common in
+        # headlines as the third-person verb.
+        assert self._passes("Emirates and Etihad among airlines suspending flights to Kuwait")
+
+    def test_route_suspension_passes(self):
+        assert self._passes("Air France suspends routes to Riyadh, Dubai and Beirut")
+
+    def test_airport_ceasing_operations_passes(self):
+        assert self._passes("Kuwait International Airport temporarily suspends operations")
+
+    def test_passive_voice_passes(self):
+        assert self._passes("Flights suspended at Bahrain International Airport")
+
+    def test_cancellation_with_security_cause_passes(self):
+        assert self._passes("Jordan flight cancellations continue as Iranian attacks disrupt air travel")
+
+    def test_weather_cancellation_filtered(self):
+        # Safety, not security — the distinction the SITREP scope rests on.
+        assert not self._passes("Delta cancels flights due to snowstorm in Chicago")
+
+    def test_winter_storm_filtered(self):
+        assert not self._passes("United cancels flights after winter storm hits Denver")
+
+    def test_fog_disruption_filtered(self):
+        assert not self._passes("Heathrow flight disruption caused by dense fog")
+
+    def test_commercial_route_news_filtered(self):
+        assert not self._passes("Ryanair launches new route to Malaga with fare sale")
+
+    def test_maintenance_filtered(self):
+        assert not self._passes("Airline cancels flights for scheduled maintenance")

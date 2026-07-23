@@ -387,6 +387,38 @@ def build_llm_router() -> LLMRouter:
             rpm=5, rpd=20,
             bucket=TokenBucket(rate_per_minute=5, daily_limit=20, burst=DEFAULT_BURST),
         ),
+        # ⑧b Gemini genişlemesi — kota PROJE ve MODEL başına ayrı verilir.
+        #
+        # 3.5-flash-lite, 3.1-flash-lite ile aynı projede olmasına rağmen kendi
+        # 500 RPD'sini taşıyor (ayrı model kovası). GEMINI_API_KEY_2 ise ayrı bir
+        # projeye ait, dolayısıyla her iki modelde de sıfırdan 500 RPD getiriyor.
+        # Bu anahtar 2026-07-23'e kadar YALNIZCA SITREP grounding'inde kullanılıyordu;
+        # 2.5-flash-lite'ın emekli olmasıyla o yol tamamen öldü ve anahtar boşta
+        # kaldı. Metin tarafı sapasağlam — beş modelde de 200 döndüğü, OpenAI-uyumlu
+        # uçta json_mode'un temiz JSON verdiği gerçek çağrıyla doğrulandı.
+        #
+        # Toplam Gemini kapasitesi: 500 → 2000 RPD.
+        LLMAccount(
+            provider="gemini", account_id="A",
+            model="gemini-3.5-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
+        LLMAccount(
+            provider="gemini", account_id="B",
+            model="gemini-3.1-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY_2", ""),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
+        LLMAccount(
+            provider="gemini", account_id="B",
+            model="gemini-3.5-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY_2", ""),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
         # ⑨ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
         # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli
         # artık 1K RPD üstüne çıkmıyor (2026-06-17 Groq deprecation).
