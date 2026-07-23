@@ -12,6 +12,7 @@ import html
 import io
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -20,6 +21,18 @@ from src.core.storyline import strip_date_hint
 from src.services.telegram_notifier import _post_telegram
 
 logger = logging.getLogger(__name__)
+
+# A partial tag ("</b") or entity ("&amp") left at the end of a truncated body.
+_PARTIAL_MARKUP_RE = re.compile(r"(<[a-zA-Z/][^>]*|&[a-zA-Z#][a-zA-Z0-9]*)$")
+
+
+def _trim_partial_markup(text: str) -> str:
+    """Drop a tag or entity the truncation cut in half.
+
+    Last resort for a body with no newline to cut on — Telegram rejects the
+    whole message when parse_mode=HTML meets "</b" or "&amp".
+    """
+    return _PARTIAL_MARKUP_RE.sub("", text)
 
 
 def generate_html_report_payload(
@@ -502,8 +515,19 @@ def send_digest_telegram(
             text += f"• {html.escape(item)}\n"
 
     # Telegram hard-caps sendMessage at 4096 chars; the rest is in the document.
+    #
+    # Cut on a LINE boundary, not at a raw offset. The body is sent with
+    # parse_mode=HTML and a blind slice lands inside a tag or an entity often
+    # enough to matter (measured over 300 body lengths: 173 produced a split
+    # <b>…</b> pair, 4 a bare "&amp"). Telegram rejects the whole message with
+    # "can't parse entities", the exception is caught and logged, and the
+    # briefing text silently never reaches the chat — only the attachment does.
+    # Every line here opens and closes its own tags, so a newline is always a
+    # safe place to stop.
     if len(text) > 3900:
-        text = text[:3880] + "…\n"
+        cut = text.rfind("\n", 0, 3880)
+        text = text[:cut] if cut > 0 else _trim_partial_markup(text[:3880])
+        text += "\n…\n"
     text += "\n<i>Brifingin tamamı ekte gönderilmiştir.</i>"
 
     telegram_message_id = None

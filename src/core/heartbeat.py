@@ -64,7 +64,18 @@ class HeartbeatWorker:
         db_conn = None
 
         try:
-            db_conn = get_connection()
+            try:
+                db_conn = get_connection()
+            except Exception:
+                # Nothing above can catch this — _run is the thread entry point,
+                # so an escaping exception becomes an unhandled-thread traceback
+                # in the logs while the caller (mid-LLM-call) sees nothing. The
+                # heartbeat is best-effort: log and let the lock age out.
+                logger.exception(
+                    "Heartbeat: could not acquire a DB connection for event %s; "
+                    "not keeping the lock alive", self._event_id,
+                )
+                return
 
             while not self._stop_event.wait(timeout=self._interval):
                 try:
