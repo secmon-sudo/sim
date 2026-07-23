@@ -6,12 +6,18 @@ Blueprint V20.1 §5.2 + §5.3
 composite suppression key to prevent duplicate notifications.
 """
 
+import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from src.core.geo import geo_key
 
 logger = logging.getLogger(__name__)
+
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as _f:
+    _SETTINGS = json.load(_f)
 
 
 @dataclass
@@ -34,6 +40,60 @@ TIERS = {
 ADVISORY_EVENT_TYPES = {"travel_advisory", "travel_ban"}
 ADVISORY_ALERT_SEVERITY_MIN = 55
 
+# Tier thresholds live in config/settings.json -> alert.tiers. They used to be
+# duplicated here as literals, which meant editing the config changed nothing —
+# a silent trap for anyone tuning alert volume. The defaults below reproduce the
+# original V19 gates exactly, so a missing or partial config behaves as before.
+#
+# Each tier is evaluated in order and takes the first match:
+#   severity_min / confidence_min   — inclusive floors
+#   anchor_confidence               — allowed values (omit to accept any)
+#   time_certainty_exclude          — reject when time_certainty is in this list
+#   time_certainty_include          — require time_certainty to be in this list
+_DEFAULT_TIER_RULES = {
+    "CRITICAL": {"severity_min": 80, "confidence_min": 0.8,
+                 "anchor_confidence": ["HIGH"], "time_certainty_exclude": ["unknown"]},
+    "ALERT": {"severity_min": 65, "confidence_min": 0.65,
+              "anchor_confidence": ["HIGH", "MEDIUM"], "time_certainty_exclude": ["unknown"]},
+    "WATCH": {"severity_min": 45, "confidence_min": 0.5,
+              "anchor_confidence": ["HIGH", "MEDIUM", "LOW"],
+              "time_certainty_include": ["same_day", "previous_day"]},
+}
+
+# Severity descends across tiers, so evaluation order is fixed rather than taken
+# from dict order in the config — a reordered config file must not silently make
+# every CRITICAL event fire as WATCH.
+TIER_ORDER = ("CRITICAL", "ALERT", "WATCH")
+
+
+def _tier_rules() -> dict:
+    """Merge configured tier rules over the built-in defaults, per tier."""
+    configured = _SETTINGS.get("alert", {}).get("tiers", {})
+    rules = {}
+    for name in TIER_ORDER:
+        merged = dict(_DEFAULT_TIER_RULES[name])
+        merged.update(configured.get(name) or {})
+        rules[name] = merged
+    return rules
+
+
+TIER_RULES = _tier_rules()
+
+
+def _matches_tier(rule: dict, sev, conf, anc: str, time_: str) -> bool:
+    if sev < rule["severity_min"] or conf < rule["confidence_min"]:
+        return False
+    allowed = rule.get("anchor_confidence")
+    if allowed is not None and anc not in allowed:
+        return False
+    excluded = rule.get("time_certainty_exclude")
+    if excluded and time_ in excluded:
+        return False
+    required = rule.get("time_certainty_include")
+    if required and time_ not in required:
+        return False
+    return True
+
 
 def evaluate_alert_tier(event: dict) -> str | None:
     """
@@ -52,17 +112,9 @@ def evaluate_alert_tier(event: dict) -> str | None:
     if event.get("event_type") in ADVISORY_EVENT_TYPES:
         return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
 
-    # CRITICAL — original V19 gate, unchanged
-    if sev >= 80 and conf >= 0.8 and anc == "HIGH" and time_ != "unknown":
-        return "CRITICAL"
-
-    # ALERT — mid tier, actionable but not highest urgency
-    if sev >= 65 and conf >= 0.65 and anc in ("HIGH", "MEDIUM") and time_ != "unknown":
-        return "ALERT"
-
-    # WATCH — early signal, situational awareness only
-    if sev >= 45 and conf >= 0.5 and time_ in ("same_day", "previous_day"):
-        return "WATCH"
+    for name in TIER_ORDER:
+        if _matches_tier(TIER_RULES[name], sev, conf, anc, time_):
+            return name
 
     return None
 

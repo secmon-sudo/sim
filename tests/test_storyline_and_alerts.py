@@ -170,3 +170,65 @@ class TestIntraBatchClustering:
                 "country_iso", "occurred_at_est", "anchor_name_norm")})
 
         assert len(set(assigned)) == 1, "all sibling reports should share one storyline"
+
+
+class TestConfigDrivenTiers:
+    """alert.tiers in settings.json must actually drive the gates.
+
+    The thresholds were duplicated as literals in alerts.py, so editing the
+    config changed nothing — a silent trap for anyone tuning alert volume.
+    """
+
+    @staticmethod
+    def _event(sev, conf, anchor="HIGH", time_="same_day"):
+        return {"severity_score": sev, "system_confidence": conf,
+                "anchor_confidence": anchor, "time_certainty": time_}
+
+    def test_config_and_code_agree(self):
+        # The shipped config must reproduce the V19 gates; a mismatch means the
+        # file was edited without the intent being reviewed.
+        import json
+        from pathlib import Path
+        from src.core.alerts import TIER_RULES
+        cfg = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
+        )["alert"]["tiers"]
+        assert cfg["CRITICAL"]["severity_min"] == TIER_RULES["CRITICAL"]["severity_min"] == 80
+        assert cfg["ALERT"]["confidence_min"] == TIER_RULES["ALERT"]["confidence_min"] == 0.65
+        assert cfg["WATCH"]["severity_min"] == TIER_RULES["WATCH"]["severity_min"] == 45
+
+    def test_raising_a_threshold_takes_effect(self, monkeypatch):
+        import src.core.alerts as alerts
+        event = self._event(85, 0.9)
+        assert alerts.evaluate_alert_tier(event) == "CRITICAL"
+        stricter = {k: dict(v) for k, v in alerts.TIER_RULES.items()}
+        stricter["CRITICAL"]["severity_min"] = 95
+        monkeypatch.setattr(alerts, "TIER_RULES", stricter)
+        # Falls through to the next tier it still satisfies, not to None.
+        assert alerts.evaluate_alert_tier(event) == "ALERT"
+
+    def test_partial_config_falls_back_to_defaults(self, monkeypatch):
+        # A config that sets only severity_min must keep the other gates.
+        import src.core.alerts as alerts
+        monkeypatch.setattr(
+            alerts, "_SETTINGS",
+            {"alert": {"tiers": {"CRITICAL": {"severity_min": 70}}}},
+        )
+        rules = alerts._tier_rules()
+        assert rules["CRITICAL"]["severity_min"] == 70
+        assert rules["CRITICAL"]["confidence_min"] == 0.8
+        assert rules["CRITICAL"]["anchor_confidence"] == ["HIGH"]
+
+    def test_evaluation_order_is_fixed(self):
+        # Tiers must be tried most-severe first regardless of config key order,
+        # or every CRITICAL event would report as WATCH.
+        from src.core.alerts import TIER_ORDER
+        assert TIER_ORDER == ("CRITICAL", "ALERT", "WATCH")
+
+    def test_low_anchor_cannot_reach_alert(self):
+        from src.core.alerts import evaluate_alert_tier
+        assert evaluate_alert_tier(self._event(70, 0.7, anchor="LOW")) == "WATCH"
+
+    def test_unknown_time_blocks_critical(self):
+        from src.core.alerts import evaluate_alert_tier
+        assert evaluate_alert_tier(self._event(90, 0.9, time_="unknown")) is None

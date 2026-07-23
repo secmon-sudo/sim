@@ -304,6 +304,10 @@ class TestGeminiQuotaBreaker:
         import src.services.sitrep_web_enrich as enr
         enr._reset_gemini_state()
         monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        # The pass ships disabled (no free-tier model can ground since
+        # 2026-07-09); this test covers the ordering it uses when a working
+        # grounding provider is wired back in.
+        monkeypatch.setattr(enr, "WEB_ENRICH_ENABLED", True)
         monkeypatch.setattr(enr.time, "sleep", lambda s: None)
         order = []
         monkeypatch.setattr(enr, "discover_incidents",
@@ -534,3 +538,36 @@ class TestGroundedCallBudget:
         enr._grounded_calls = 5
         enr._reset_gemini_state()
         assert enr._grounded_calls == 0
+
+
+class TestWebEnrichKillSwitch:
+    """The grounding pass must cost nothing while it has no working provider.
+
+    Run #13 (2026-07-23) spent 25 HTTP calls, ~3 minutes and one key's daily
+    quota on a retired model, and still reported success — the pass is
+    fail-soft, so a dead provider looks exactly like a quiet news day.
+    """
+
+    def test_disabled_by_default_in_config(self):
+        import json
+        from pathlib import Path
+        settings = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
+        )
+        assert settings["sitrep"]["web_enrich_enabled"] is False
+
+    def test_disabled_pass_makes_no_calls(self, monkeypatch):
+        import src.services.sitrep_web_enrich as enr
+        enr._reset_gemini_state()
+        monkeypatch.setenv("GEMINI_API_KEY", "k1")
+        monkeypatch.setattr(enr, "WEB_ENRICH_ENABLED", False)
+
+        def _boom(*a, **k):
+            raise AssertionError("no network call may happen while disabled")
+
+        monkeypatch.setattr(enr.httpx, "post", _boom)
+        monkeypatch.setattr(enr.time, "sleep", _boom)
+        result = enr.apply_web_enrichment(
+            [{"sources": [], "location": "X", "snippet": "s"}], "Iraq", max_clusters=3
+        )
+        assert result == {"strategic": None, "discovered": []}

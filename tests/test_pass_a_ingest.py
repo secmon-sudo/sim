@@ -233,3 +233,43 @@ class TestCorroborationRecording:
                                    "reuters.com", "https://reuters.com/b", "headline")
         assert ok and conn.calls
         assert "corroborating_sources" in conn.calls[0][0]
+
+
+class TestGoogleNewsRecency:
+    """Google News search feeds rank by relevance, not date.
+
+    Measured 2026-07-23 across 12 live queries: 885 items returned, 6 of them
+    from the last 48 hours — the rest were months-old "best matches" that the
+    age filter then discarded. The operator is appended centrally so all ~120
+    built queries get it, including the storyline-driven dynamic ones.
+    """
+
+    def test_operator_matches_age_filter(self):
+        # Asking Google for a wider window than the age filter accepts would
+        # spend the feed's 100-item budget on rows that are dropped anyway.
+        from src.pipeline.ingest_sources import _MAX_ARTICLE_AGE_DAYS, _RECENCY_OPERATOR
+        assert _RECENCY_OPERATOR == f"when:{_MAX_ARTICLE_AGE_DAYS}d"
+
+    def test_operator_appended(self):
+        from src.pipeline.ingest_sources import with_recency
+        assert with_recency('"airport attack"').endswith(" when:2d")
+
+    def test_existing_operator_preserved(self):
+        # A query that sets its own window wins — no double operator.
+        from src.pipeline.ingest_sources import with_recency
+        assert with_recency("Iran strike when:1d") == "Iran strike when:1d"
+
+    def test_static_feed_urls_carry_the_operator(self):
+        # Static feeds are fetched as direct URLs and bypass with_recency(),
+        # so the operator has to live in the configured URL itself.
+        import json
+        from pathlib import Path
+        settings = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
+        )
+        google_feeds = [
+            u for u in settings["sources"]["static_feeds"]
+            if "news.google.com/rss/search" in u
+        ]
+        assert google_feeds, "expected Google News feeds in static_feeds"
+        assert all("when%3A" in u or "when:" in u for u in google_feeds)

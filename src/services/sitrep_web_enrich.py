@@ -33,6 +33,23 @@ _CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as _f:
     _SITREP_CFG = json.load(_f).get("sitrep", {})
 
+# Master switch for the whole grounding pass.
+#
+# Google retired gemini-2.5-flash-lite on 2026-07-09 (earlier than the announced
+# October date) and it was the last free-tier model that could ground: measured
+# 2026-07-23, every 3.x model returns 429 on a google_search tool call within
+# 0.1s — quota zero, not exhausted — while the same model answers 200 without
+# the tool. Run #13 therefore spent 25 calls, ~3 minutes of wall clock and one
+# key's daily quota to produce nothing, and reported success while doing it,
+# because the pass is fail-soft.
+#
+# Off by default until grounding moves to a search API whose context size we
+# control (see the Groq-compound post-mortem). The code below is deliberately
+# left intact — swapping _call_gemini for a search provider is a small change,
+# and deleting it would mean rewriting the prompts and the groundingSupports →
+# source-domain mapping that the verification labels depend on.
+WEB_ENRICH_ENABLED = bool(_SITREP_CFG.get("web_enrich_enabled", False))
+
 # Seconds between grounded calls. 7.0 caps the rate at ~8.5/min, under
 # gemini-2.5-flash-lite's free-tier 10 RPM ceiling. A paid tier would make this
 # pacing irrelevant (RPM in the thousands), but grounding is billed per request
@@ -518,6 +535,10 @@ def apply_web_enrichment(clusters: List[Dict[str, Any]], country_name: str,
     grounding-capable model since Gemini 3 Search grounding went to 0).
     MAX_GROUNDED_CALLS_PER_RUN is the per-run backstop on top of that.
     """
+    if not WEB_ENRICH_ENABLED:
+        logger.info("SITREP web enrichment disabled (sitrep.web_enrich_enabled): "
+                    "no free-tier Gemini model can ground since 2026-07-09")
+        return {"strategic": None, "discovered": []}
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logger.info("SITREP web enrichment skipped: GEMINI_API_KEY not set")

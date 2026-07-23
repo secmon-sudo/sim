@@ -206,6 +206,37 @@ def _compile_security_keyword_pattern() -> re.Pattern:
 
 _SECURITY_KEYWORD_PATTERN = _compile_security_keyword_pattern()
 
+# Flight disruption resists the flat keyword list. Headlines phrase it a dozen
+# ways — "cancel Kuwait flights", "Airport temporarily suspends operations",
+# "airlines suspending flights" — and every fixed phrase added to cover one of
+# them either misses the next variant or, if shortened to "suspends operations",
+# admits every mine, factory and telco that halts business (measured: 6 of 9
+# non-security control headlines passed on such phrases).
+#
+# A conjunction is the honest rule: an aviation noun AND a disruption verb in
+# the same text. Weather and maintenance cases satisfy it too, but they are
+# already caught downstream by is_noise(), which runs on every ingested item —
+# so the two filters together express "aviation stopped flying, and not because
+# of weather", which is exactly the security scope of the SITREPs.
+_AVIATION_CONTEXT_PATTERN = re.compile(
+    r"\b(airport|airports|airline|airlines|airspace|flight|flights|"
+    r"carrier|carriers|aviation|terminal)\b",
+    re.IGNORECASE,
+)
+_DISRUPTION_PATTERN = re.compile(
+    r"\b(suspend|suspends|suspended|suspending|suspension|suspensions|"
+    r"halt|halts|halted|cancel|cancels|cancelled|canceled|cancelling|"
+    r"canceling|cancellation|cancellations|grounded|reroute|reroutes|"
+    r"rerouted|closure|closures|disruption|disruptions)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_flight_disruption(text: str) -> bool:
+    """Aviation noun + disruption verb in the same text (see block comment)."""
+    return bool(_AVIATION_CONTEXT_PATTERN.search(text)
+                and _DISRUPTION_PATTERN.search(text))
+
 
 def _matches_security_keywords(title: str, description: str) -> bool:
     """Check if article title/description contains at least one security keyword.
@@ -213,10 +244,11 @@ def _matches_security_keywords(title: str, description: str) -> bool:
     Used as a post-filter for general RSS feeds (reddit, aljazeera, reuters)
     that aren't pre-filtered by search query. Matches on word boundaries to
     avoid substring false positives. Covers high-signal standalone terms plus
-    config emergency/geopolitical keywords across all languages (en, ar, tr, fr).
+    config emergency/geopolitical keywords across all languages (en, ar, tr, fr),
+    plus the aviation-disruption conjunction.
     """
     text = f"{title} {description}"
-    return bool(_SECURITY_KEYWORD_PATTERN.search(text))
+    return bool(_SECURITY_KEYWORD_PATTERN.search(text)) or _is_flight_disruption(text)
 
 
 # ---------------------------------------------------------------------------

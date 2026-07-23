@@ -127,26 +127,19 @@
       "https://www.aljazeera.com/xml/rss/all.xml",
       "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml",
       "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
-      "https://www.timesofisrael.com/feed/",
       "https://www.jpost.com/rss/rssfeedsfrontpage.aspx",
       "https://www.ynetnews.com/Integration/StoryRss2.xml",
       "https://rcs.mako.co.il/rss/news-military.xml",
       "https://rss.walla.co.il/feed/22",
       "https://www.haaretz.com/srv/haaretz-latest-headlines",
       "https://www.haaretz.com/srv/middle-east-news-rss",
-      "https://www.presstv.ir/rss.xml",
-      "https://www.presstv.ir/rss/rss-102.xml",
-      "https://www.presstv.ir/rss/rss-101.xml",
-      "http://rss.cnn.com/rss/edition_meast.rss",
       "https://moxie.foxnews.com/google-publisher/world.xml",
       "https://feeds.content.dowjones.io/public/rss/RSSWorldNews",
       "https://rss.nytimes.com/services/xml/rss/nyt/MiddleEast.xml",
       "https://breakingdefense.com/feed/",
       "https://www.longwarjournal.org/feed",
-      "https://www.hstoday.us/feed/",
       "https://www.militarytimes.com/arc/outboundfeeds/rss/?outputType=xml",
       "https://warontherocks.com/feed/",
-      "https://www.centcom.mil/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=808&max=20",
       "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10",
       "https://www.dropsitenews.com/feed",
       "https://www.france24.com/en/rss",
@@ -170,9 +163,7 @@
       "https://feeds.bbci.co.uk/news/world/rss.xml",
       "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
       "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
-      "https://jamestown.org/feed/",
       "https://thesoufancenter.org/feed/",
-      "https://ctc.westpoint.edu/feed/",
       "https://www.counterextremism.com/rss.xml",
       "https://news.google.com/rss/search?q=Iran%20Israel%20war%20military%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Iran%20missile%20strike%20drone%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
@@ -198,12 +189,14 @@
       "https://news.google.com/rss/search?q=Haiti%20gang%20violence%20OR%20kidnapping%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Mexico%20OR%20Ecuador%20cartel%20violence%20OR%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22South%20China%20Sea%22%20OR%20Taiwan%20military%20incursion%20OR%20confrontation%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen"
-    ],
-    "nitter_feeds": [
-      "https://nitter.net/ww3mediaa/rss",
-      "https://nitter.net/ConflictTR/rss",
-      "https://nitter.net/visegrad24/rss"
+      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://www.rferl.org/api/epiqq",
+      "https://iranintl.com/en/feed",
+      "https://www.aa.com.tr/en/rss/default?cat=live",
+      "https://iranwire.com/en/feed/",
+      "https://www.middleeasteye.net/rss",
+      "https://saudigazette.com.sa/rssFeed/74",
+      "https://rss.dw.com/atom/rss-en-all"
     ],
     "nitter_mirrors": [
       "https://nitter.net",
@@ -237,7 +230,12 @@
       "https://www.gov.uk/foreign-travel-advice/libya.atom",
       "https://www.gov.uk/foreign-travel-advice/mozambique.atom"
     ],
-    "gdelt_enabled": false
+    "nitter_feeds_disabled_2026_07_23": [
+      "https://nitter.net/ww3mediaa/rss",
+      "https://nitter.net/ConflictTR/rss",
+      "https://nitter.net/visegrad24/rss"
+    ],
+    "nitter_feeds": []
   },
   "sitrep": {
     "window_hours": 24,
@@ -247,6 +245,7 @@
     "snippet_chars": 600,
     "language": "tr",
     "max_web_enrich_clusters": 3,
+    "web_enrich_enabled": false,
     "web_enrich_cooldown_s": 7.0,
     "max_grounded_calls_per_run": 36,
     "high_severity_override": 80

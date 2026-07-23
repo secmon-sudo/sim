@@ -73,11 +73,7 @@
       "airport closure",
       "flights suspended",
       "flights were suspended",
-      "suspends operations",
-      "suspended operations",
       "airport suspends",
-      "cancels routes",
-      "cancel routes",
       "flight cancellations",
       "flight disruption",
       "flight disruptions",
@@ -86,7 +82,6 @@
       "suspending flights",
       "suspends routes",
       "suspend routes",
-      "suspends service",
       "cancels flights",
       "cancel flights",
       "cancelled flights",
@@ -1513,7 +1508,6 @@
     "pilot shortage",
     "fare sale",
     "route launch",
-    "new route",
     "codeshare"
   ]
 }

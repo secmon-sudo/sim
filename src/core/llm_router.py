@@ -377,16 +377,6 @@ def build_llm_router() -> LLMRouter:
             rpm=15, rpd=500,
             bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
         ),
-        LLMAccount(
-            provider="gemini", account_id="A",
-            # Acil yedek: yalnızca 20 RPD — bucket yerelde durdurur, 429'a sürmez.
-            # Çıplak "gemini-3-flash" 404 döndürüyor; doğru kimlik "-preview" ekli
-            # (deprecated ama kapanış tarihi yok).
-            model="gemini-3-flash-preview",
-            api_key=os.environ.get("GEMINI_API_KEY", ""),
-            rpm=5, rpd=20,
-            bucket=TokenBucket(rate_per_minute=5, daily_limit=20, burst=DEFAULT_BURST),
-        ),
         # ⑧b Gemini genişlemesi — kota PROJE ve MODEL başına ayrı verilir.
         #
         # 3.5-flash-lite, 3.1-flash-lite ile aynı projede olmasına rağmen kendi
@@ -418,6 +408,18 @@ def build_llm_router() -> LLMRouter:
             api_key=os.environ.get("GEMINI_API_KEY_2", ""),
             rpm=15, rpd=500,
             bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
+        LLMAccount(
+            provider="gemini", account_id="A",
+            # Acil yedek: yalnızca 20 RPD — bucket yerelde durdurur, 429'a sürmez.
+            # Çıplak "gemini-3-flash" 404 döndürüyor; doğru kimlik "-preview" ekli
+            # (deprecated ama kapanış tarihi yok). Sırası kasıtlı: 20 RPD'lik bu
+            # slot 500'lüklerin ARKASINDA durmalı, yoksa dakikalar içinde tükenip
+            # arkasındaki 1500 RPD'ye hiç sıra gelmeden cascade'i aşağı iter.
+            model="gemini-3-flash-preview",
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
+            rpm=5, rpd=20,
+            bucket=TokenBucket(rate_per_minute=5, daily_limit=20, burst=DEFAULT_BURST),
         ),
         # ⑨ Groq Bulk Fallback — son çare (eski llama-3.1-8b-instant yerine gpt-oss-20b)
         # NOT: 8b-instant 14.4K RPD sundu; ücretsiz katmanda hiçbir sohbet modeli

@@ -2,7 +2,7 @@
 SIM — Pass A ingest: search-query construction
 
 Builds the per-run Google News RSS query set (static tiers + dynamic
-active-storyline queries) and the GDELT query rotation.
+active-storyline queries).
 Split out of pass_a_ingest.py on 2026-07-16.
 """
 
@@ -276,77 +276,3 @@ def build_search_queries(db_conn=None) -> list[dict]:
         _add(q)
 
     return queries
-
-
-def build_gdelt_queries() -> list[dict]:
-    """
-    Build focused GDELT queries with tone and source-country filters.
-
-    Covers ALL active conflict regions globally per EASA CZIB + known high-risk areas:
-      • Middle East & Persian Gulf
-      • Sahel & Horn of Africa
-      • North & Central Africa
-      • South & Southeast Asia
-      • Latin America
-      • Eurasia / Eastern Europe
-
-    Each query dict has:
-      - query: GDELT search string
-      - tone: optional tone filter ("<-5" = negative news)
-      - countries: FIPS source-country list
-    """
-    return [
-        # ── Middle East & Persian Gulf (CZIB Active) ──
-        {
-            "query": '"airport attack" OR "airport bombing" OR "airport shooting" OR "airport terror"',
-            "tone": "<-5",
-            "countries": ["SY", "IQ", "IR", "IL", "JO", "LB", "YE", "SA", "AE", "QA", "KW", "BH", "OM", "TR", "PS"],
-        },
-        {
-            "query": '"missile strike" OR "airstrike" OR "drone strike" OR "civilian casualties"',
-            "tone": "<-5",
-            "countries": ["SY", "IQ", "IR", "IL", "LB", "YE", "SA", "AE", "TR", "PS", "JO", "KW"],
-        },
-        # ── Sahel & West Africa (CZIB Active: Mali, Libya, Sudan, Somalia) ──
-        {
-            "query": '"Boko Haram" OR "Al-Shabaab" OR "jihadist attack" OR "ISIS Africa" OR "Sahel crisis" OR "Wagner Africa"',
-            "tone": None,
-            "countries": ["NG", "NE", "ML", "BF", "TD", "CF", "SN", "MR", "GN", "SL", "LR", "CI", "GH", "TG", "BJ", "CM", "GA", "GQ", "ST", "SO", "ET", "ER", "DJ", "KE", "SS", "SD", "UG", "RW", "BI", "CD", "CG", "AO", "LY", "DZ", "TN", "EG", "MA", "EH"],
-        },
-        {
-            "query": '"mass shooting" OR "mass casualty" OR "massacre" OR "suicide bombing" OR "vehicle ramming"',
-            "tone": "<-5",
-            "countries": ["NG", "ML", "BF", "TD", "CF", "SO", "ET", "SS", "SD", "CD", "CG", "AO", "LY", "DZ", "TN", "EG"],
-        },
-        # ─— Ukraine / Russia / Eurasia (CZIB Active) ──
-        {
-            "query": '"Ukraine" OR "Russia" OR "missile" OR "airstrike" OR "war" OR "invasion"',
-            "tone": "<-5",
-            "countries": ["UA", "RU", "BY", "MD", "GE", "AM", "AZ", "PL", "RO", "HU", "SK", "LT", "LV", "EE", "FI"],
-        },
-        # ── South & Central Asia ──
-        {
-            "query": '"Taliban" OR "Afghanistan" OR "Pakistan" OR "terror attack" OR "suicide bomber"',
-            "tone": "<-5",
-            "countries": ["AF", "PK", "IN", "BD", "LK", "NP", "BT", "MV", "IR", "IQ", "SY", "YE"],
-        },
-        # ── Southeast Asia ──
-        {
-            "query": '"Myanmar" OR "Rohingya" OR "civil war" OR "armed conflict" OR "insurgency"',
-            "tone": "<-5",
-            "countries": ["MM", "TH", "PH", "ID", "MY", "VN", "LA", "KH", "SG", "BN", "TL", "PG"],
-        },
-        # ── Latin America ──
-        {
-            "query": '"drug cartel" OR "gang violence" OR "massacre" OR "armed conflict" OR "homicide"',
-            "tone": "<-5",
-            "countries": ["CO", "VE", "MX", "HT", "EC", "PE", "BR", "HN", "GT", "SV", "NI", "CR", "PA", "BO", "PY", "CL", "AR", "UY", "CU", "JM", "DO"],
-        },
-        # ── East Asia / Pacific ──
-        {
-            "query": '"North Korea" OR "DPRK" OR "nuclear" OR "missile test" OR "provocation"',
-            "tone": "<-5",
-            "countries": ["KP", "KR", "JP", "CN", "TW", "MN", "PH", "VN", "ID", "MY", "SG", "TH", "AU", "NZ", "PG"],
-        },
-    ]
-

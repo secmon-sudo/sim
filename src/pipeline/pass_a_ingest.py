@@ -7,7 +7,7 @@ applies noise/age/dedup filtering and inserts raw events. The heavy lifting
 lives in focused modules (split from this 1.9K-line monolith on 2026-07-16):
 
   - ingest_queries   — search-query construction (static tiers + storyline queries)
-  - ingest_sources   — all network I/O (RSS, Nitter, advisories, GDELT, translate)
+  - ingest_sources   — all network I/O (RSS, Nitter, advisories, translate)
   - ingest_filters   — pure text filters, canonicalization, similarity dedup
 
 This module keeps only the DB-touching pieces and run_pass_a itself. The
@@ -41,13 +41,11 @@ from src.pipeline.ingest_filters import (  # noqa: F401
 )
 from src.pipeline.ingest_queries import (  # noqa: F401
     MAX_DYNAMIC_QUERIES,
-    build_gdelt_queries,
     build_search_queries,
 )
 from src.pipeline.ingest_sources import (  # noqa: F401
     GOOGLE_NEWS_RSS,
     fetch_full_text,
-    fetch_gdelt_articles,
     fetch_nitter_feeds,
     fetch_rss_feed,
     fetch_travel_advisories,
@@ -81,7 +79,6 @@ _MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
 _PER_DOMAIN_CAPS = {
     k.lower(): int(v) for k, v in _INGESTION.get("per_domain_caps", {}).items()
 }
-_GDELT_ENABLED = SETTINGS.get("sources", {}).get("gdelt_enabled", False)
 
 # ---------------------------------------------------------------------------
 # Dedup
@@ -316,30 +313,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                         len(nitter_items), len(kept_nitter), nitter_count)
     except Exception:
         logger.warning("Nitter fetch skipped due to errors")
-
-    # Fetch from GDELT — disabled by default (sources.gdelt_enabled): constant
-    # 429s/errors on cloud IPs made it noise, never signal.
-    if _GDELT_ENABLED:
-        try:
-            gdelt_queries = build_gdelt_queries()
-            # Pick 1 query per run to minimize rate-limit exposure. Rotate by hour so
-            # all regions get coverage over a day (seeding the GLOBAL random module by
-            # minute both polluted other random users and biased the selection).
-            selected = gdelt_queries[datetime.now(timezone.utc).hour % len(gdelt_queries)]
-
-            items = fetch_gdelt_articles(
-                query=selected["query"],
-                max_age_days=_MAX_ARTICLE_AGE_DAYS,
-                tone=selected.get("tone"),
-                source_countries=selected.get("countries"),
-            )
-            if items:
-                all_items.extend(items)
-                stats["queries_executed"] += 1
-                logger.info("GDELT: Got %d articles (bonus)", len(items))
-        except Exception:
-            # GDELT failure is expected on cloud IPs — never block pipeline
-            pass
 
     # Fetch official travel advisories (US State Dept + UK FCDO) — Level 3-4 / "do not travel"
     try:

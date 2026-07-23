@@ -36,6 +36,7 @@ model's RPD and one of its grounding bucket.
 
 import argparse
 import os
+import re
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,6 +44,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 _URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# The key travels in the query string, so httpx exception messages (which quote
+# the failing URL) carry it. This output is meant to be pasted into an issue or
+# a chat, and the project has already leaked credentials once through a public
+# CI artifact — mirror the redaction sitrep_web_enrich uses.
+_KEY_IN_URL_RE = re.compile(r"([?&]key=)[\w.\-]+")
+
+
+def _redact(text: str) -> str:
+    return _KEY_IN_URL_RE.sub(r"\1***", text or "")
 
 # Ordered by usefulness to us: the 500-RPD lites first — they would give the
 # most headroom — then the 20-RPD flashes, then the known-dead 2.5 as a control.
@@ -90,11 +101,10 @@ def _call(model: str, api_key: str) -> Tuple[Optional[Dict[str, Any]], int, str,
         resp = httpx.post(_URL.format(model=model), params={"key": api_key},
                           json=body, timeout=60.0)
     except Exception as e:  # network-level failure, not a model verdict
-        return None, 0, str(e)[:200], time.time() - started
+        return None, 0, _redact(str(e))[:200], time.time() - started
     elapsed = time.time() - started
     if resp.status_code != 200:
-        # Redact the key: this output may be pasted into an issue or a log.
-        return None, resp.status_code, resp.text[:400], elapsed
+        return None, resp.status_code, _redact(resp.text)[:400], elapsed
     return resp.json(), 200, "", elapsed
 
 

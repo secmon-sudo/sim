@@ -96,3 +96,47 @@ class TestFlightDisruptionGate:
 
     def test_maintenance_filtered(self):
         assert not self._passes("Airline cancels flights for scheduled maintenance")
+
+    def test_verb_place_flights_passes(self):
+        # "cancel <place> flights" defeats any fixed-phrase list; the
+        # aviation-noun + disruption-verb conjunction is what catches it.
+        assert self._passes("Etihad, Emirates cancel Kuwait flights as Gulf tensions disrupt travel")
+
+    def test_extended_suspensions_passes(self):
+        assert self._passes("UAE airlines extend Gulf flight suspensions amid conflict")
+
+
+class TestDisruptionGateStaysAviationOnly:
+    """The conjunction must not turn into a business-news firehose.
+
+    "suspends operations" was briefly a standalone keyword; it admitted mines,
+    factories, banks and telcos, all of which reach this gate through the
+    general feeds (Reuters, Al Jazeera). Requiring an aviation noun in the same
+    text is what keeps them out.
+    """
+
+    @staticmethod
+    def _passes(title: str) -> bool:
+        return _matches_security_keywords(title, "") and not is_noise(title)
+
+    def test_mine_suspension_filtered(self):
+        assert not self._passes("Gold mine suspends operations after workplace accident in Ghana")
+
+    def test_telco_suspension_filtered(self):
+        assert not self._passes("Vodafone suspends service in rural areas over billing dispute")
+
+    def test_factory_suspension_filtered(self):
+        assert not self._passes("Tesla factory suspends operations for annual retooling")
+
+    def test_rail_route_cancellation_filtered(self):
+        assert not self._passes("Amtrak cancels routes amid budget shortfall")
+
+
+class TestSmugglingRouteNotNoise:
+    def test_sanctions_evasion_route_not_noise(self):
+        # "new route" was briefly a noise filter to block fare-sale PR; it also
+        # deleted smuggling and sanctions-evasion reporting, which is signal.
+        assert is_noise("Russia opens new route to bypass Western sanctions on oil exports") is False
+
+    def test_commercial_route_launch_still_noise(self):
+        assert is_noise("Ryanair launches new route to Malaga with fare sale") is True

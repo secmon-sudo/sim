@@ -1,7 +1,7 @@
 """
 SIM — Pass A ingest: source fetchers (all network I/O)
 
-RSS/Google News, Nitter mirrors, official travel advisories, GDELT, full-text
+RSS/Google News, Nitter mirrors, official travel advisories, full-text
 fetch and best-effort translation. Everything that talks to the outside world
 during ingest lives here. Split out of pass_a_ingest.py on 2026-07-16.
 """
@@ -31,10 +31,20 @@ _MAX_ARTICLE_AGE_DAYS = SETTINGS.get("ingestion", {}).get("max_article_age_days"
 # to let Google serve regionally mixed results.  We still force hl=en.
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
 
+# Google News search feeds are RELEVANCE-ranked, not date-ranked, so a bare
+# query returns its 100 all-time best matches and buries today's coverage.
+# Measured 2026-07-23 across 12 live queries: 885 items fetched, 6 of them from
+# the last 48h. The same queries with `when:2d` returned 65 fresh items and
+# nothing stale. The window follows max_article_age_days so the search operator
+# and the age filter can never drift apart — asking Google for more than the
+# filter accepts just wastes the feed's 100-item budget on rows we then drop.
+_RECENCY_OPERATOR = f"when:{max(1, _MAX_ARTICLE_AGE_DAYS)}d"
 
-# GDELT 2.0 Article List API
-GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_MAX_RECORDS = 25  # Per query to stay within API limits
+
+def with_recency(query: str) -> str:
+    """Append the Google News recency operator unless the query sets its own."""
+    return query if "when:" in query else f"{query} {_RECENCY_OPERATOR}"
+
 
 
 # ---------------------------------------------------------------------------
@@ -72,178 +82,6 @@ def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float =
                 continue
             raise
     return None
-
-
-# ---------------------------------------------------------------------------
-# GDELT fetch
-# ---------------------------------------------------------------------------
-
-# Try to use gdeltdoc for structured queries; fall back to raw HTTP if unavailable.
-_GDELTDOC_AVAILABLE = False
-try:
-    from gdeltdoc import Filters, GdeltDoc
-    _GDELTDOC_AVAILABLE = True
-except ImportError:
-    pass
-
-
-# GDELT uses FIPS 10-4 country codes, not ISO2.
-_ISO2_TO_FIPS = {
-    # Middle East
-    "IL": "IS", "IQ": "IZ", "TR": "TU", "YE": "YM", "KW": "KU", "LB": "LE", "JO": "JO", "PS": "WE",
-    # Africa
-    "NG": "NI", "NE": "NG", "BF": "UV", "SD": "SU", "SS": "OD", "DZ": "AG", "LY": "LY",
-    # Eurasia
-    "UA": "UP", "RU": "RS", "GE": "GG", "MD": "MD", "AZ": "AJ", "AM": "AM",
-    # Asia
-    "KP": "KN", "KR": "KS", "VN": "VM", "PH": "RP", "MM": "BM", "KH": "CB",
-}
-
-
-def _parse_gdelt_date(seendate_str: str) -> datetime | None:
-    """Parse GDELT seendate (YYYYMMDDHHMMSS) to datetime."""
-    if seendate_str and len(seendate_str) >= 14:
-        try:
-            return datetime.strptime(seendate_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-        except Exception:
-            pass
-    return None
-
-
-def _gdelt_articles_from_raw(
-    query: str,
-    max_age_days: int = 3,
-    tone: str | None = None,
-    source_countries: list[str] | None = None,
-) -> list[dict]:
-    """Raw HTTP fallback for GDELT (used when gdeltdoc is not installed)."""
-    now = datetime.now(timezone.utc)
-    end_dt = now.strftime("%Y%m%d%H%M%S")
-    start_dt = (now - timedelta(days=max_age_days)).strftime("%Y%m%d%H%M%S")
-
-    full_query = query
-    if tone:
-        full_query = f"({full_query}) tone{tone}"
-    if source_countries:
-        # Map ISO2 to FIPS for GDELT
-        fips_list = [_ISO2_TO_FIPS.get(c, c) for c in source_countries]
-        # Keep filter short to avoid GDELT query length limits
-        country_filter = " OR ".join(f"sourcecountry:{c}" for c in fips_list[:10])
-        full_query = f"({full_query}) AND ({country_filter})"
-
-    params = {
-        "query": full_query,
-        "mode": "ArtList",
-        "format": "json",
-        "maxrecords": GDELT_MAX_RECORDS,
-        "startdatetime": start_dt,
-        "enddatetime": end_dt,
-        "sort": "seendate",
-    }
-
-    try:
-        resp = _http_get_with_retry(
-            GDELT_DOC_API,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-            timeout=8.0,       # fail fast — cloud IPs often get 429
-            max_retries=1,     # single attempt, no long backoff loops
-            backoff_base=2.0,
-            params=params,
-        )
-        if resp is None:
-            return []
-        data = resp.json()
-    except Exception:
-        return []
-
-    items = []
-    for article in data.get("articles", []):
-        seendate_str = article.get("seendate", "")
-        title = article.get("title", "")
-        url = article.get("url", "")
-        domain = article.get("domain", "")
-        if not url or not title:
-            continue
-        pub_dt = _parse_gdelt_date(seendate_str)
-        if pub_dt is None:
-            continue
-        if (now - pub_dt).total_seconds() / 86400 > max_age_days:
-            continue
-        items.append({
-            "title": title, "link": url, "pub_date": seendate_str,
-            "pub_dt": pub_dt, "description": "",
-            "source": "gdelt", "domain": domain,
-            "source_country": article.get("sourcecountry", ""),
-        })
-    return items
-
-
-def _gdelt_articles_with_client(
-    query: str,
-    max_age_days: int = 3,
-    tone: str | None = None,
-    source_countries: list[str] | None = None,
-) -> list[dict]:
-    """Use gdeltdoc client for structured GDELT queries."""
-    now = datetime.now(timezone.utc)
-    start_date = (now - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
-    end_date = now.strftime("%Y-%m-%d")
-
-    try:
-        f = Filters(
-            keyword=query,
-            start_date=start_date,
-            end_date=end_date,
-            num_records=GDELT_MAX_RECORDS,
-            tone=tone,
-            country=[_ISO2_TO_FIPS.get(c, c) for c in source_countries[:10]] if source_countries else None,
-        )
-        gd = GdeltDoc()
-        df = gd.article_search(f)
-    except Exception:
-        return []
-
-    items = []
-    for _, row in df.iterrows():
-        url = row.get("url", "")
-        title = row.get("title", "")
-        if not url or not title:
-            continue
-        seendate_str = str(row.get("seendate", ""))
-        pub_dt = _parse_gdelt_date(seendate_str)
-        if pub_dt is None:
-            continue
-        if (now - pub_dt).total_seconds() / 86400 > max_age_days:
-            continue
-        items.append({
-            "title": title, "link": url, "pub_date": seendate_str,
-            "pub_dt": pub_dt, "description": "",
-            "source": "gdelt", "domain": row.get("domain", ""),
-            "source_country": row.get("sourcecountry", ""),
-        })
-    return items
-
-
-def fetch_gdelt_articles(
-    query: str,
-    max_age_days: int = 3,
-    tone: str | None = None,
-    source_countries: list[str] | None = None,
-) -> list[dict]:
-    """
-    Fetch article URLs from GDELT 2.0 API.
-
-    Uses gdeltdoc client if available (structured Filters with tone/country
-    support); falls back to raw HTTP GET with retry/backoff otherwise.
-    """
-    if _GDELTDOC_AVAILABLE:
-        items = _gdelt_articles_with_client(query, max_age_days, tone, source_countries)
-    else:
-        items = _gdelt_articles_from_raw(query, max_age_days, tone, source_countries)
-
-    if items:
-        logger.info("GDELT: %d articles for '%s...' (last %dh)", len(items), query[:40], max_age_days * 24)
-    return items
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +523,7 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
         url = query_info if isinstance(query_info, str) else query_info.get("url", "")
     else:
         from urllib.parse import quote_plus
-        url = GOOGLE_NEWS_RSS.format(query=quote_plus(query_info["query"]))
+        url = GOOGLE_NEWS_RSS.format(query=quote_plus(with_recency(query_info["query"])))
 
     try:
         headers = {

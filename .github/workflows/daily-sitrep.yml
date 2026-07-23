@@ -23,10 +23,13 @@ env:
   OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
   GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
   GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
-  # BOTH keys' projects have zero Search-grounding quota for the Gemini 3
-  # family (free tier, observed 2026-07-18) but 1.5K/day for Gemini 2.5 —
-  # grounded enrichment must use a 2.5 model on every key. The binding limit
-  # then becomes the 2.5-flash-lite MODEL quota: 20 RPD per project.
+  # DEAD as of 2026-07-09: Google retired gemini-2.5-flash-lite on the
+  # generativelanguage endpoint ahead of its announced October date, and no
+  # 3.x model has Search-grounding quota on the free tier (measured 2026-07-23:
+  # 429 in 0.1s with the tool, 200 without it). There is no value that makes
+  # these work, so the pass itself is off via sitrep.web_enrich_enabled and
+  # these two vars are inert. Leave them until a search provider replaces
+  # Gemini grounding, then delete both.
   SITREP_GEMINI_MODEL:   gemini-2.5-flash-lite
   SITREP_GEMINI_MODEL_2: gemini-2.5-flash-lite
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
