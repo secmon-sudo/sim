@@ -56,6 +56,14 @@ logging.getLogger().addHandler(_file_handler)
 # without printing request lines.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+# trafilatura logs a WARNING for every article body it cannot extract and an
+# ERROR for every paywall response. Full-text fetch is best-effort by design —
+# run #1122 attempted 80 URLs and got 24, which is a normal hit rate against
+# NYT/WSJ/Reddit — but it wrote 56 of that run's 404 log lines, burying the
+# pipeline's own output. The outcome is already counted properly in Pass A's
+# full_text_attempted / full_text_fetched stats.
+logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
+
 logger = logging.getLogger("sim.orchestrator")
 
 # Double-trigger guard: the pipeline is fired by BOTH the GitHub `schedule` cron
