@@ -22,6 +22,7 @@ from src.core.sitrep_verify import (
     label_cluster,
     registrable_domain,
 )
+from src.pipeline.ingest_filters import _is_flight_disruption
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,49 @@ def fetch_spillover_events(db_conn, country_iso: str, country_name: str,
         (window_start, window_end, country_iso.upper(), *mention_params),
     ).fetchall()
     return _rows_to_dicts(rows)
+
+
+# Aviation is the priority domain, but flight-disruption headlines are usually
+# regional ("Airlines suspend Middle East flights to Dubai, Riyadh and Beirut")
+# and so carry a null or neighbour country_iso — invisible to the per-country
+# fetch_sitrep_events (WHERE country_iso = %s). This SQL noun pre-filter narrows
+# the mention sweep to aviation before the exact _is_flight_disruption gate runs
+# in Python. \y is Postgres' word boundary (\b is a backspace in Postgres regex).
+_AVIATION_NOUN_SQL = (
+    r"(source_title || ' ' || COALESCE(canonical_text, '')) ~* "
+    r"'\y(airport|airports|airline|airlines|airspace|flight|flights|"
+    r"carrier|carriers|aviation|terminal)\y'"
+)
+
+
+def fetch_aviation_spillover_events(db_conn, country_iso: str, country_name: str,
+                                    window_start: datetime, window_end: datetime) -> List[Dict[str, Any]]:
+    """Flight-disruption events relevant to this country but attributed to the
+    region or a neighbour (null / other country_iso) — the aviation picture the
+    per-country query structurally misses. Narrowed in SQL by an aviation noun +
+    a country mention, then confirmed against the exact production ingest gate
+    (_is_flight_disruption: aviation noun AND disruption verb in the same text)."""
+    if not country_name or country_name == country_iso.upper():
+        return []
+    terms = _country_mention_terms(country_iso, country_name)
+    if not terms:
+        return []
+    mention_sql = " OR ".join(
+        "source_title ILIKE %s OR canonical_text ILIKE %s" for _ in terms
+    )
+    mention_params = [p for t in terms for p in (f"%{t}%", f"%{t}%")]
+    rows = db_conn.execute(
+        _EVENTS_SELECT
+        + " AND country_iso IS DISTINCT FROM %s"
+        + f" AND ({mention_sql})"
+        + f" AND {_AVIATION_NOUN_SQL}"
+        + " ORDER BY severity_score DESC NULLS LAST LIMIT 60",
+        (window_start, window_end, country_iso.upper(), *mention_params),
+    ).fetchall()
+    return [
+        e for e in _rows_to_dicts(rows)
+        if _is_flight_disruption(f"{e.get('source_title') or ''} {e.get('canonical_text') or ''}")
+    ]
 
 
 def fetch_penalized_domains(db_conn, min_penalty: float = 0.5) -> List[str]:

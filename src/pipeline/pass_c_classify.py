@@ -29,6 +29,14 @@ from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classificatio
 # the queue is more than two full runs behind even at the raised per-run limit.
 QUEUE_DEPTH_ALERT_THRESHOLD = 400
 
+# FK-safe fallback for events we could not — or need not — classify: parse
+# failures, 'noise' verdicts, missing types, and the sub-relevance tail. Kept
+# DISTINCT from the genuine 'other_aviation_related' aviation category so these
+# never surface in SITREP daily records mislabeled as aviation. Requires the
+# 'unclassified' catalog row (migration 019), which the workflow applies before
+# this pass runs.
+FALLBACK_EVENT_TYPE = "unclassified"
+
 logger = logging.getLogger(__name__)
 
 # Config: sanity bounds for occurred_at + deterministic pre-screen
@@ -390,7 +398,7 @@ def validate_and_parse(content: str) -> dict:
 
     # Ensure event_type is present
     if "event_type" not in parsed:
-        parsed["event_type"] = "other_aviation_related"
+        parsed["event_type"] = FALLBACK_EVENT_TYPE
 
     return parsed
 
@@ -434,7 +442,7 @@ def _try_prescreen_archive(db_conn, event: dict, det: dict) -> bool:
         update_domain_penalty(db_conn, source_domain, 1)
         db_conn.execute(
             """UPDATE events
-               SET event_type = 'other_aviation_related',
+               SET event_type = 'unclassified',
                    llm_parsed_output = %s,
                    status = 'archived',
                    updated_at = NOW()
@@ -471,7 +479,7 @@ def classify_single_event(db_conn, router: LLMRouter, event: dict, worker_id: uu
             det = deterministic_relevance(source_title, canonical_text)
             if _try_prescreen_archive(db_conn, event, det):
                 release_lock(db_conn, event_id, worker_id)
-                return {"event_type": "other_aviation_related", "_prescreen_skipped": True}
+                return {"event_type": FALLBACK_EVENT_TYPE, "_prescreen_skipped": True}
 
             prompt = f"""Classify this news report:
 
@@ -500,7 +508,7 @@ Text: {canonical_text[:3000]}"""
             db_conn.execute(
                 """UPDATE events
                    SET llm_parse_error = %s,
-                       event_type = 'other_aviation_related',
+                       event_type = 'unclassified',
                        status = 'classified',
                        updated_at = NOW()
                    WHERE id = %s""",
@@ -547,7 +555,7 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     source_domain = event.get('source_domain', 'unknown') or 'unknown'
 
     # Graduated relevance handling using LLM's relevance_score
-    event_type = parsed.get("event_type", "other_aviation_related")
+    event_type = parsed.get("event_type", FALLBACK_EVENT_TYPE)
     relevance = _safe_relevance(parsed.get("relevance_score", 50))
 
     # LLM false-negative guard: if a hard deterministic signal is present
@@ -561,14 +569,14 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
         )
         relevance = max(relevance, 30)
         if event_type == "noise":
-            event_type = "other_aviation_related"
+            event_type = FALLBACK_EVENT_TYPE
             parsed["event_type"] = event_type
 
     # Tier 1: Clear noise (relevance < 20) → archive immediately
-    # Use 'other_aviation_related' as FK-safe type; the real signal is status='archived'
+    # Use 'unclassified' as FK-safe type; the real signal is status='archived'
     # The original LLM classification is preserved in llm_parsed_output for auditing
     if relevance < 30 or (event_type == "noise" and relevance < 40):
-        archive_type = "other_aviation_related"  # FK-safe fallback
+        archive_type = FALLBACK_EVENT_TYPE  # FK-safe fallback
         with db_conn.transaction():  # penalty + archive land together (conn is autocommit)
             update_domain_penalty(db_conn, source_domain, 1)
             db_conn.execute(
@@ -600,10 +608,10 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     # Tier 2: Low relevance (20-40) or noise with some relevance → classify but flag
     # These events proceed through the pipeline but with reduced priority
     if relevance < 50 or event_type == "noise":
-        # Re-classify noise with some relevance as other_aviation_related
+        # Re-classify noise with some relevance as the neutral fallback type
         # so it still flows through scoring but won't get high priority
         if event_type == "noise":
-            event_type = "other_aviation_related"
+            event_type = FALLBACK_EVENT_TYPE
             parsed["event_type"] = event_type
         logger.info("Event %s low-relevance (%d) — classifying as %s",
                     event_id[:8], relevance, event_type)
@@ -617,7 +625,7 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
         (event_type,),
     ).fetchone()
     if not active_check:
-        event_type = "other_aviation_related"
+        event_type = FALLBACK_EVENT_TYPE
 
     # Validate sub_type against active catalog
     sub_type = parsed.get("sub_type")
@@ -731,7 +739,7 @@ def _parse_batch_response(content: str, expected: int) -> dict[int, dict]:
         except (TypeError, ValueError):
             report_no = pos
         if 1 <= report_no <= expected and report_no not in items:
-            item.setdefault("event_type", "other_aviation_related")
+            item.setdefault("event_type", FALLBACK_EVENT_TYPE)
             items[report_no] = item
     return items
 

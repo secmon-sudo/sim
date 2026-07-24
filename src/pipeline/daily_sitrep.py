@@ -17,6 +17,7 @@ from src.services.sitrep_generator import (
     MAX_WEB_ENRICH_CLUSTERS,
     WINDOW_HOURS,
     build_sitrep_clusters,
+    fetch_aviation_spillover_events,
     fetch_penalized_domains,
     fetch_sitrep_events,
     fetch_spillover_events,
@@ -76,9 +77,28 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
                                               window_start, window_end)
     spillover = build_sitrep_clusters(spillover_events, penalized) if spillover_events else []
 
+    # Regional aviation disruptions relevant to this country but attributed to
+    # the region/neighbours (null or other country_iso). Rendered as its own
+    # deterministic block so aviation — the priority domain — is never lost to
+    # per-country attribution or to the LLM narrative dropping it.
+    aviation_events = fetch_aviation_spillover_events(db_conn, country_iso, country_name,
+                                                      window_start, window_end)
+    aviation_spill = build_sitrep_clusters(aviation_events, penalized) if aviation_events else []
+
     # Replace Google News redirect links with the real publisher URLs so the
     # report's sources are directly usable.
-    resolve_cluster_urls(clusters + spillover)
+    resolve_cluster_urls(clusters + spillover + aviation_spill)
+
+    # Drop any aviation cluster already covered by the country's own clusters
+    # (all its resolved source URLs already appear there) so nothing shows twice.
+    if aviation_spill:
+        _main_urls = {s.get("url") for c in clusters for s in c.get("sources", []) if s.get("url")}
+
+        def _already_shown(c: Dict[str, Any]) -> bool:
+            urls = [s.get("url") for s in c.get("sources", []) if s.get("url")]
+            return bool(urls) and all(u in _main_urls for u in urls)
+
+        aviation_spill = [c for c in aviation_spill if not _already_shown(c)]
 
     # Optional Gemini Google-Search grounding: extra corroborated detail per top
     # cluster, discovery of incidents the ingest pipeline missed, and a strategic
@@ -122,7 +142,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     html_doc = render_sitrep_html(
         country_name, country_iso,
         f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",
-        report_text, clusters,
+        report_text, clusters, aviation_spill,
     )
     r2_url = None
     try:

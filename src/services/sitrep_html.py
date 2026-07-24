@@ -17,7 +17,7 @@ Parsing contract with the prompt in sitrep_generator:
 
 import html as _html
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL, LABEL_SINGLE
 
@@ -70,6 +70,8 @@ _EVENT_TYPE_TR = {
     "hijacking": "Uçak Kaçırma",
     "bomb_threat": "Bomba Tehdidi",
     "web_discovery": "Web Taraması Bulgusu",
+    "other_aviation_related": "Diğer Havacılık Olayı",
+    "unclassified": "Sınıflandırılmamış",
 }
 
 _SOURCE_RE = re.compile(r"([\w][\w .\-]{1,60}?)\s*\((https?://[^)\s]+)\)")
@@ -308,9 +310,29 @@ def _appendix(clusters: List[Dict[str, Any]]) -> str:
     )
 
 
+def _aviation_section(clusters: List[Dict[str, Any]], top_n: int = 8) -> str:
+    """Deterministic regional-aviation block: flight-disruption events relevant
+    to this country but attributed to the region or a neighbour (null / other
+    country_iso), which the per-country flow never surfaces. Aviation is the
+    priority domain, so this renders open near the top — not buried in a
+    collapsed appendix and not left to the LLM narrative to remember."""
+    if not clusters:
+        return ""
+    ranked = sorted(clusters, key=lambda c: -(c.get("severity") or 0))[:top_n]
+    rows = "".join(_appendix_row(c) for c in ranked)
+    return (
+        _section_header("BÖLGESEL HAVACILIK KESİNTİLERİ", "✈")
+        + '<div style="font-size:11px;color:#5b6b8a;margin:6px 0 2px">'
+        "Bu ülkeyi ilgilendiren, ancak bölgeye veya komşu ülkelere atfedilen "
+        "uçuş kesintileri (uçuş durdurma, havalimanı/hava sahası kapanışı).</div>"
+        + rows
+    )
+
+
 def render_sitrep_html(country_name: str, country_iso: str,
                        window_start: str, window_end: str,
-                       report_text: str, clusters: List[Dict[str, Any]]) -> str:
+                       report_text: str, clusters: List[Dict[str, Any]],
+                       aviation_clusters: Optional[List[Dict[str, Any]]] = None) -> str:
     """Self-contained mobile-first HTML for the SITREP."""
     counts = {LABEL_OFFICIAL: 0, LABEL_MULTI: 0, LABEL_SINGLE: 0}
     for c in clusters:
@@ -389,6 +411,8 @@ def render_sitrep_html(country_name: str, country_iso: str,
 </div>
 
 {_highlights(clusters)}
+
+{_aviation_section(aviation_clusters or [])}
 
 {"".join(body_parts)}
 
