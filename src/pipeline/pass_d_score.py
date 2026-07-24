@@ -704,7 +704,14 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
 
         # Send Telegram alert for high-severity events (suppression-claim BEFORE
         # send to prevent duplicate notifications; see dispatch_alert).
-        dispatch_alert(db_conn, event, event_id)
+        # dispatch_alert may force event["alert_tier"] to "ALERT" when a
+        # severity-gated card goes out for an event that missed the full tier gate
+        # (low confidence / unresolved anchor). Read back the tier that ACTUALLY
+        # paged and the outcome, so the DB column and telemetry reflect what was
+        # sent — not the raw pre-dispatch tier, which is often None and historically
+        # made alerts_generated undercount real pages (0 counted vs N sent).
+        dispatch_result = dispatch_alert(db_conn, event, event_id)
+        effective_tier = event.get("alert_tier")
 
         # 6. Update event — wrapped in savepoint for isolation
         with db_conn.transaction():
@@ -732,7 +739,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
                     anchor.get("country_iso"),
                     severity,
                     system_conf,
-                    alert_tier,
+                    effective_tier,
                     storyline_id,
                     is_safety,
                     occurred_at_est,
@@ -758,14 +765,15 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         })
 
         logger.info(
-            "Scored event %s: severity=%d, confidence=%.2f, tier=%s, anchor=%s",
-            event_id[:8], severity, system_conf, alert_tier, anchor["norm"],
+            "Scored event %s: severity=%d, confidence=%.2f, tier=%s, dispatch=%s, anchor=%s",
+            event_id[:8], severity, system_conf, effective_tier, dispatch_result, anchor["norm"],
         )
         return {
             "event_id": event_id,
             "severity": severity,
             "confidence": system_conf,
-            "alert_tier": alert_tier,
+            "alert_tier": effective_tier,
+            "dispatch_result": dispatch_result,
             "anchor_norm": anchor["norm"],
             "storyline_id": storyline_id,
         }
@@ -823,8 +831,12 @@ def run_pass_d(db_conn) -> dict:
             result = score_single_event(db_conn, str(row[0]), recent_events, adjudicator)
             if result:
                 stats["events_scored"] += 1
-                tier = result.get("alert_tier")
-                if tier:
+                # Count an alert only when a Telegram card was ACTUALLY dispatched
+                # this run — not merely "tier-eligible". dispatch_result is the source
+                # of truth; effective tier is forced to ALERT for severity-gated sends,
+                # so it is always one of the three buckets.
+                if result.get("dispatch_result") == "sent":
+                    tier = result.get("alert_tier") or "ALERT"
                     stats["alerts_generated"][tier] = stats["alerts_generated"].get(tier, 0) + 1
             else:
                 stats["events_failed"] += 1

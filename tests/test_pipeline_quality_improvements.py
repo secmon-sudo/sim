@@ -309,6 +309,69 @@ def test_dispatch_alert_skips_stale_ingested_event():
     db_conn.execute.assert_not_called()
 
 
+@patch("src.pipeline.pass_d_score.register_alert")
+@patch("src.pipeline.pass_d_score.get_peak_tier")
+@patch("src.pipeline.pass_d_score.record_suppression")
+@patch("src.pipeline.pass_d_score.is_suppressed")
+@patch("src.pipeline.pass_d_score.send_telegram_alert")
+def test_dispatch_alert_forces_tier_and_reports_sent(
+    mock_send_tg, mock_is_supp, mock_record, mock_peak, mock_register
+):
+    """Regression: a severity-gated event that missed the full tier gate (tier=None,
+    e.g. low confidence / unresolved anchor) must still page. dispatch_alert forces
+    the tier to ALERT, returns 'sent', and leaves the forced tier on the event so the
+    DB column and alerts_generated reflect the real page instead of undercounting to 0."""
+    from src.pipeline.pass_d_score import dispatch_alert
+
+    mock_is_supp.return_value = False
+    mock_send_tg.return_value = True
+    mock_peak.return_value = None
+
+    db_conn = MagicMock()
+    event = {
+        "severity_score": 100,       # >= ALERT_SEVERITY_MIN, so the severity gate passes
+        "alert_tier": None,          # missed the confidence/anchor tier gate
+        "anchor_name_norm": "UNKNOWN",
+        "country_iso": "IR",
+        "storyline_id": None,
+        # no ingested_at -> not stale
+    }
+
+    result = dispatch_alert(db_conn, event, "event_forced")
+
+    assert result == "sent"
+    assert event["alert_tier"] == "ALERT"   # forced, not left as None
+    mock_send_tg.assert_called_once()
+    mock_register.assert_called_once()       # paging history recorded for closure/escalation
+
+
+@patch("src.pipeline.pass_d_score.STORYLINE_LLM_ADJUDICATION", False)
+@patch("src.pipeline.pass_d_score._fetch_recent_events_for_linking", return_value=[])
+@patch("src.pipeline.pass_d_score.score_single_event")
+def test_run_pass_d_counts_only_dispatched_alerts(mock_score, _mock_recent):
+    """Regression: alerts_generated must count Telegram cards ACTUALLY dispatched
+    (dispatch_result == 'sent'), keyed by the tier that paged — not every tier-eligible
+    event. Suppressed duplicates and below-threshold skips must not inflate the count."""
+    from src.pipeline.pass_d_score import run_pass_d
+
+    db_conn = MagicMock()
+    classified = MagicMock()
+    classified.fetchall.return_value = [("e1",), ("e2",), ("e3",), ("e4",)]
+    db_conn.execute.return_value = classified
+
+    mock_score.side_effect = [
+        {"alert_tier": "ALERT", "dispatch_result": "sent"},         # counted
+        {"alert_tier": "CRITICAL", "dispatch_result": "sent"},      # counted
+        {"alert_tier": "ALERT", "dispatch_result": "suppressed"},   # dup -> NOT counted
+        {"alert_tier": None, "dispatch_result": "skipped"},         # below thr -> NOT counted
+    ]
+
+    stats = run_pass_d(db_conn)
+
+    assert stats["events_scored"] == 4
+    assert stats["alerts_generated"] == {"CRITICAL": 1, "ALERT": 1, "WATCH": 0}
+
+
 def test_requeue_orphans_archives_ancient_events_first():
     """requeue_orphaned_locked_events must archive orphans older than
     MAX_EVENT_AGE_DAYS before requeuing the rest, so stale news is never
