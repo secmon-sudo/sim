@@ -3,6 +3,10 @@ Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus)
 """
 
 from src.pipeline.pass_a_ingest import _matches_security_keywords, is_noise
+from src.pipeline.pass_c_classify import (
+    PRESCREEN_SKIP_FLOOR,
+    deterministic_relevance,
+)
 from src.pipeline.pass_d_score import (
     AVIATION_NEXUS_BONUS,
     compute_aviation_bonus,
@@ -140,3 +144,42 @@ class TestSmugglingRouteNotNoise:
 
     def test_commercial_route_launch_still_noise(self):
         assert is_noise("Ryanair launches new route to Malaga with fare sale") is True
+
+
+class TestFlightDisruptionSurvivesPassC:
+    """Fix A — a genuine flight disruption is never dropped in Pass C.
+
+    Real cases (measured 2026-07-24) scored 0 on the relevance heuristic and had
+    no other security keyword, so they were prescreen-archived before the LLM or
+    LLM-archived at sev 0 — losing "which carrier stopped flying where", the
+    highest-value line in an aviation SITREP. deterministic_relevance now flags
+    them and lifts the score above the prescreen floor; weather stays filtered.
+    """
+
+    def test_carrier_suspension_flagged_and_survives_prescreen(self):
+        det = deterministic_relevance(
+            "Qatar Airways temporarily suspends passenger flights to Bahrain, Erbil and Kuwait", "")
+        assert det["has_flight_disruption"] is True
+        assert det["score"] >= PRESCREEN_SKIP_FLOOR  # would NOT be prescreen-archived
+
+    def test_conflict_cancellation_flagged(self):
+        det = deterministic_relevance("Several flights cancelled due to Iranian aggression", "")
+        assert det["has_flight_disruption"] is True
+        assert det["score"] >= PRESCREEN_SKIP_FLOOR
+
+    def test_disruption_verb_in_body_only(self):
+        det = deterministic_relevance("Dubai flight update", "All flights cancelled after strikes")
+        assert det["has_flight_disruption"] is True
+
+    def test_weather_cancellation_not_flagged(self):
+        # Safety, not security — must remain droppable (is_noise catches it).
+        det = deterministic_relevance("Delta cancels flights due to snowstorm in Chicago", "")
+        assert det["has_flight_disruption"] is False
+
+    def test_winter_storm_not_flagged(self):
+        det = deterministic_relevance("United cancels flights after winter storm hits Denver", "")
+        assert det["has_flight_disruption"] is False
+
+    def test_non_aviation_not_flagged(self):
+        det = deterministic_relevance("Gold mine suspends operations after workplace accident", "")
+        assert det["has_flight_disruption"] is False

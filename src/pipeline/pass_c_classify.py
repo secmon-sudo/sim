@@ -21,6 +21,7 @@ from src.core.storyline import strip_date_hint
 from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
+    _is_flight_disruption,
     is_noise,
 )
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
@@ -36,6 +37,16 @@ QUEUE_DEPTH_ALERT_THRESHOLD = 400
 # 'unclassified' catalog row (migration 019), which the workflow applies before
 # this pass runs.
 FALLBACK_EVENT_TYPE = "unclassified"
+
+# Aviation is the priority domain, and "which carrier stopped flying where" is
+# the single highest-value line in these reports — but its vocabulary is low on
+# the generic security keywords the relevance heuristic and LLM both key on, so
+# genuine flight-disruption headlines ("Qatar Airways suspends flights to
+# Bahrain") were being prescreen-dropped (det score 0) or LLM-archived (sev 0).
+# A flight-disruption headline that is NOT weather noise is floored to this
+# relevance so it always survives to scoring, where the aviation nexus bonus
+# ranks it. Weather cancellations still fall through (is_noise catches them).
+AVIATION_RELEVANCE_FLOOR = 40
 
 logger = logging.getLogger(__name__)
 
@@ -90,15 +101,22 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     """
     blob = f"{title} {text}"
     has_high_signal = bool(_HIGH_SIGNAL_PATTERN.search(blob))
-    has_security = has_high_signal or bool(_SECURITY_KEYWORD_PATTERN.search(blob))
     has_casualty = bool(_CASUALTY_NUM_PATTERN.search(blob))
     noisy = is_noise(f"{title} {text[:500]}")
+    # Aviation stopped flying, and not because of weather — the security scope.
+    # is_noise() catches snowstorm/maintenance cancellations, so excluding noisy
+    # here leaves only disruptions worth keeping (mirrors the ingest gate).
+    has_flight_disruption = _is_flight_disruption(blob) and not noisy
+    has_security = (has_high_signal or has_flight_disruption
+                    or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
     if has_high_signal:
         score += 45
     elif has_security:
         score += 25
+    if has_flight_disruption:
+        score += 20  # ensure it clears the prescreen floor even with no other keyword
     if has_casualty:
         score += 15
     if trusted_domain:
@@ -111,6 +129,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "score": score,
         "has_security": has_security,
         "has_high_signal": has_high_signal,
+        "has_flight_disruption": has_flight_disruption,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }
@@ -568,6 +587,19 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
             event_id[:8], relevance,
         )
         relevance = max(relevance, 30)
+        if event_type == "noise":
+            event_type = FALLBACK_EVENT_TYPE
+            parsed["event_type"] = event_type
+
+    # Aviation-priority guard: a genuine flight disruption (not weather) is never
+    # archived. Floored above the noise tiers so it survives to scoring, where
+    # the aviation nexus bonus ranks it. Mirrors the high-signal guard above.
+    if det.get("has_flight_disruption") and relevance < AVIATION_RELEVANCE_FLOOR:
+        logger.warning(
+            "Event %s: LLM relevance=%d but flight-disruption present — flooring to %d, keeping event",
+            event_id[:8], relevance, AVIATION_RELEVANCE_FLOOR,
+        )
+        relevance = AVIATION_RELEVANCE_FLOOR
         if event_type == "noise":
             event_type = FALLBACK_EVENT_TYPE
             parsed["event_type"] = event_type
