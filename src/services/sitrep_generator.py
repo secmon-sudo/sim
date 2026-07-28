@@ -40,6 +40,13 @@ MAX_WEB_ENRICH_CLUSTERS = int(SITREP_CFG.get("max_web_enrich_clusters", 8))
 # A single event at/above this severity (0-100, same scale as alert.severity_min)
 # qualifies its country for a SITREP even below the volume threshold.
 HIGH_SEVERITY_OVERRIDE = int(SITREP_CFG.get("high_severity_override", 80))
+# Aviation is the priority domain. A country with at least this many genuine
+# (non-archived) flight-disruption events qualifies for a SITREP even below the
+# volume/severity bars, and is ranked in the protected tier so the per-run cap
+# can't squeeze it out — otherwise a Kuwait-airport-strike day never gets a
+# report. 1 is intentional: post-Fix-A weather cancellations are archived, so a
+# single reconciled disruption is already a real signal in the priority domain.
+AVIATION_SELECTION_MIN = int(SITREP_CFG.get("aviation_selection_min", 1))
 
 # event_type codes treated as strategic/political rather than field events
 STRATEGIC_EVENT_TYPES = {
@@ -151,13 +158,27 @@ def fetch_spillover_events(db_conn, country_iso: str, country_name: str,
 # Aviation is the priority domain, but flight-disruption headlines are usually
 # regional ("Airlines suspend Middle East flights to Dubai, Riyadh and Beirut")
 # and so carry a null or neighbour country_iso — invisible to the per-country
-# fetch_sitrep_events (WHERE country_iso = %s). This SQL noun pre-filter narrows
-# the mention sweep to aviation before the exact _is_flight_disruption gate runs
-# in Python. \y is Postgres' word boundary (\b is a backspace in Postgres regex).
-_AVIATION_NOUN_SQL = (
-    r"(source_title || ' ' || COALESCE(canonical_text, '')) ~* "
-    r"'\y(airport|airports|airline|airlines|airspace|flight|flights|"
-    r"carrier|carriers|aviation|terminal)\y'"
+# fetch_sitrep_events (WHERE country_iso = %s). These SQL fragments mirror the
+# Python ingest gate (ingest_filters._is_flight_disruption): an aviation noun,
+# and a disruption verb, in the report text. \y is Postgres' word boundary
+# (\b is a backspace in Postgres regex). Kept in one place so the spillover
+# fetch and the country-selection signal (Fix C) stay in lockstep.
+_TEXT_BLOB_SQL = "(source_title || ' ' || COALESCE(canonical_text, ''))"
+_AVIATION_NOUN_RE = (
+    r"\y(airport|airports|airline|airlines|airspace|flight|flights|"
+    r"carrier|carriers|aviation|terminal)\y"
+)
+_DISRUPTION_VERB_RE = (
+    r"\y(suspend|suspends|suspended|suspending|suspension|suspensions|"
+    r"halt|halts|halted|cancel|cancels|cancelled|canceled|cancelling|"
+    r"canceling|cancellation|cancellations|grounded|reroute|reroutes|"
+    r"rerouted|closure|closures|disruption|disruptions)\y"
+)
+_AVIATION_NOUN_SQL = f"{_TEXT_BLOB_SQL} ~* '{_AVIATION_NOUN_RE}'"
+# Full conjunction — aviation noun AND disruption verb — for the selection count.
+_AVIATION_DISRUPTION_SQL = (
+    f"({_TEXT_BLOB_SQL} ~* '{_AVIATION_NOUN_RE}' "
+    f"AND {_TEXT_BLOB_SQL} ~* '{_DISRUPTION_VERB_RE}')"
 )
 
 
@@ -440,14 +461,19 @@ def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetim
 
     Volume alone was severity-blind: a country with 2 events could never get a
     SITREP even if one of them was a mass-casualty strike, while 40 routine
-    events guaranteed a slot. Selection now admits a country EITHER by volume
-    (>= min_events_threshold) OR by a single high-severity event
-    (>= high_severity_override, 0-100 scale), and severity-qualified countries
-    are ranked ahead so volume can't squeeze them out of the per-run cap.
+    events guaranteed a slot. Selection now admits a country by ANY of: volume
+    (>= min_events_threshold), a single high-severity event
+    (>= high_severity_override, 0-100 scale), or aviation activity
+    (>= aviation_selection_min genuine flight disruptions — the priority domain,
+    e.g. a Kuwait-airport-strike day with too few events to clear volume).
+    Severity- and aviation-qualified countries are ranked in a protected tier so
+    routine volume can't squeeze them out of the per-run cap.
     """
     rows = db_conn.execute(
-        """
-        SELECT country_iso, COUNT(*) AS n, MAX(severity_score) AS max_sev
+        f"""
+        SELECT country_iso, COUNT(*) AS n, MAX(severity_score) AS max_sev,
+               COUNT(*) FILTER (WHERE status <> 'archived'
+                                  AND {_AVIATION_DISRUPTION_SQL}) AS n_aviation
         FROM events
         WHERE severity_score IS NOT NULL
           AND status IN ('scored', 'reconciled', 'archived')
@@ -455,11 +481,18 @@ def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetim
           AND COALESCE(occurred_at_est, published_at, ingested_at) < %s
           AND country_iso IS NOT NULL
         GROUP BY country_iso
-        HAVING COUNT(*) >= %s OR MAX(severity_score) >= %s
-        ORDER BY (MAX(severity_score) >= %s) DESC, n DESC
+        HAVING COUNT(*) >= %s
+            OR MAX(severity_score) >= %s
+            OR COUNT(*) FILTER (WHERE status <> 'archived'
+                                 AND {_AVIATION_DISRUPTION_SQL}) >= %s
+        ORDER BY (MAX(severity_score) >= %s
+                  OR COUNT(*) FILTER (WHERE status <> 'archived'
+                                       AND {_AVIATION_DISRUPTION_SQL}) >= %s) DESC,
+                 n DESC
         LIMIT %s
         """,
         (window_start, window_end, MIN_EVENTS_THRESHOLD,
-         HIGH_SEVERITY_OVERRIDE, HIGH_SEVERITY_OVERRIDE, MAX_COUNTRIES_PER_RUN),
+         HIGH_SEVERITY_OVERRIDE, AVIATION_SELECTION_MIN,
+         HIGH_SEVERITY_OVERRIDE, AVIATION_SELECTION_MIN, MAX_COUNTRIES_PER_RUN),
     ).fetchall()
     return [r[0].strip().upper() for r in rows if r[0]]

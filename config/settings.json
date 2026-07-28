@@ -248,6 +248,7 @@
     "web_enrich_enabled": false,
     "web_enrich_cooldown_s": 7.0,
     "max_grounded_calls_per_run": 36,
-    "high_severity_override": 80
+    "high_severity_override": 80,
+    "aviation_selection_min": 1
   }
 }

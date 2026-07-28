@@ -12,8 +12,11 @@ dedicated render block that surfaces it.
 from datetime import datetime, timezone
 
 from src.services.sitrep_generator import (
+    _AVIATION_DISRUPTION_SQL,
     _EVENT_COLUMNS,
+    AVIATION_SELECTION_MIN,
     fetch_aviation_spillover_events,
+    select_sitrep_countries,
 )
 from src.services.sitrep_html import render_sitrep_html
 
@@ -114,3 +117,47 @@ class TestAviationSectionRender:
                                   "2026-07-24 09:56", self._REPORT, [])
         assert "GÜNLÜK DURUM RAPORU" in html
         assert "BÖLGESEL HAVACILIK KESİNTİLERİ" not in html
+
+
+class TestAviationCountrySelection:
+    """Fix C — aviation activity is a third admission path for country selection.
+
+    A country whose only signal is genuine flight disruptions (a Kuwait-airport-
+    strike day, too few events to clear the volume bar and no single sev>=80
+    event) was never given a SITREP. Selection now admits it and ranks it in the
+    protected tier so the per-run cap can't squeeze it out.
+    """
+
+    @staticmethod
+    def _capture(rows):
+        cap = {}
+
+        class FakeConn:
+            def execute(self, sql, params):
+                cap["sql"], cap["params"] = sql, params
+                class R:
+                    def fetchall(self_inner):
+                        return rows
+                return R()
+
+        t0 = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        t1 = datetime(2026, 7, 28, tzinfo=timezone.utc)
+        result = select_sitrep_countries(FakeConn(), t0, t1)
+        return cap, result
+
+    def test_query_binds_aviation_and_placeholders_match(self):
+        cap, _ = self._capture([])
+        # aviation admission is wired into the SQL
+        assert _AVIATION_DISRUPTION_SQL in cap["sql"]
+        assert "n_aviation" in cap["sql"]
+        # every placeholder is bound — guards against param/placeholder drift
+        assert cap["sql"].count("%s") == len(cap["params"])
+        # the aviation floor is bound (appears twice: HAVING + ORDER BY)
+        assert cap["params"].count(AVIATION_SELECTION_MIN) >= 1
+
+    def test_rows_map_to_uppercase_iso_list(self):
+        # (country_iso, n, max_sev, n_aviation) — new 4-col shape; the extra
+        # n_aviation column must not disturb the iso extraction (r[0]).
+        rows = [("kw", 2, 60, 1), ("US", 40, 100, 0)]
+        _, result = self._capture(rows)
+        assert result == ["KW", "US"]
