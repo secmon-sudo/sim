@@ -9,6 +9,7 @@ corroboration clusters, applies rule-based verification labels
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -17,6 +18,9 @@ from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
 from src.core.sitrep_verify import (
     CANONICAL_LABELS,
+    LABEL_MULTI,
+    LABEL_OFFICIAL,
+    LABEL_SINGLE,
     fallback_cluster_key,
     is_official_domain,
     label_cluster,
@@ -432,27 +436,72 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
     return call_llm(router, user_prompt, _SYSTEM_PROMPT, max_tokens=4000, json_mode=False)
 
 
+# A verification label span the model may have editorialized, e.g.
+# "Onaylandı (Çoklu kaynak, ancak detaylar doğrulanmamış)".
+_LABEL_SPAN_RE = re.compile(r"\s*(?:Onaylandı|Doğrulanmamış)\s*\([^)]*\)")
+_SOURCE_SEP_RE = re.compile(r"\s+[—–-]{1,2}\s+")
+
+
+def _canonical_label_for(tail: str) -> str:
+    """Map a deviant verification label to the nearest canonical one by keyword.
+
+    Never UPGRADES confidence beyond what the model claimed (the guardrail's whole
+    purpose): an unrecognisable label degrades to the most conservative
+    'Doğrulanmamış (Tek kaynak)', never to a 'confirmed' tier.
+    """
+    low = tail.lower()
+    if "resmî" in low or "resmi" in low:
+        return LABEL_OFFICIAL
+    if "çoklu" in low or "coklu" in low:
+        return LABEL_MULTI
+    if "onaylandı" in low or "onaylandi" in low:
+        # confirmed but tier unspecified → the more conservative confirmed tier
+        return LABEL_MULTI
+    return LABEL_SINGLE
+
+
+def _normalize_label_line(line: str) -> str:
+    """Rewrite a 'Doğruluk Durumu:' line to use an exact canonical label,
+    preserving any ' — Kaynak: …' remainder. Returns the line unchanged when it
+    already carries a canonical label."""
+    head, sep, tail = line.partition("Doğruluk Durumu:")
+    if not sep or any(lbl in tail for lbl in CANONICAL_LABELS):
+        return line
+    canonical = _canonical_label_for(tail)
+    m = _LABEL_SPAN_RE.match(tail)
+    if m:
+        remainder = tail[m.end():]
+    else:
+        src = _SOURCE_SEP_RE.search(tail)
+        remainder = tail[src.start():] if src else ""
+    return f"{head}Doğruluk Durumu: {canonical}{remainder}"
+
+
 def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
     """
-    Server-side guardrails: required section header, URL allowlist, and no
-    non-canonical verification labels.
+    Server-side guardrails: required section header, URL allowlist, and canonical
+    verification labels.
+
+    A verification label the model editorialized (extra words inside/after the
+    parentheses) is NORMALIZED to the nearest canonical label rather than failing
+    the whole country report — a single stray label used to cost an active-
+    conflict country its entire SITREP (run #19, IR). Normalization never raises
+    the claimed confidence tier, so the anti-upgrade guarantee is preserved.
     """
     if "YÖNETİCİ ÖZETİ" not in text:
         raise ValueError("SITREP output missing required 'YÖNETİCİ ÖZETİ' header")
 
     allowed = {u.strip() for u in allowed_urls if u}
-    import re
+
     def _replace_unknown(match: "re.Match[str]") -> str:
         url = match.group(0).rstrip(".,);]")
         return url if url in allowed else "[kaynak listede]"
     text = re.sub(r"https?://\S+", _replace_unknown, text)
 
-    for line in text.splitlines():
-        if "Doğruluk Durumu:" in line:
-            tail = line.split("Doğruluk Durumu:", 1)[1]
-            if not any(label in tail for label in CANONICAL_LABELS):
-                raise ValueError(f"Non-canonical verification label in line: {line.strip()[:120]}")
-    return text
+    return "\n".join(
+        _normalize_label_line(line) if "Doğruluk Durumu:" in line else line
+        for line in text.splitlines()
+    )
 
 
 def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetime) -> List[str]:

@@ -138,6 +138,23 @@ def test_batch_parse_error_penalizes_slot():
         "openrouter", "A", "nvidia/nemotron-3-super-120b-a12b:free")
 
 
+def test_batch_parse_error_logs_failure_telemetry():
+    # Successes already log telemetry; the garbage-JSON path must log success=False
+    # so a degrading :free slot's true failure rate becomes measurable (it was
+    # previously invisible — only successes were recorded).
+    events = [_event(1)]
+    call = MagicMock(return_value={
+        "content": "not json at all", "provider": "openrouter",
+        "account": "A", "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    })
+    patches, mocks = _patch_batch(call_llm=call)
+    with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
+        pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
+    tel = mocks["log_llm_telemetry"]
+    tel.assert_called_once()
+    assert tel.call_args.kwargs.get("success") is False
+
+
 def test_validate_and_parse_tolerates_control_chars_in_strings():
     # Raw newline inside a quoted value (seen from degraded :free upstreams)
     # must parse instead of failing with "Invalid control character".

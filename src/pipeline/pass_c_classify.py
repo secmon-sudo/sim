@@ -850,6 +850,10 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
         router.penalize_model_slot(
             result.get("provider", ""), result.get("account", ""), result.get("model", ""),
         )
+        # Record the failure so a model's true garbage-JSON rate is measurable —
+        # successes already log telemetry, so without this a degrading :free slot
+        # (e.g. Nemotron) stays invisible until it starves the run.
+        log_llm_telemetry(db_conn, result, router, success=False)
         _release_pending(requeue=True)
         stats["failed"] += len(llm_events)
         stats["parse_error"] = True
