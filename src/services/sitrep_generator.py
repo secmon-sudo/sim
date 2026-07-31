@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from src.core.airspace import compact_for_prompt
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
 from src.core.sitrep_verify import (
@@ -458,7 +459,9 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
         "spillover": spillover,
         "strategic": strategic,
         "strategic_web": strategic_web,
-        "airspace": airspace,
+        # Compacted: the rich object is for the HTML block, and the prompt is
+        # already the tightest budget in this pipeline.
+        "airspace": compact_for_prompt(airspace),
     }
     user_prompt = (
         f"Aşağıdaki veriden {country_name} için 24 saatlik SITREP'i yaz. "

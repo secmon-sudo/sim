@@ -141,6 +141,37 @@ class TestHtmlSection:
         assert "HAVA SAHASI ETKİ ANALİZİ" not in html
 
 
+class TestSitrepPrompt:
+    def test_airspace_reaches_the_prompt_in_compact_form(self):
+        import src.services.sitrep_generator as gen
+        captured = {}
+
+        def fake_call_llm(router, prompt, system_prompt, **kw):
+            captured["prompt"] = prompt
+            return {"content": "YÖNETİCİ ÖZETİ\nX"}
+
+        clusters = build_sitrep_clusters([_event()], [])
+        airspace = build_airspace_assessment(clusters, "PL", CZIB)
+        original = gen.call_llm
+        gen.call_llm = fake_call_llm
+        try:
+            gen.run_sitrep_llm(None, "PL", "Polonya", T0, T1, clusters, [], [],
+                               airspace=airspace)
+        finally:
+            gen.call_llm = original
+
+        prompt = captured["prompt"]
+        assert "EPWW" in prompt and "LUZ" in prompt
+        assert "kisitlamali_komsu_firlar" in prompt
+        # The rich HTML-only shape must not be what we pay tokens for.
+        assert "neighbor_firs" not in prompt
+
+    def test_prompt_forbids_inventing_airspace_facts(self):
+        from src.services.sitrep_generator import _SYSTEM_PROMPT
+        assert "UYDURMA" in _SYSTEM_PROMPT
+        assert "MARUZİYET/YAKINLIK" in _SYSTEM_PROMPT
+
+
 class TestDigestIntegration:
     def _results(self):
         clusters = build_sitrep_clusters([_event()], [])

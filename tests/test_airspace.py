@@ -272,6 +272,49 @@ class TestBuildAssessment:
         assert build_airspace_assessment(self._clusters(), "PL", CZIB) is None
 
 
+class TestPromptCompaction:
+    """The HTML block wants every field; the prompt cannot afford them. A full
+    25-cluster SITREP prompt already exceeds the smallest request ceiling in the
+    router cascade, so repeated neighbour lists are budget taken from events."""
+
+    def _assessment(self):
+        return build_airspace_assessment(
+            [{"location": "Lublin", "country_iso": "PL", "severity": 78,
+              "event_type": "drone_attack_critical_infra", "snippet": ""}], "PL", CZIB)
+
+    def test_keeps_the_facts_the_narrator_needs(self):
+        out = airspace.compact_for_prompt(self._assessment())
+        item = out["assessments"][0]
+        assert item["fir"]["icao"] == "EPWW"
+        assert item["kapsam"] == "point"
+        assert {n["icao"] for n in item["kisitlamali_komsu_firlar"]} == {"UKLV", "UMMV"}
+        assert item["kisitlamali_komsu_firlar"][0]["easa_czib_aktif"] is True
+        assert "EYVL" in item["diger_komsu_firlar"]
+        assert item["havalimanlari"][0]["iata"] == "LUZ"
+        assert item["havalimanlari"][0]["distance_km"] == 10
+
+    def test_unrestricted_neighbours_collapse_to_codes(self):
+        item = airspace.compact_for_prompt(self._assessment())["assessments"][0]
+        assert all(isinstance(n, str) for n in item["diger_komsu_firlar"])
+
+    def test_is_materially_smaller(self):
+        import json
+        full = self._assessment()
+        big = len(json.dumps(full, ensure_ascii=False))
+        small = len(json.dumps(airspace.compact_for_prompt(full), ensure_ascii=False))
+        assert small < big * 0.6
+
+    def test_country_scope_carries_no_radius(self):
+        out = airspace.compact_for_prompt(build_airspace_assessment(
+            [{"location": "Ülke Geneli", "country_iso": "PL", "severity": 60,
+              "event_type": "military_action", "snippet": ""}], "PL", CZIB))
+        assert "yaricap_km" not in out["assessments"][0]
+
+    def test_empty_input_stays_empty(self):
+        assert airspace.compact_for_prompt(None) is None
+        assert airspace.compact_for_prompt({"assessments": []}) is None
+
+
 class TestDigestSummary:
     def test_mentions_fir_restrictions_and_airports(self):
         out = build_airspace_assessment(

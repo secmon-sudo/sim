@@ -347,6 +347,49 @@ def build_airspace_assessment(clusters: List[Dict[str, Any]], country_iso: str,
     return {"country_iso": iso, "assessments": assessments}
 
 
+def compact_for_prompt(assessment: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Strip the assessment down to what the narrator actually needs.
+
+    The full object is shaped for the HTML block, where every field earns its
+    place. In the prompt it is mostly repetition: each card restates the same
+    nine-entry neighbour list, and a neighbour with no restriction contributes
+    nothing but its code. Measured on a full 25-cluster day this is ~40% of the
+    airspace payload for zero added meaning — and the SITREP prompt already sits
+    above the Groq request ceiling, so the remaining headroom belongs to events.
+
+    Only the prompt uses this; `render_sitrep_html` keeps the rich object.
+    """
+    if not assessment or not assessment.get("assessments"):
+        return None
+
+    def _fir(view: Dict[str, Any]) -> Dict[str, Any]:
+        out = {"icao": view["icao"], "name": view["name"]}
+        if view.get("czib_active"):
+            out["easa_czib_aktif"] = True
+            out["czib"] = view.get("czib")
+        return out
+
+    compact = []
+    for item in assessment["assessments"]:
+        neighbors = item.get("neighbor_firs") or []
+        entry = {
+            "yer": item.get("location"),
+            "kapsam": item["scope"],
+            "fir": _fir(item["fir"]),
+            # Restricted neighbours keep their bulletin; the rest are just codes.
+            "kisitlamali_komsu_firlar": [_fir(n) for n in neighbors if n.get("czib_active")],
+            "diger_komsu_firlar": [n["icao"] for n in neighbors if not n.get("czib_active")],
+            "havalimanlari": [
+                {k: v for k, v in a.items() if k in ("iata", "name", "distance_km")}
+                for a in (item.get("airports") or [])
+            ],
+        }
+        if item.get("radius_km"):
+            entry["yaricap_km"] = item["radius_km"]
+        compact.append(entry)
+    return {"country_iso": assessment.get("country_iso"), "assessments": compact}
+
+
 def summarize_assessment(assessment: Optional[Dict[str, Any]]) -> str:
     """One Turkish line for the cross-country digest, or '' when there is nothing."""
     if not assessment or not assessment.get("assessments"):
