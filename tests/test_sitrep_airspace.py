@@ -127,6 +127,17 @@ class TestHtmlSection:
         assert "HAVA SAHASI ETKİ ANALİZİ" not in html
         assert DISCLAIMER not in html
 
+    def test_multi_fir_country_card_lists_them_all(self):
+        """The card must not present one guessed FIR as the country's airspace."""
+        clusters = build_sitrep_clusters(
+            [_event(anchor_name_raw=None, country_iso="IN",
+                    event_type="military_action")], [])
+        html = self._render(build_airspace_assessment(clusters, "IN", CZIB))
+        assert "Ülkenin hava sahaları (4)" in html
+        for icao in ("VIDF", "VABF", "VOMF", "VECF"):
+            assert icao in html
+        assert "tek bir FIR belirtilmemiştir" in html
+
     def test_country_scope_card_shows_no_distances(self):
         clusters = build_sitrep_clusters(
             [_event(anchor_name_raw=None, event_type="military_action")], [])

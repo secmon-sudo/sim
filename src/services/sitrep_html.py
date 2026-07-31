@@ -342,15 +342,28 @@ def _airspace_card(item: Dict[str, Any]) -> str:
         f'<span style="color:#5b6b8a;font-weight:400"> · '
         f'{_esc(_event_type_label(item.get("event_type") or ""))}</span></div>'
     )
-    fir_line = (
-        f'<div style="margin-top:6px;font-size:13px;color:#cbd5e1">'
-        f'✈ Hava sahası: <b style="color:#93c5fd">{_esc(fir.get("name") or "—")}</b> '
-        f'<code style="color:#7db3ff">{_esc(fir.get("icao") or "")}</code>'
-        + ('<span style="margin-left:6px;padding:1px 8px;border-radius:99px;font-size:10px;'
-           'background:#3b1111;color:#fca5a5;border:1px solid #7f1d1d">EASA CZIB AKTİF</span>'
-           if fir.get("czib_active") else "")
-        + "</div>"
-    )
+    def _fir_chip(f: Dict[str, Any]) -> str:
+        return (
+            f'<b style="color:#93c5fd">{_esc(f.get("name") or "—")}</b> '
+            f'<code style="color:#7db3ff">{_esc(f.get("icao") or "")}</code>'
+            + ('<span style="margin-left:6px;padding:1px 8px;border-radius:99px;font-size:10px;'
+               'background:#3b1111;color:#fca5a5;border:1px solid #7f1d1d">EASA CZIB AKTİF</span>'
+               if f.get("czib_active") else "")
+        )
+
+    firs = item.get("firs") or ([fir] if fir else [])
+    if located or len(firs) <= 1:
+        fir_line = ('<div style="margin-top:6px;font-size:13px;color:#cbd5e1">'
+                    f'✈ Hava sahası: {_fir_chip(fir)}</div>')
+    else:
+        # Unplaced event in a multi-FIR country: naming one would be a guess.
+        fir_line = (
+            '<div style="margin-top:6px;font-size:13px;color:#cbd5e1">'
+            f'✈ Ülkenin hava sahaları ({len(firs)}): '
+            + " · ".join(_fir_chip(f) for f in firs)
+            + '</div><div style="margin-top:3px;font-size:10px;color:#5b6b8a">'
+            "Olay tam olarak konumlandırılamadığı için tek bir FIR belirtilmemiştir.</div>"
+        )
 
     restricted = [n for n in (item.get("neighbor_firs") or []) if n.get("czib_active")]
     others = [n for n in (item.get("neighbor_firs") or []) if not n.get("czib_active")]

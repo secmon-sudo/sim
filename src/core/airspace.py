@@ -270,13 +270,15 @@ def assess_cluster(cluster: Dict[str, Any],
         if fir is None:
             logger.debug("No FIR covers %.3f/%.3f — falling back to country scope", lat, lon)
         else:
+            view = _fir_view(fir, czib_by_iso)
             return {
                 "location": cluster.get("location"),
                 "event_type": cluster.get("event_type"),
                 "severity": cluster.get("severity"),
                 "scope": "point",
                 "point": {"lat": round(lat, 4), "lon": round(lon, 4), "source": source},
-                "fir": _fir_view(fir, czib_by_iso),
+                "fir": view,
+                "firs": [view],
                 "neighbor_firs": _neighbor_views(neighbor_firs(fir), czib_by_iso),
                 "airports": nearby_airports(lat, lon, radius_km, max_airports),
                 "radius_km": round(radius_km),
@@ -285,15 +287,32 @@ def assess_cluster(cluster: Dict[str, Any],
     country_firs = firs_for_country(iso)
     if not country_firs:
         return None
+    # A country is not one airspace. Russia has six FIRs and India four, so
+    # naming a single one for an event we could not place is a guess presented
+    # as a fact — and the guess was whichever FIR sorted first (a Kashmir event
+    # came out as "Mumbai FIR"). List them all instead: less precise, but true.
+    views = [_fir_view(f, czib_by_iso) for f in country_firs]
+    views.sort(key=lambda v: (not v["czib_active"], v["icao"]))
+    # Neighbours of the whole country = every bordering FIR that is not itself
+    # one of the country's own.
+    own = {f["icao"] for f in country_firs}
+    outside = [n for f in country_firs for n in neighbor_firs(f) if n["icao"] not in own]
+    seen, unique = set(), []
+    for n in outside:
+        if n["icao"] not in seen:
+            seen.add(n["icao"])
+            unique.append(n)
     return {
         "location": cluster.get("location"),
         "event_type": cluster.get("event_type"),
         "severity": cluster.get("severity"),
         "scope": "country",
         "point": None,
-        "fir": _fir_view(country_firs[0], czib_by_iso),
-        "neighbor_firs": _neighbor_views(
-            country_firs[1:] + neighbor_firs(country_firs[0]), czib_by_iso),
+        # `fir` stays the lead entry for consumers that show one line; `firs`
+        # carries the honest full set.
+        "fir": views[0],
+        "firs": views,
+        "neighbor_firs": _neighbor_views(unique, czib_by_iso),
         "airports": country_airports(iso, max_airports),
         "radius_km": None,
     }
@@ -396,7 +415,11 @@ def summarize_assessment(assessment: Optional[Dict[str, Any]]) -> str:
         return ""
     first = assessment["assessments"][0]
     fir = first["fir"]
-    parts = [f"{fir['name']} ({fir['icao']})"]
+    firs = first.get("firs") or [fir]
+    if first.get("scope") == "country" and len(firs) > 1:
+        parts = ["ülkenin hava sahaları: " + ", ".join(f["icao"] for f in firs)]
+    else:
+        parts = [f"{fir['name']} ({fir['icao']})"]
 
     restricted = [f["icao"] for f in first.get("neighbor_firs", []) if f.get("czib_active")]
     if fir.get("czib_active"):

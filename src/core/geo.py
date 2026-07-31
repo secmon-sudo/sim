@@ -42,6 +42,12 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "MOSCOW":    ["moscow", "moskva"],
     "BELGOROD":  ["belgorod"],
     "GAZA":      ["gaza", "gaza strip"],
+    "STRAIT OF HORMUZ": ["strait of hormuz", "hormuz strait", "hormuz"],
+    # "port"/"island" are NOT admin words — stripping them would turn
+    # "Port Said" into "Said". Handled per-name instead.
+    "DAMIETTA":  ["damietta", "damietta port", "dumyat"],
+    "QESHM":     ["qeshm", "qeshm island"],
+    "NEW DELHI": ["new delhi", "delhi"],
     # NATO eastern flank / Europe: drone-incursion and airspace-violation
     # reporting names these places constantly, and each has a Polish/Romanian
     # spelling that wire copy strips the diacritics from.
@@ -107,6 +113,7 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     "MARIUPOL": (47.0951, 37.5497, "UA"),
     "BAKHMUT": (48.5946, 38.0027, "UA"),
     "KHERSON": (46.6354, 32.6169, "UA"),
+    "KRYVYI RIH": (47.9105, 33.3918, "UA"),
     "DONETSK": (48.0159, 37.8028, "UA"),
     "LUHANSK": (48.5740, 39.3078, "UA"),
     # Russia / Belarus
@@ -175,6 +182,9 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     "ERBIL": (36.1901, 44.0091, "IQ"),
     "BASRA": (30.5085, 47.7804, "IQ"),
     "TEHRAN": (35.6892, 51.3890, "IR"),
+    "QESHM": (26.9581, 56.2718, "IR"),
+    "BUSHEHR": (28.9684, 50.8385, "IR"),
+    "STRAIT OF HORMUZ": (26.5667, 56.2500, "IR"),
     # Arabian Peninsula
     "SANAA": (15.3694, 44.1910, "YE"),
     "ADEN": (12.7797, 45.0095, "YE"),
@@ -183,6 +193,13 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     "DUBAI": (25.2048, 55.2708, "AE"),
     # North Africa / Sahel / Horn
     "CAIRO": (30.0444, 31.2357, "EG"),
+    # Seen unresolved in production anchors (2026-08-01 DB sample): Egyptian
+    # ports, the Hormuz chokepoint and Ukrainian/Indian conflict towns all
+    # reached the SITREP with no coordinate.
+    "DAMIETTA": (31.4165, 31.8133, "EG"),
+    "PORT SAID": (31.2653, 32.3019, "EG"),
+    "ALEXANDRIA": (31.2001, 29.9187, "EG"),
+    "SUEZ": (29.9668, 32.5498, "EG"),
     "BENGHAZI": (32.1167, 20.0667, "LY"),
     "KHARTOUM": (15.5007, 32.5599, "SD"),
     "MOGADISHU": (2.0469, 45.3182, "SO"),
@@ -194,6 +211,11 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     "MAIDUGURI": (11.8333, 13.1500, "NG"),
     # South / Central Asia
     "KABUL": (34.5553, 69.2075, "AF"),
+    "SRINAGAR": (34.0837, 74.7973, "IN"),
+    "KULGAM": (33.6400, 75.0190, "IN"),
+    "COIMBATORE": (11.0168, 76.9558, "IN"),
+    "NEW DELHI": (28.6139, 77.2090, "IN"),
+    "MUMBAI": (19.0760, 72.8777, "IN"),
     # Turkey
     "ISTANBUL": (41.0082, 28.9784, "TR"),
     "ANKARA": (39.9334, 32.8597, "TR"),

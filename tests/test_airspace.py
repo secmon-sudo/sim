@@ -210,6 +210,31 @@ class TestAssessment:
         assert out["radius_km"] is None
         assert all("distance_km" not in a for a in out["airports"])
 
+    def test_multi_fir_country_is_not_reduced_to_one_airspace(self):
+        """India has four FIRs and Russia six. Naming one for an event we could
+        not place is a guess dressed as a fact — and the guess used to be
+        whichever code sorted first, so a Kashmir event came out as Mumbai FIR.
+        Production anchors ('Iran', 'Iraqi Kurdistan', 'eastern Poland') hit this
+        path constantly, so it has to be honest rather than confident."""
+        out = assess_cluster({"location": "Ülke Geneli", "country_iso": "IN",
+                              "event_type": "military_action"}, CZIB)
+        assert out["scope"] == "country"
+        assert {f["icao"] for f in out["firs"]} == {"VABF", "VECF", "VIDF", "VOMF"}
+        # neighbours must exclude the country's own FIRs
+        assert not ({f["icao"] for f in out["neighbor_firs"]}
+                    & {f["icao"] for f in out["firs"]})
+
+    def test_single_fir_country_still_names_it(self):
+        out = assess_cluster({"location": "Ülke Geneli", "country_iso": "PL",
+                              "event_type": "military_action"}, CZIB)
+        assert [f["icao"] for f in out["firs"]] == ["EPWW"]
+
+    def test_located_event_names_exactly_one_fir(self):
+        out = assess_cluster({"location": "Kulgam", "country_iso": "IN",
+                              "event_type": "missile_strike"}, CZIB)
+        assert out["scope"] == "point"
+        assert [f["icao"] for f in out["firs"]] == ["VIDF"]  # Kashmir → Delhi FIR
+
     def test_unknown_country_yields_nothing(self):
         cluster = {"location": "Somewhere", "country_iso": "US",
                    "event_type": "military_action"}
