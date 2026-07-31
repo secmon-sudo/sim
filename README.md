@@ -42,7 +42,7 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 
 | Pass | Function | Key Features |
 |------|----------|-------------|
-| **A** | Ingest & Canonicalization | Google News RSS (terror/hotel/airport attack queries), 50+ curated news & terrorism-research feeds, GDELT 2.0, Nitter, Travel Advisories, content translation & dedup |
+| **A** | Ingest & Canonicalization | 18 standing Google News queries (terror/hotel/airport attack), 55 curated publisher feeds, UK FCDO / US State Dept travel advisories, content translation & dedup |
 | **B** | Dedup & Distributed Locks | URL hash dedup, maturation window, stale lock cleanup with telemetry |
 | **C** | LLM Classification | Multi-provider router (Groq + OpenRouter), heartbeat-protected locks |
 | **D** | Scoring & Storyline | Anchor resolution, severity/confidence scoring, storyline linking, Telegram alerts |
@@ -110,9 +110,9 @@ connection loss). Three layers now defend against it:
 ## Source Coverage
 
 - **Targeted Google News queries** (always-on static feeds): hotel attacks/bombings/sieges, airport attacks/bombings/explosions, suicide bombings & vehicle bombs, terror attacks with casualties, attacks on tourists — plus ~110 rotating tier queries (aviation security, transit attacks, protests, travel advisories).
-- **Terrorism research:** Jamestown Foundation, The Soufan Center, CTC Sentinel (West Point), Counter Extremism Project, Long War Journal, HSToday.
+- **Terrorism research:** The Soufan Center, Long War Journal, InsightCrime, Bellingcat.
 - **Global & regional wires:** BBC (World/Middle East/Africa/Asia), Al Jazeera, Guardian, France24, NYT, WSJ, CNN, Fox, UN News and Israeli/Iranian/Russian/Ukrainian outlets for conflict-zone coverage.
-- **Structured sources:** GDELT 2.0 (region-rotating), EASA CZIB conflict zones, US State Dept travel advisories, Nitter/X conflict trackers.
+- **Structured sources:** EASA CZIB conflict zones (also drives the SITREP airspace block), US State Dept and UK FCDO travel advisories.
 
 ## Tech Stack
 
@@ -186,7 +186,7 @@ sim/
 │   │   ├── orchestrator.py                # Main entry point (supports --weekly)
 │   │   ├── weekly_forecast.py             # Weekly forecast pass coordinator
 │   │   ├── pass_a_ingest.py               # Pass A orchestration + DB persistence
-│   │   ├── ingest_sources.py              # All ingest network I/O (RSS/Nitter/advisories/GDELT)
+│   │   ├── ingest_sources.py              # All ingest network I/O (RSS/advisories/full-text)
 │   │   ├── ingest_filters.py              # Pure text filters, canonicalization, dedup
 │   │   ├── ingest_queries.py              # Search-query construction
 │   │   ├── pass_b_dedup.py                # URL dedup & distributed locks

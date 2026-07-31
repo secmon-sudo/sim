@@ -7,7 +7,7 @@ applies noise/age/dedup filtering and inserts raw events. The heavy lifting
 lives in focused modules (split from this 1.9K-line monolith on 2026-07-16):
 
   - ingest_queries   — search-query construction (static tiers + storyline queries)
-  - ingest_sources   — all network I/O (RSS, Nitter, advisories, translate)
+  - ingest_sources   — all network I/O (RSS, advisories, translate)
   - ingest_filters   — pure text filters, canonicalization, similarity dedup
 
 This module keeps only the DB-touching pieces and run_pass_a itself. The
@@ -46,7 +46,6 @@ from src.pipeline.ingest_queries import (  # noqa: F401
 from src.pipeline.ingest_sources import (  # noqa: F401
     GOOGLE_NEWS_RSS,
     fetch_full_text,
-    fetch_nitter_feeds,
     fetch_rss_feed,
     fetch_travel_advisories,
     google_translate,
@@ -280,9 +279,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         all_items.extend(items)
         stats["queries_executed"] += 1
 
-    # Fetch from static hardcoded feeds with keyword post-filter
-    static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
-    for feed_url in static_feeds:
+    # Configured feeds, keyword-gated. Two lists, same handling: publisher_feeds
+    # are publishers' own RSS, news_queries are standing Google News searches.
+    # They are kept apart because their yield profiles differ by roughly 2x per
+    # source, so they are worth measuring — and tuning — separately.
+    configured = (SETTINGS.get("sources", {}).get("publisher_feeds", [])
+                  + SETTINGS.get("sources", {}).get("news_queries", []))
+    for feed_url in configured:
         items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
         # Apply keyword filter: only keep items matching security keywords
         filtered_items = []
@@ -294,25 +297,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     stats["noise_filtered"] = stats.get("noise_filtered", 0) + 1
         all_items.extend(filtered_items)
         stats["queries_executed"] += 1
-
-    # Fetch from Nitter (Twitter/X) feeds — with mirror fallback & 3 retries.
-    # Same keyword gate as static feeds: the accounts are curated, but if one
-    # drifts off-topic its tweets shouldn't ride in ungated.
-    try:
-        nitter_items = fetch_nitter_feeds(stats=stats)
-        kept_nitter = [
-            it for it in nitter_items
-            if _matches_security_keywords(it.get("title", ""), it.get("description", ""))
-        ]
-        stats["noise_filtered"] += len(nitter_items) - len(kept_nitter)
-        all_items.extend(kept_nitter)
-        nitter_count = len(SETTINGS.get("sources", {}).get("nitter_feeds", []))
-        stats["queries_executed"] += nitter_count
-        if nitter_items:
-            logger.info("Nitter: Total %d items (%d kept) from %d accounts",
-                        len(nitter_items), len(kept_nitter), nitter_count)
-    except Exception:
-        logger.warning("Nitter fetch skipped due to errors")
 
     # Fetch official travel advisories (US State Dept + UK FCDO) — Level 3-4 / "do not travel"
     try:

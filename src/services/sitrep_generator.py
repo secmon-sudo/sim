@@ -41,7 +41,6 @@ MAX_COUNTRIES_PER_RUN = int(SITREP_CFG.get("max_countries_per_run", 5))
 MIN_EVENTS_THRESHOLD = int(SITREP_CFG.get("min_events_threshold", 3))
 MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 25))
 SNIPPET_CHARS = int(SITREP_CFG.get("snippet_chars", 600))
-MAX_WEB_ENRICH_CLUSTERS = int(SITREP_CFG.get("max_web_enrich_clusters", 8))
 # A single event at/above this severity (0-100, same scale as alert.severity_min)
 # qualifies its country for a SITREP even below the volume threshold.
 HIGH_SEVERITY_OVERRIDE = int(SITREP_CFG.get("high_severity_override", 80))
@@ -356,8 +355,8 @@ _SYSTEM_PROMPT = (
     "Sonrasında raporu O GÜNÜN verisine en uygun şekilde SEN kurgula: bölümleri coğrafi, "
     "tematik veya kronolojik olarak düzenleyebilirsin — hangisi günü en iyi anlatıyorsa. "
     "Sabit bir bölüm şablonu YOK; boş bölüm uydurma, 'veri yok' diye bölüm açma. "
-    "Komşu ülkelere yayılma ('spillover') ve stratejik/siyasi gelişmeleri ('strategic', "
-    "'strategic_web': hava sahası, seyahat uyarıları, yaptırımlar, resmi açıklamalar) "
+    "Komşu ülkelere yayılma ('spillover') ve stratejik/siyasi gelişmeleri ('strategic': "
+    "hava sahası, seyahat uyarıları, yaptırımlar, resmi açıklamalar) "
     "veri varsa anlamlı başlıklar altında işle; askeri olaylarla iç içe anlatmak daha "
     "doğalsa öyle yap.\n"
     "HAVACILIK ETKİSİ: Veride havalimanına saldırı, havalimanı kapanması, hava sahası "
@@ -449,7 +448,6 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
                    window_start: datetime, window_end: datetime,
                    field: List[Dict[str, Any]], strategic: List[Dict[str, Any]],
                    spillover: List[Dict[str, Any]],
-                   strategic_web: Dict[str, Any] = None,
                    airspace: Dict[str, Any] = None) -> Dict[str, Any]:
     """Generate the Turkish SITREP narrative. Returns call_llm's result dict."""
     payload = {
@@ -458,7 +456,6 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
         "events": field,
         "spillover": spillover,
         "strategic": strategic,
-        "strategic_web": strategic_web,
         # Compacted: the rich object is for the HTML block, and the prompt is
         # already the tightest budget in this pipeline.
         "airspace": compact_for_prompt(airspace),

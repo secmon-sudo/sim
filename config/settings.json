@@ -1,10 +1,7 @@
 {
   "pipeline": {
-    "run_interval_minutes": 120,
     "max_events_per_run": 100,
-    "stale_lock_threshold_minutes": 15,
-    "heartbeat_interval_seconds": 60,
-    "heartbeat_max_consecutive_errors": 5
+    "stale_lock_threshold_minutes": 15
   },
   "ingestion": {
     "max_events_per_domain": 8,
@@ -13,7 +10,6 @@
     },
     "max_article_age_days": 2,
     "fetch_full_text": true,
-    "query_language": "en",
     "max_event_age_days": 30,
     "max_event_future_days": 1,
     "full_text_min_priority": 3,
@@ -25,9 +21,7 @@
     "llm_batch_size": 6
   },
   "dedup": {
-    "url_hash_algorithm": "sha256",
     "maturation_window_hours": 2,
-    "content_similarity_threshold": 0.5,
     "title_similarity_threshold": 0.65,
     "title_token_jaccard_threshold": 0.72,
     "content_shingle_threshold": 0.4
@@ -48,6 +42,9 @@
       "injuries_threshold": 10,
       "bonus_points": 20
     }
+  },
+  "cold_storage": {
+    "archive_null_occurred_after_days": 60
   },
   "storyline": {
     "jaccard_threshold": 0.4,
@@ -108,20 +105,11 @@
       }
     }
   },
-  "cold_storage": {
-    "archive_endpoint": "",
-    "retry_attempts": 3,
-    "batch_size": 500,
-    "archive_null_occurred_after_days": 60
-  },
   "radius_mapping": {
-    "airport": 5.0,
-    "hotel_chain": 2.0,
-    "port": 10.0,
-    "military_base": 15.0
+    "airport": 5.0
   },
   "sources": {
-    "static_feeds": [
+    "publisher_feeds": [
       "https://www.reddit.com/r/worldnews/new/.rss",
       "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
       "https://www.aljazeera.com/xml/rss/all.xml",
@@ -158,13 +146,27 @@
       "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
       "https://www.themoscowtimes.com/rss/news",
       "https://meduza.io/rss/en/all",
-      "https://warsawinstitute.org/feed/",
       "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
       "https://feeds.bbci.co.uk/news/world/rss.xml",
       "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
       "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
       "https://thesoufancenter.org/feed/",
-      "https://www.counterextremism.com/rss.xml",
+      "https://humanglemedia.com/feed/",
+      "https://www.dailymaverick.co.za/dmrss/",
+      "https://thediplomat.com/feed/",
+      "https://www.scmp.com/rss/4/feed",
+      "https://www.dawn.com/feeds/home",
+      "https://insightcrime.org/feed/",
+      "https://www.rfa.org/english/rss2.xml",
+      "https://www.rferl.org/api/epiqq",
+      "https://iranintl.com/en/feed",
+      "https://www.aa.com.tr/en/rss/default?cat=live",
+      "https://iranwire.com/en/feed/",
+      "https://www.middleeasteye.net/rss",
+      "https://saudigazette.com.sa/rssFeed/74",
+      "https://rss.dw.com/atom/rss-en-all"
+    ],
+    "news_queries": [
       "https://news.google.com/rss/search?q=Iran%20Israel%20war%20military%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Iran%20missile%20strike%20drone%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22Strait%20of%20Hormuz%22%20OR%20%22Red%20Sea%22%20military%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
@@ -176,32 +178,13 @@
       "https://news.google.com/rss/search?q=%22suicide%20bombing%22%20OR%20%22car%20bomb%22%20OR%20%22truck%20bomb%22%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22terrorist%20attack%22%20OR%20%22terror%20attack%22%20casualties%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22tourists%20killed%22%20OR%20%22tourist%20attack%22%20OR%20%22tourists%20kidnapped%22%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://humanglemedia.com/feed/",
-      "https://www.dailymaverick.co.za/dmrss/",
-      "https://thediplomat.com/feed/",
-      "https://www.scmp.com/rss/4/feed",
-      "https://www.dawn.com/feeds/home",
-      "https://insightcrime.org/feed/",
-      "https://www.rfa.org/english/rss2.xml",
       "https://news.google.com/rss/search?q=Sahel%20OR%20Mali%20OR%20%22Burkina%20Faso%22%20OR%20Niger%20attack%20militants%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Myanmar%20OR%20Rakhine%20junta%20airstrike%20OR%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Balochistan%20OR%20%22Khyber%20Pakhtunkhwa%22%20attack%20OR%20militants%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://news.google.com/rss/search?q=Haiti%20gang%20violence%20OR%20kidnapping%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%28%22Port-au-Prince%22%20OR%20Haiti%29%20%28gang%20OR%20gangs%20OR%20kidnapping%20OR%20killed%20OR%20attack%29%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Mexico%20OR%20Ecuador%20cartel%20violence%20OR%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22South%20China%20Sea%22%20OR%20Taiwan%20military%20incursion%20OR%20confrontation%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://www.rferl.org/api/epiqq",
-      "https://iranintl.com/en/feed",
-      "https://www.aa.com.tr/en/rss/default?cat=live",
-      "https://iranwire.com/en/feed/",
-      "https://www.middleeasteye.net/rss",
-      "https://saudigazette.com.sa/rssFeed/74",
-      "https://rss.dw.com/atom/rss-en-all"
-    ],
-    "nitter_mirrors": [
-      "https://nitter.net",
-      "https://nitter.privacydev.net",
-      "https://nitter.poast.org"
+      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen"
     ],
     "travel_advisory_feeds": [
       "https://travel.state.gov/_res/rss/TAsTWs.xml",
@@ -229,13 +212,7 @@
       "https://www.gov.uk/foreign-travel-advice/democratic-republic-of-the-congo.atom",
       "https://www.gov.uk/foreign-travel-advice/libya.atom",
       "https://www.gov.uk/foreign-travel-advice/mozambique.atom"
-    ],
-    "nitter_feeds_disabled_2026_07_23": [
-      "https://nitter.net/ww3mediaa/rss",
-      "https://nitter.net/ConflictTR/rss",
-      "https://nitter.net/visegrad24/rss"
-    ],
-    "nitter_feeds": []
+    ]
   },
   "sitrep": {
     "window_hours": 24,
@@ -243,11 +220,6 @@
     "min_events_threshold": 3,
     "max_clusters_in_prompt": 25,
     "snippet_chars": 600,
-    "language": "tr",
-    "max_web_enrich_clusters": 3,
-    "web_enrich_enabled": false,
-    "web_enrich_cooldown_s": 7.0,
-    "max_grounded_calls_per_run": 36,
     "high_severity_override": 80,
     "aviation_selection_min": 1,
     "airspace_enabled": true,

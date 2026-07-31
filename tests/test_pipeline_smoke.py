@@ -131,8 +131,10 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
     from src.services import storyline_narrator
 
     fed = {"done": False}
+    fetched_urls = []
 
     def fake_fetch_rss(query_info, is_direct_url=False, stats=None):
+        fetched_urls.append(query_info)
         if fed["done"]:
             return []
         fed["done"] = True
@@ -140,7 +142,6 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
 
     fake_telegram = MagicMock(return_value=True)
     with patch.object(pass_a_ingest, "fetch_rss_feed", side_effect=fake_fetch_rss), \
-         patch.object(pass_a_ingest, "fetch_nitter_feeds", return_value=[]), \
          patch.object(pass_a_ingest, "fetch_travel_advisories", return_value=[]), \
          patch.object(pass_a_ingest, "translate_to_english_if_needed", side_effect=lambda t: t), \
          patch.object(pass_c_classify, "call_llm", side_effect=_fake_call_llm), \
@@ -154,6 +155,15 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
         results = orchestrator.run_pipeline()
 
     assert results["success"] is True, f"pipeline failed: {results.get('error')}"
+
+    # Both configured source lists must actually be fetched. They were one flat
+    # list until 2026-08-01; splitting them is only safe if ingest reads both,
+    # and a silently unread list would halve the source pool without any error.
+    from src.pipeline.pass_a_ingest import SETTINGS
+    _sources = SETTINGS["sources"]
+    assert _sources["publisher_feeds"][0] in fetched_urls
+    assert _sources["news_queries"][0] in fetched_urls
+
     assert results["pass_a"]["events_inserted"] == 2
     assert results["pass_c"]["events_classified"] == 2
     assert results["pass_c"]["events_failed"] == 0

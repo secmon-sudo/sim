@@ -110,7 +110,7 @@ class TestFallbackClusterKey:
 class TestGoogleNewsDecode:
     def test_legacy_id_decodes_to_publisher_url(self):
         import base64
-        from src.services.sitrep_web_enrich import decode_google_news_url
+        from src.services.google_news_resolver import decode_google_news_url
         # legacy format: base64 payload embeds the article URL directly
         inner = b"\x08\x13\x22" + bytes([len(b"https://example.com/story-1")]) \
             + b"https://example.com/story-1" + b"\xd2\x01\x00"
@@ -119,11 +119,11 @@ class TestGoogleNewsDecode:
         assert decode_google_news_url(url) == "https://example.com/story-1"
 
     def test_non_google_url_returns_none(self):
-        from src.services.sitrep_web_enrich import decode_google_news_url
+        from src.services.google_news_resolver import decode_google_news_url
         assert decode_google_news_url("https://reuters.com/a") is None
 
     def test_opaque_new_format_returns_none_or_url(self):
-        from src.services.sitrep_web_enrich import decode_google_news_url
+        from src.services.google_news_resolver import decode_google_news_url
         # new AU_yq… IDs are not offline-decodable; must not crash or return garbage
         res = decode_google_news_url(
             "https://news.google.com/rss/articles/CBMihwJBVV95cUxNYTc5?oc=5")
@@ -154,172 +154,6 @@ class TestRelabelCluster:
         }
         relabel_cluster(cluster, [])
         assert cluster["verification"] == LABEL_OFFICIAL
-
-
-class TestDiscoverIncidents:
-    def _fake_gemini(self, text, sources, supports):
-        return {"text": text, "sources": sources, "supports": supports}
-
-    def test_supported_lines_become_clusters(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        text = (
-            "LOKASYON: Erbil | OLAY: ABD Konsolosluğu yakınına füze saldırısı düzenlendi.\n"
-            "LOKASYON: Basra | OLAY: Petrol tesisinde patlama meydana geldi."
-        )
-        sources = [
-            {"name": "reuters.com", "url": "https://v.example/1", "title": "reuters.com"},
-            {"name": "centcom.mil", "url": "https://v.example/2", "title": "centcom.mil"},
-        ]
-        supports = [
-            ("LOKASYON: Erbil | OLAY: ABD Konsolosluğu yakınına füze saldırısı", [0, 1]),
-        ]
-        monkeypatch.setattr(enr, "_call_gemini",
-                            lambda *a, **k: self._fake_gemini(text, sources, supports))
-        clusters = enr.discover_incidents("Iraq", "fake-key", [])
-        # Basra line has no grounding support → dropped; Erbil kept with both sources
-        assert len(clusters) == 1
-        assert clusters[0]["location"] == "Erbil"
-        assert {s["name"] for s in clusters[0]["sources"]} == {"reuters.com", "centcom.mil"}
-
-    def test_no_findings(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        monkeypatch.setattr(enr, "_call_gemini",
-                            lambda *a, **k: self._fake_gemini("EK_BILGI_YOK", [], []))
-        assert enr.discover_incidents("Iraq", "fake-key", []) == []
-
-
-class TestGeminiQuotaBreaker:
-    def _make_429(self):
-        class Resp:
-            status_code = 429
-            def json(self): return {"error": {"details": [{"retryDelay": "1s"}]}}
-        return Resp()
-
-    def _run_429_calls(self, enr, monkeypatch, n):
-        monkeypatch.setattr(enr.httpx, "post", lambda *a, **k: self._make_429())
-        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
-        for _ in range(n):
-            assert enr._call_gemini("q", "env-key") is None
-
-    def test_single_key_trips_breaker(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
-        self._run_429_calls(enr, monkeypatch, 3)
-        assert enr._quota_exhausted
-        enr._reset_gemini_state()
-
-    def test_second_key_rotation_before_tripping(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
-        self._run_429_calls(enr, monkeypatch, 3)
-        # first key dead → rotated to backup, breaker NOT tripped yet
-        assert not enr._quota_exhausted
-        assert enr._key_idx == 1
-        self._run_429_calls(enr, monkeypatch, 3)
-        assert enr._quota_exhausted  # backup dead too → now disabled
-        enr._reset_gemini_state()
-
-    def test_backup_key_uses_its_own_model(self, monkeypatch):
-        """Key #2's project has zero Gemini-3 Search-grounding quota (2026-07-18):
-        after rotation, grounded calls must go to SITREP_GEMINI_MODEL_2."""
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
-        monkeypatch.setenv("SITREP_GEMINI_MODEL_2", "gemini-2.5-flash-lite")
-        self._run_429_calls(enr, monkeypatch, 3)  # burn key 1 → rotate
-        assert enr._key_idx == 1
-        seen = {}
-        def fake_post(url, **kw):
-            seen["url"] = url
-            seen["key"] = kw.get("params", {}).get("key")
-            class R:
-                status_code = 200
-                def raise_for_status(self): pass
-                def json(self):
-                    return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
-            return R()
-        monkeypatch.setattr(enr.httpx, "post", fake_post)
-        res = enr._call_gemini("q", "k1")
-        assert res and res["text"] == "ok"
-        assert "gemini-2.5-flash-lite" in seen["url"]
-        assert seen["key"] == "k2"
-        enr._reset_gemini_state()
-
-    def _make_perday_429(self):
-        class Resp:
-            status_code = 429
-            def json(self):
-                return {"error": {"details": [{"violations": [
-                    {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
-                ]}]}}
-        return Resp()
-
-    def test_perday_429_rotates_immediately(self, monkeypatch):
-        """A PerDay quotaId is definitive — rotate on the FIRST such 429 instead
-        of counting failed calls (2026-07-19: flapping daily 429s interleaved
-        with 200s kept resetting the counter, so rotation never fired)."""
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
-        calls = []
-        def fake_post(url, **kw):
-            calls.append(kw.get("params", {}).get("key"))
-            if calls[-1] == "k1":
-                return self._make_perday_429()
-            class R:
-                status_code = 200
-                def raise_for_status(self): pass
-                def json(self):
-                    return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
-            return R()
-        monkeypatch.setattr(enr.httpx, "post", fake_post)
-        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
-        res = enr._call_gemini("q", "k1")
-        assert res and res["text"] == "ok"
-        assert calls == ["k1", "k2"]  # no retries burned on the spent key
-        assert enr._key_idx == 1
-        assert not enr._quota_exhausted
-        enr._reset_gemini_state()
-
-    def test_perday_429_single_key_disables(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
-        monkeypatch.setattr(enr.httpx, "post", lambda *a, **k: self._make_perday_429())
-        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
-        assert enr._call_gemini("q", "k1") is None
-        assert enr._quota_exhausted
-        enr._reset_gemini_state()
-
-    def test_enrichment_prioritizes_discovery_and_sweep(self, monkeypatch):
-        """Discovery + strategic sweep must run BEFORE per-cluster enrichment so a
-        mid-run quota death costs the least valuable calls (2026-07-17 incident)."""
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        # The pass ships disabled (no free-tier model can ground since
-        # 2026-07-09); this test covers the ordering it uses when a working
-        # grounding provider is wired back in.
-        monkeypatch.setattr(enr, "WEB_ENRICH_ENABLED", True)
-        monkeypatch.setattr(enr.time, "sleep", lambda s: None)
-        order = []
-        monkeypatch.setattr(enr, "discover_incidents",
-                            lambda *a, **k: order.append("discover") or [])
-        monkeypatch.setattr(enr, "strategic_sweep",
-                            lambda *a, **k: order.append("sweep"))
-        monkeypatch.setattr(enr, "enrich_cluster",
-                            lambda *a, **k: order.append("enrich"))
-        enr.apply_web_enrichment([{"sources": [], "location": "X", "snippet": "s"}],
-                                 "Iraq", max_clusters=3, cooldown_s=0)
-        assert order == ["discover", "sweep", "enrich"]
-        enr._reset_gemini_state()
 
 
 class TestHtmlRenderer:
@@ -484,90 +318,3 @@ class TestSpilloverAliases:
         # placeholder count matches parameter count (2 per term + 3 fixed)
         assert captured["sql"].count("%s") == len(captured["params"])
 
-
-class TestCredentialRedaction:
-    """API keys travel in the query string; CI logs of a public repo are
-    world-readable, so transport errors must never carry a live key."""
-
-    def test_key_param_is_masked(self):
-        from src.services.sitrep_web_enrich import _redact
-        raw = ("Client error '404 Not Found' for url 'https://generativelanguage."
-               "googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"
-               "?key=AQ.Ab8RN6K66GNyvmHAz3qoicsSL'")
-        out = _redact(raw)
-        assert "AQ.Ab8RN6K66GNyvmHAz3qoicsSL" not in out
-        assert "key=***" in out
-
-    def test_non_key_text_untouched(self):
-        from src.services.sitrep_web_enrich import _redact
-        assert _redact("plain error") == "plain error"
-
-
-class TestGroundedCallBudget:
-    """Search grounding is billed per REQUEST, so the call count is the cost
-    driver — the budget must hard-stop grounding, not merely pace it."""
-
-    def test_budget_exhaustion_disables_further_calls(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setattr(enr, "MAX_GROUNDED_CALLS_PER_RUN", 2)
-        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-
-        calls = {"n": 0}
-
-        class FakeResp:
-            status_code = 200
-            def raise_for_status(self): pass
-            def json(self):
-                calls["n"] += 1
-                return {"candidates": [{"content": {"parts": [{"text": "ok"}]},
-                                        "groundingMetadata": {}}]}
-
-        monkeypatch.setattr(enr.httpx, "post", lambda *a, **kw: FakeResp())
-
-        assert enr._call_gemini("p", "test-key") is not None
-        assert enr._call_gemini("p", "test-key") is not None
-        # third call must be refused without touching the network
-        assert enr._call_gemini("p", "test-key") is None
-        assert calls["n"] == 2
-        assert enr._quota_exhausted is True
-        enr._reset_gemini_state()
-
-    def test_reset_clears_budget(self):
-        import src.services.sitrep_web_enrich as enr
-        enr._grounded_calls = 5
-        enr._reset_gemini_state()
-        assert enr._grounded_calls == 0
-
-
-class TestWebEnrichKillSwitch:
-    """The grounding pass must cost nothing while it has no working provider.
-
-    Run #13 (2026-07-23) spent 25 HTTP calls, ~3 minutes and one key's daily
-    quota on a retired model, and still reported success — the pass is
-    fail-soft, so a dead provider looks exactly like a quiet news day.
-    """
-
-    def test_disabled_by_default_in_config(self):
-        import json
-        from pathlib import Path
-        settings = json.loads(
-            (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
-        )
-        assert settings["sitrep"]["web_enrich_enabled"] is False
-
-    def test_disabled_pass_makes_no_calls(self, monkeypatch):
-        import src.services.sitrep_web_enrich as enr
-        enr._reset_gemini_state()
-        monkeypatch.setenv("GEMINI_API_KEY", "k1")
-        monkeypatch.setattr(enr, "WEB_ENRICH_ENABLED", False)
-
-        def _boom(*a, **k):
-            raise AssertionError("no network call may happen while disabled")
-
-        monkeypatch.setattr(enr.httpx, "post", _boom)
-        monkeypatch.setattr(enr.time, "sleep", _boom)
-        result = enr.apply_web_enrichment(
-            [{"sources": [], "location": "X", "snippet": "s"}], "Iraq", max_clusters=3
-        )
-        assert result == {"strategic": None, "discovered": []}

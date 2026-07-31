@@ -16,7 +16,6 @@ from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
 from src.services.czib_client import fetch_active_czib_by_country
 from src.services.sitrep_generator import (
-    MAX_WEB_ENRICH_CLUSTERS,
     WINDOW_HOURS,
     build_sitrep_clusters,
     fetch_aviation_spillover_events,
@@ -32,7 +31,7 @@ from src.services.sitrep_generator import (
 from src.services.sitrep_digest import build_digest
 from src.services.sitrep_digest_html import render_digest_html
 from src.services.sitrep_html import render_sitrep_html
-from src.services.sitrep_web_enrich import apply_web_enrichment, resolve_cluster_urls
+from src.services.google_news_resolver import resolve_cluster_urls
 from src.services.telegram_report_notifier import send_digest_telegram, send_sitrep_telegram
 
 logger = logging.getLogger(__name__)
@@ -115,21 +114,13 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
 
         aviation_spill = [c for c in aviation_spill if not _already_shown(c)]
 
-    # Optional Gemini Google-Search grounding: extra corroborated detail per top
-    # cluster, discovery of incidents the ingest pipeline missed, and a strategic
-    # sweep for BÖLÜM III. Labels are re-derived afterwards so newly found
-    # independent domains upgrade single-source events.
-    enrichment = apply_web_enrichment(field, country_name, MAX_WEB_ENRICH_CLUSTERS)
-    strategic_web = enrichment["strategic"]
-    field = field + enrichment["discovered"]
-    clusters = clusters + enrichment["discovered"]
+    # Verification labels are re-derived after URL resolution: a resolved link
+    # reveals the real publisher domain, which is what label_cluster counts.
     for cluster in field:
         relabel_cluster(cluster, penalized)
 
-    # Only genuinely quiet after BOTH the events table and web discovery came
-    # back empty (discovery is a no-op without GEMINI_API_KEY).
-    if not clusters and not strategic_web:
-        logger.info("SITREP %s: no events and no web findings — saving empty report", country_iso)
+    if not clusters:
+        logger.info("SITREP %s: no events in window — saving empty report", country_iso)
         _save_sitrep(db_conn, country_iso, window_start, window_end,
                      status="empty", report_text=EMPTY_REPORT_TEXT, clusters=[])
         return {"country_iso": country_iso, "status": "empty", "event_count": 0}
@@ -137,12 +128,10 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     try:
         res = run_sitrep_llm(router, country_iso, country_name,
                              window_start, window_end, field, strategic, spillover,
-                             strategic_web=strategic_web, airspace=airspace)
+                             airspace=airspace)
         allowed_urls = [
             s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
         ]
-        if strategic_web:
-            allowed_urls += [s.get("url") for s in strategic_web.get("sources", []) if s.get("url")]
         report_text = validate_sitrep(res["content"], allowed_urls)
     except Exception as e:
         logger.exception("SITREP %s: LLM generation failed", country_iso)
@@ -152,8 +141,8 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         return {"country_iso": country_iso, "status": "failed", "error": str(e)}
 
     # Delivery is best-effort; the report row is the source of truth.
-    # Full cluster list (field + strategic + discovered) so the stat cards and
-    # the appendix log cover the complete day, not just field events.
+    # Full cluster list (field + strategic) so the stat cards and the appendix
+    # log cover the complete day, not just field events.
     html_doc = render_sitrep_html(
         country_name, country_iso,
         f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",

@@ -88,12 +88,12 @@ class TestTitleSimilarity:
         assert sim < 0.5
 
 
-class TestStaticFeeds:
-    def test_static_feeds_loaded_from_settings(self):
+class TestConfiguredFeeds:
+    def test_publisher_feeds_loaded_from_settings(self):
         from src.pipeline.pass_a_ingest import SETTINGS
-        static_feeds = SETTINGS.get("sources", {}).get("static_feeds", [])
-        
-        # Core feeds that must stay in the static_feeds list.
+        publisher_feeds = SETTINGS.get("sources", {}).get("publisher_feeds", [])
+
+        # Core feeds that must stay in the publisher_feeds list.
         # (feeds.reuters.com was removed from settings — the endpoint was
         # discontinued by Reuters and always returned errors.)
         expected_feeds = [
@@ -104,7 +104,19 @@ class TestStaticFeeds:
         ]
         
         for feed in expected_feeds:
-            assert feed in static_feeds
+            assert feed in publisher_feeds
+
+    def test_the_two_source_lists_are_disjoint_and_correctly_sorted(self):
+        """publisher_feeds and news_queries are split so their very different
+        yield profiles can be measured separately — the split only means
+        anything if each URL is in the right list."""
+        from src.pipeline.pass_a_ingest import SETTINGS
+        pub = SETTINGS["sources"]["publisher_feeds"]
+        qry = SETTINGS["sources"]["news_queries"]
+        assert not set(pub) & set(qry)
+        assert all("news.google.com" not in u for u in pub)
+        assert all("news.google.com/rss/search" in u for u in qry)
+
 
 
 
@@ -268,8 +280,8 @@ class TestGoogleNewsRecency:
             (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
         )
         google_feeds = [
-            u for u in settings["sources"]["static_feeds"]
+            u for u in settings["sources"]["news_queries"]
             if "news.google.com/rss/search" in u
         ]
-        assert google_feeds, "expected Google News feeds in static_feeds"
+        assert google_feeds, "expected Google News queries in news_queries"
         assert all("when%3A" in u or "when:" in u for u in google_feeds)
