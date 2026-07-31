@@ -8,28 +8,19 @@ Critical Event Circuit Breaker (Flash Update) trigger logic:
 3. 3+ verified high-confidence events in a country within a 6h window.
 """
 
-import math
 import logging
 from datetime import datetime
 from typing import List, Dict, Any
 
 from src.core.forecast_engine import get_source_credibility
+from src.core.geo import haversine_km
 
 logger = logging.getLogger(__name__)
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate geodesic distance between two points in km."""
-    R = 6371.0  # Earth's radius in km
-    try:
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-        a = (math.sin(dlat / 2) ** 2 + 
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        return R * c
-    except Exception:
-        return float('inf')
+    return haversine_km(lat1, lon1, lat2, lon2)
 
 
 def is_same_location(ev1: Dict[str, Any], ev2: Dict[str, Any]) -> bool:

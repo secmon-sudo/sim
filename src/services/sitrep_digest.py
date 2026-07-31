@@ -17,6 +17,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from src.core.airspace import summarize_assessment
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
 
@@ -78,6 +79,10 @@ def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str,
             "max_severity": max_sev,
             "cluster_count": len(clusters),
             "report_text": res["report_text"][:MAX_REPORT_CHARS],
+            # Deterministic airspace exposure line, computed upstream by
+            # src/core/airspace.py — fed to the model as fact and re-appended
+            # after parsing so it survives a narrative that drops it.
+            "airspace_summary": summarize_assessment(res.get("airspace")),
         })
     rows.sort(key=lambda r: (-RISK_ORDER[r["risk"]], -r["max_severity"]))
     return rows
@@ -104,7 +109,11 @@ _SYSTEM_PROMPT = (
     "hangi rotada uçuşunu durdurdu/askıya aldı/rota değiştirdi/yeniden başlattı, hangi "
     "havalimanı saldırıya uğradı veya kapandı, hangi hava sahası kime kapandı. "
     "Havayolunun ve havalimanının adını yaz. Raporlarda bu tür bir bilgi yoksa tek "
-    "kelime yaz: YOK>\n\n"
+    "kelime yaz: YOK\n"
+    "Ülke bloklarındaki '[HAVA SAHASI (sistem hesabı)]' satırı haber değil, sistemin "
+    "olay koordinatından hesapladığı FIR/havalimanı yakınlık bilgisidir. Bu satırı "
+    "buraya kopyalama — sistem onu zaten ayrıca ekliyor; yalnızca haberlerden gelen "
+    "fiili kesintileri yaz.>\n\n"
     f"{H_HIGHLIGHTS}\n"
     "<Günün en kritik 3-5 gelişmesi, madde madde ('- '), her biri tek cümle. "
     "Havacılık maddelerini burada tekrar etme.>\n\n"
@@ -132,9 +141,10 @@ def run_digest_llm(router: LLMRouter, rows: List[Dict[str, Any]],
     """Generate the Turkish digest narrative. Returns call_llm's result dict."""
     blocks = []
     for r in rows:
-        blocks.append(
-            f"=== ÜLKE: {r['name']} ({r['iso']}) ===\n{r['report_text']}"
-        )
+        block = f"=== ÜLKE: {r['name']} ({r['iso']}) ===\n{r['report_text']}"
+        if r.get("airspace_summary"):
+            block += f"\n[HAVA SAHASI (sistem hesabı)]: {r['airspace_summary']}"
+        blocks.append(block)
     user_prompt = (
         f"Rapor dönemi: {window_start} — {window_end} UTC\n"
         f"Kapsanan ülkeler: {', '.join(r['iso'] for r in rows)}\n\n"
@@ -238,6 +248,16 @@ def build_digest(router: LLMRouter, country_results: List[Dict[str, Any]],
                 "text": "Ayrıntı için ülke raporuna bakınız.",
             })
     parsed["countries"].sort(key=lambda c: -RISK_ORDER.get(c["risk"], 0))
+
+    # Deterministic airspace lines ride along in the aviation section: the HTML
+    # renderer and the Telegram card already iterate that list, and appending
+    # here means a narrative that ignored the computed exposure still can't lose
+    # it. Prefixed so a reader can tell a system calculation from reporting.
+    for r in rows:
+        if r.get("airspace_summary"):
+            parsed.setdefault("aviation", []).append(
+                f"[hava sahası · sistem hesabı] {r['name']}: {r['airspace_summary']}"
+            )
 
     parsed["raw_text"] = res["content"]
     parsed["provider"] = res.get("provider")

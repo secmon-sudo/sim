@@ -74,6 +74,36 @@ def fetch_czib_data() -> list[dict]:
         return []
 
 
+def fetch_active_czib_by_country(db_conn) -> dict[str, list[dict]]:
+    """Active EASA conflict-zone bulletins, indexed by the ISO2 states they cover.
+
+    The sync above has always fed scoring only; the SITREP airspace block reads
+    this to tell a proximity finding ("the event was 40 km from this border")
+    apart from an authoritative advisory ("EASA has an active bulletin over that
+    airspace"). Fail-soft: an unreadable table costs the CZIB annotation, never
+    the report.
+    """
+    try:
+        rows = db_conn.execute(
+            """SELECT czib_id, name, countries, valid_until, valid_descr
+               FROM v_czib_active
+               ORDER BY issued_date DESC NULLS LAST"""
+        ).fetchall()
+    except Exception:
+        logger.exception("Failed to load active CZIB zones; continuing without them")
+        return {}
+
+    by_country: dict[str, list[dict]] = {}
+    for czib_id, name, countries, valid_until, valid_descr in rows:
+        zone = {"czib_id": czib_id, "name": name,
+                "valid_until": valid_until or valid_descr or ""}
+        for iso in (countries or []):
+            iso = (iso or "").strip().upper()
+            if iso:
+                by_country.setdefault(iso, []).append(zone)
+    return by_country
+
+
 def sync_czib_to_db(db_conn) -> dict:
     """
     Sync EASA CZIB data to database.

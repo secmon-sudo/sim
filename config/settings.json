@@ -249,6 +249,10 @@
     "web_enrich_cooldown_s": 7.0,
     "max_grounded_calls_per_run": 36,
     "high_severity_override": 80,
-    "aviation_selection_min": 1
+    "aviation_selection_min": 1,
+    "airspace_enabled": true,
+    "airspace_radius_km": 300,
+    "airspace_max_clusters": 5,
+    "airspace_max_airports": 6
   }
 }

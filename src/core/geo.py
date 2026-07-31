@@ -18,6 +18,7 @@ to geocode the world. Anything unrecognised falls back to its normalized text so
 identical location strings still share a key.
 """
 
+import math
 import re
 
 # Administrative suffixes/prefixes that describe the same place with extra words.
@@ -41,6 +42,18 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "MOSCOW":    ["moscow", "moskva"],
     "BELGOROD":  ["belgorod"],
     "GAZA":      ["gaza", "gaza strip"],
+    # NATO eastern flank / Europe: drone-incursion and airspace-violation
+    # reporting names these places constantly, and each has a Polish/Romanian
+    # spelling that wire copy strips the diacritics from.
+    "WARSAW":    ["warsaw", "warszawa"],
+    "KRAKOW":    ["krakow", "kraków", "cracow"],
+    "GDANSK":    ["gdansk", "gdańsk"],
+    "WROCLAW":   ["wroclaw", "wrocław"],
+    "RZESZOW":   ["rzeszow", "rzeszów"],
+    "LODZ":      ["lodz", "łódź"],
+    "CHISINAU":  ["chisinau", "chișinău", "kishinev"],
+    "CONSTANTA": ["constanta", "constanța"],
+    "BUCHAREST": ["bucharest", "bucuresti", "bucurești", "bucureşti"],
     "TEL AVIV":  ["tel aviv", "telaviv"],
     "JERUSALEM": ["jerusalem", "al quds", "al-quds"],
     "BEIRUT":    ["beirut"],
@@ -99,7 +112,49 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     # Russia / Belarus
     "MOSCOW": (55.7558, 37.6173, "RU"),
     "BELGOROD": (50.5997, 36.5983, "RU"),
+    "BRYANSK": (53.2436, 34.3634, "RU"),
+    "KURSK": (51.7373, 36.1874, "RU"),
+    "ROSTOV": (47.2357, 39.7015, "RU"),
+    "KRASNODAR": (45.0355, 38.9753, "RU"),
+    "NOVOROSSIYSK": (44.7239, 37.7686, "RU"),
+    "SEVASTOPOL": (44.6166, 33.5254, "RU"),
+    "KALININGRAD": (54.7104, 20.4522, "RU"),
+    "SAINT PETERSBURG": (59.9311, 30.3609, "RU"),
     "MINSK": (53.9006, 27.5590, "BY"),
+    # NATO eastern flank — drone incursions and airspace violations are reported
+    # against these places, and none of them resolved to a coordinate before.
+    "WARSAW": (52.2297, 21.0122, "PL"),
+    "LUBLIN": (51.2465, 22.5684, "PL"),
+    "RZESZOW": (50.0413, 21.9990, "PL"),
+    "KRAKOW": (50.0647, 19.9450, "PL"),
+    "GDANSK": (54.3520, 18.6466, "PL"),
+    "WROCLAW": (51.1079, 17.0385, "PL"),
+    "POZNAN": (52.4064, 16.9252, "PL"),
+    "KATOWICE": (50.2649, 19.0238, "PL"),
+    "SZCZECIN": (53.4285, 14.5528, "PL"),
+    "BIALYSTOK": (53.1325, 23.1688, "PL"),
+    "LODZ": (51.7592, 19.4560, "PL"),
+    "VILNIUS": (54.6872, 25.2797, "LT"),
+    "KAUNAS": (54.8985, 23.9036, "LT"),
+    "RIGA": (56.9496, 24.1052, "LV"),
+    "TALLINN": (59.4370, 24.7536, "EE"),
+    "HELSINKI": (60.1699, 24.9384, "FI"),
+    "STOCKHOLM": (59.3293, 18.0686, "SE"),
+    "OSLO": (59.9139, 10.7522, "NO"),
+    "COPENHAGEN": (55.6761, 12.5683, "DK"),
+    "BERLIN": (52.5200, 13.4050, "DE"),
+    "PRAGUE": (50.0755, 14.4378, "CZ"),
+    "BRATISLAVA": (48.1486, 17.1077, "SK"),
+    "BUDAPEST": (47.4979, 19.0402, "HU"),
+    "VIENNA": (48.2082, 16.3738, "AT"),
+    "BUCHAREST": (44.4268, 26.1025, "RO"),
+    "CONSTANTA": (44.1598, 28.6348, "RO"),
+    "CHISINAU": (47.0105, 28.8638, "MD"),
+    "SOFIA": (42.6977, 23.3219, "BG"),
+    "BELGRADE": (44.7866, 20.4489, "RS"),
+    "ZAGREB": (45.8150, 15.9819, "HR"),
+    "ATHENS": (37.9838, 23.7275, "GR"),
+    "NICOSIA": (35.1856, 33.3823, "CY"),
     # Israel / Palestine
     "GAZA": (31.5000, 34.4668, "PS"),
     "RAFAH": (31.2968, 34.2432, "PS"),
@@ -143,6 +198,30 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     "ISTANBUL": (41.0082, 28.9784, "TR"),
     "ANKARA": (39.9334, 32.8597, "TR"),
 }
+
+
+_EARTH_RADIUS_KM = 6371.0
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in km.
+
+    Lives here rather than in a service module because both the flash detector's
+    co-location check and the airspace proximity analysis need it, and geo.py is
+    the one dependency-free module both can import. Returns infinity on
+    unusable input so a bad coordinate can never look like a near miss.
+    """
+    try:
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+            * math.sin(dlon / 2) ** 2
+        )
+        return _EARTH_RADIUS_KM * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def geo_coords(

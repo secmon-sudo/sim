@@ -68,6 +68,9 @@ _EVENT_COLUMNS = [
     "occurred_at_est", "published_at", "time_certainty", "anchor_name_raw",
     "anchor_name_norm", "country_iso", "severity_score", "system_confidence",
     "storyline_id", "storyline_hint", "canonical_text", "corroborating_sources",
+    # Carried so clusters can be placed in an airspace (src/core/airspace.py);
+    # Pass D/E resolve these from the anchor gazetteer where they can.
+    "latitude", "longitude",
 ]
 
 _EVENTS_SELECT = f"""
@@ -297,6 +300,14 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
                                 "title": (s.get("title") or "")[:240]})
 
         label_members = members + [{"source_domain": s.get("domain")} for s in corroborating]
+        # Location fields for the airspace analysis: any member's coordinate will
+        # do (they are the same incident), so take the first one that resolved
+        # rather than insisting the representative event carries it.
+        located = next(
+            (e for e in members
+             if e.get("latitude") is not None and e.get("longitude") is not None),
+            None,
+        )
         clusters.append({
             "location": (rep.get("anchor_name_raw") or "Ülke Geneli").strip() or "Ülke Geneli",
             "event_type": rep.get("event_type") or "security_incident",
@@ -305,6 +316,9 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
             "severity": max((e.get("severity_score") or 0) for e in members),
             "snippet": snippet,
             "sources": sources,
+            "country_iso": rep.get("country_iso"),
+            "latitude": located.get("latitude") if located else None,
+            "longitude": located.get("longitude") if located else None,
         })
 
     clusters.sort(key=lambda c: -c["severity"])
@@ -352,6 +366,22 @@ _SYSTEM_PROMPT = (
     "raporun ana kullanıcısı için kritiktir; 'diğer gelişmeler' içinde tek kelimeyle "
     "geçiştirme. Teknik/emniyet kaynaklı aksamaları (hava muhalefeti, bakım) rapora alma — "
     "yalnızca güvenlik durumundan kaynaklananları yaz.\n"
+    "HAVA SAHASI ETKİSİ ('airspace' alanı): Bu alan haber değil, SİSTEMİN olay "
+    "koordinatından hesapladığı coğrafi gerçektir: olayın içinde olduğu FIR (hava "
+    "sahası), komşu FIR'lar, EASA'nın aktif çatışma bölgesi bülteni (CZIB) bulunan "
+    "hava sahaları ve olaya en yakın ticari havalimanları mesafeleriyle. Kurallar:\n"
+    "- Yalnızca bu alandaki FIR kodlarını, adlarını, havalimanı kodlarını ve km "
+    "değerlerini kullan. Buraya yazılmayan bir FIR/havalimanı adı veya mesafe "
+    "UYDURMA; hafızandan havacılık bilgisi ekleme.\n"
+    "- Bu bir MARUZİYET/YAKINLIK tespitidir. 'Hava sahası kapandı', 'uçuşlar "
+    "durduruldu' DEME — bunu yalnızca bir haber kaynağı öyle diyorsa yazabilirsin. "
+    "Doğru anlatım: 'olay X FIR sınırları içinde gerçekleşti; en yakın ticari "
+    "havalimanı Y, N km mesafede'.\n"
+    "- 'czib_active' true olan FIR'lar için EASA'nın AKTİF kısıtlama bülteni "
+    "bulunduğunu kesin bilgi olarak yazabilirsin; bunu yakınlık tespitinden ayrı "
+    "cümlede ver.\n"
+    "- 'scope' değeri 'country' ise olayın tam koordinatı yoktur: mesafe iddiasında "
+    "BULUNMA, yalnızca ülkenin hava sahasını ve başlıca havalimanlarını an.\n"
     "Biçim kuralları (HTML dönüştürücü bunlara göre çalışır):\n"
     "- Bölüm başlıkları TAMAMI BÜYÜK HARF, tek satır, kısa (ör. 'SAHA OLAYLARI', "
     "'HAVA SAHASI VE ULAŞIM', 'BÖLGESEL YANSIMALAR').\n"
@@ -418,7 +448,8 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
                    window_start: datetime, window_end: datetime,
                    field: List[Dict[str, Any]], strategic: List[Dict[str, Any]],
                    spillover: List[Dict[str, Any]],
-                   strategic_web: Dict[str, Any] = None) -> Dict[str, Any]:
+                   strategic_web: Dict[str, Any] = None,
+                   airspace: Dict[str, Any] = None) -> Dict[str, Any]:
     """Generate the Turkish SITREP narrative. Returns call_llm's result dict."""
     payload = {
         "country": f"{country_name} ({country_iso})",
@@ -427,6 +458,7 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
         "spillover": spillover,
         "strategic": strategic,
         "strategic_web": strategic_web,
+        "airspace": airspace,
     }
     user_prompt = (
         f"Aşağıdaki veriden {country_name} için 24 saatlik SITREP'i yaz. "

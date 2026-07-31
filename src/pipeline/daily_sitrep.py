@@ -11,8 +11,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from src.core.airspace import build_airspace_assessment
 from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
+from src.services.czib_client import fetch_active_czib_by_country
 from src.services.sitrep_generator import (
     MAX_WEB_ENRICH_CLUSTERS,
     WINDOW_HOURS,
@@ -85,6 +87,19 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
                                                       window_start, window_end)
     aviation_spill = build_sitrep_clusters(aviation_events, penalized) if aviation_events else []
 
+    # Deterministic airspace exposure: which FIR each kinetic/aviation event sits
+    # in, which neighbouring airspaces carry an active EASA CZIB restriction, and
+    # which commercial airports are nearby. Pure geometry over a static
+    # reference, so the narrative can be handed it as fact — and it is rendered
+    # separately below, so a narrative that ignores it cannot lose it.
+    try:
+        czib_by_iso = fetch_active_czib_by_country(db_conn)
+        airspace = build_airspace_assessment(clusters + aviation_spill,
+                                             country_iso, czib_by_iso)
+    except Exception:
+        logger.exception("SITREP %s: airspace assessment failed", country_iso)
+        airspace = None
+
     # Replace Google News redirect links with the real publisher URLs so the
     # report's sources are directly usable.
     resolve_cluster_urls(clusters + spillover + aviation_spill)
@@ -122,7 +137,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     try:
         res = run_sitrep_llm(router, country_iso, country_name,
                              window_start, window_end, field, strategic, spillover,
-                             strategic_web=strategic_web)
+                             strategic_web=strategic_web, airspace=airspace)
         allowed_urls = [
             s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
         ]
@@ -142,7 +157,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     html_doc = render_sitrep_html(
         country_name, country_iso,
         f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",
-        report_text, clusters, aviation_spill,
+        report_text, clusters, aviation_spill, airspace,
     )
     r2_url = None
     try:
@@ -182,7 +197,8 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     return {"country_iso": country_iso, "country_name": country_name,
             "status": "completed", "event_count": len(events),
             "cluster_count": len(clusters), "r2_url": r2_url,
-            "report_text": report_text, "clusters": clusters}
+            "report_text": report_text, "clusters": clusters,
+            "airspace": airspace}
 
 
 def _save_digest(db_conn, window_start, window_end, status: str,
@@ -282,7 +298,8 @@ def run_daily_sitrep(db_conn, router: LLMRouter,
 
     completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
-    slim = [{k: v for k, v in r.items() if k not in ("report_text", "clusters")}
+    slim = [{k: v for k, v in r.items()
+             if k not in ("report_text", "clusters", "airspace")}
             for r in results]
     return {"success": failed == 0, "countries": slim, "completed": completed,
             "digest_r2_url": digest_r2_url}

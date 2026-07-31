@@ -1,0 +1,7311 @@
+{
+ "version": "2026-07-31",
+ "note": "FIR bbox extents are approximate (~0.1 deg) and airport tiers are editorial. Used for proximity analysis only, never for navigation.",
+ "firs": [
+  {
+   "icao": "DAAA",
+   "name": "Alger FIR",
+   "name_tr": "Cezayir FIR",
+   "countries": [
+    "DZ"
+   ],
+   "bbox": [
+    18.9,
+    -8.7,
+    37.2,
+    12.0
+   ],
+   "neighbors": [
+    "DRRR",
+    "DTTC",
+    "GMMM",
+    "GOOO",
+    "HLLL",
+    "LECM"
+   ]
+  },
+  {
+   "icao": "DGAC",
+   "name": "Accra FIR",
+   "name_tr": "Akra FIR",
+   "countries": [
+    "GH",
+    "CI"
+   ],
+   "bbox": [
+    1.0,
+    -4.0,
+    11.5,
+    3.0
+   ],
+   "neighbors": [
+    "DNKK",
+    "DRRR",
+    "GLRB",
+    "GOOO"
+   ]
+  },
+  {
+   "icao": "DNKK",
+   "name": "Kano FIR",
+   "name_tr": "Kano FIR",
+   "countries": [
+    "NG"
+   ],
+   "bbox": [
+    3.5,
+    2.5,
+    14.1,
+    14.8
+   ],
+   "neighbors": [
+    "DGAC",
+    "DRRR",
+    "FCCC",
+    "FTTT",
+    "FZZA"
+   ]
+  },
+  {
+   "icao": "DRRR",
+   "name": "Niamey FIR",
+   "name_tr": "Niamey FIR",
+   "countries": [
+    "NE",
+    "BF",
+    "BJ",
+    "TG"
+   ],
+   "bbox": [
+    8.5,
+    -0.5,
+    23.7,
+    16.1
+   ],
+   "neighbors": [
+    "DAAA",
+    "DGAC",
+    "DNKK",
+    "FTTT",
+    "GOOO",
+    "HLLL"
+   ]
+  },
+  {
+   "icao": "DTTC",
+   "name": "Tunis FIR",
+   "name_tr": "Tunus FIR",
+   "countries": [
+    "TN"
+   ],
+   "bbox": [
+    30.1,
+    7.5,
+    38.1,
+    12.1
+   ],
+   "neighbors": [
+    "DAAA",
+    "HLLL",
+    "LMMM"
+   ]
+  },
+  {
+   "icao": "EBBU",
+   "name": "Brussels FIR",
+   "name_tr": "Brüksel FIR",
+   "countries": [
+    "BE"
+   ],
+   "bbox": [
+    49.4,
+    2.4,
+    51.6,
+    6.4
+   ],
+   "neighbors": [
+    "EDGG",
+    "EGTT",
+    "EHAA",
+    "LFFF"
+   ]
+  },
+  {
+   "icao": "EDGG",
+   "name": "Langen FIR",
+   "name_tr": "Langen FIR",
+   "countries": [
+    "DE"
+   ],
+   "bbox": [
+    47.5,
+    5.9,
+    51.6,
+    10.6
+   ],
+   "neighbors": [
+    "EBBU",
+    "EDMM",
+    "EDWW",
+    "EHAA",
+    "LFFF",
+    "LKAA",
+    "LSAS"
+   ]
+  },
+  {
+   "icao": "EDMM",
+   "name": "München FIR",
+   "name_tr": "Münih FIR",
+   "countries": [
+    "DE"
+   ],
+   "bbox": [
+    47.2,
+    9.0,
+    51.6,
+    13.9
+   ],
+   "neighbors": [
+    "EDGG",
+    "EDWW",
+    "EPWW",
+    "LKAA",
+    "LOVV",
+    "LSAS"
+   ]
+  },
+  {
+   "icao": "EDWW",
+   "name": "Bremen FIR",
+   "name_tr": "Bremen FIR",
+   "countries": [
+    "DE"
+   ],
+   "bbox": [
+    51.3,
+    6.0,
+    55.1,
+    14.1
+   ],
+   "neighbors": [
+    "EDGG",
+    "EDMM",
+    "EHAA",
+    "EKDK",
+    "EPWW",
+    "LKAA"
+   ]
+  },
+  {
+   "icao": "EETT",
+   "name": "Tallinn FIR",
+   "name_tr": "Tallinn FIR",
+   "countries": [
+    "EE"
+   ],
+   "bbox": [
+    57.5,
+    21.7,
+    59.8,
+    28.2
+   ],
+   "neighbors": [
+    "EFIN",
+    "ESAA",
+    "EVRR",
+    "ULLL"
+   ]
+  },
+  {
+   "icao": "EFIN",
+   "name": "Finland FIR",
+   "name_tr": "Finlandiya FIR",
+   "countries": [
+    "FI"
+   ],
+   "bbox": [
+    59.4,
+    19.0,
+    70.1,
+    31.6
+   ],
+   "neighbors": [
+    "EETT",
+    "ENOR",
+    "ESAA",
+    "ULLL"
+   ]
+  },
+  {
+   "icao": "EGPX",
+   "name": "Scottish FIR",
+   "name_tr": "İskoçya FIR",
+   "countries": [
+    "GB"
+   ],
+   "bbox": [
+    55.0,
+    -9.0,
+    61.0,
+    1.5
+   ],
+   "neighbors": [
+    "EGTT",
+    "EISN",
+    "ENOR"
+   ]
+  },
+  {
+   "icao": "EGTT",
+   "name": "London FIR",
+   "name_tr": "Londra FIR",
+   "countries": [
+    "GB"
+   ],
+   "bbox": [
+    49.9,
+    -6.5,
+    55.0,
+    2.1
+   ],
+   "neighbors": [
+    "EBBU",
+    "EGPX",
+    "EHAA",
+    "EISN",
+    "LFFF",
+    "LFRR"
+   ]
+  },
+  {
+   "icao": "EHAA",
+   "name": "Amsterdam FIR",
+   "name_tr": "Amsterdam FIR",
+   "countries": [
+    "NL"
+   ],
+   "bbox": [
+    50.7,
+    2.0,
+    55.0,
+    7.3
+   ],
+   "neighbors": [
+    "EBBU",
+    "EDGG",
+    "EDWW",
+    "EGTT",
+    "EKDK"
+   ]
+  },
+  {
+   "icao": "EISN",
+   "name": "Shannon FIR",
+   "name_tr": "Shannon FIR",
+   "countries": [
+    "IE"
+   ],
+   "bbox": [
+    51.0,
+    -11.0,
+    55.5,
+    -5.4
+   ],
+   "neighbors": [
+    "EGPX",
+    "EGTT"
+   ]
+  },
+  {
+   "icao": "EKDK",
+   "name": "København FIR",
+   "name_tr": "Kopenhag FIR",
+   "countries": [
+    "DK"
+   ],
+   "bbox": [
+    54.4,
+    7.7,
+    58.0,
+    15.2
+   ],
+   "neighbors": [
+    "EDWW",
+    "EHAA",
+    "ENOR",
+    "ESAA"
+   ]
+  },
+  {
+   "icao": "ENOR",
+   "name": "Norway FIR",
+   "name_tr": "Norveç FIR",
+   "countries": [
+    "NO"
+   ],
+   "bbox": [
+    57.0,
+    4.0,
+    71.5,
+    31.5
+   ],
+   "neighbors": [
+    "EFIN",
+    "EGPX",
+    "EKDK",
+    "ESAA",
+    "ULLL"
+   ]
+  },
+  {
+   "icao": "EPWW",
+   "name": "Warszawa FIR",
+   "name_tr": "Varşova FIR",
+   "countries": [
+    "PL"
+   ],
+   "bbox": [
+    48.9,
+    14.1,
+    55.0,
+    24.2
+   ],
+   "neighbors": [
+    "EDMM",
+    "EDWW",
+    "ESAA",
+    "EYVL",
+    "LKAA",
+    "LZBB",
+    "UKLV",
+    "UMKK",
+    "UMMV"
+   ]
+  },
+  {
+   "icao": "ESAA",
+   "name": "Sweden FIR",
+   "name_tr": "İsveç FIR",
+   "countries": [
+    "SE"
+   ],
+   "bbox": [
+    54.9,
+    10.5,
+    69.1,
+    24.2
+   ],
+   "neighbors": [
+    "EETT",
+    "EFIN",
+    "EKDK",
+    "ENOR",
+    "EPWW",
+    "EVRR",
+    "UMKK"
+   ]
+  },
+  {
+   "icao": "EVRR",
+   "name": "Riga FIR",
+   "name_tr": "Riga FIR",
+   "countries": [
+    "LV"
+   ],
+   "bbox": [
+    55.6,
+    20.5,
+    58.1,
+    28.3
+   ],
+   "neighbors": [
+    "EETT",
+    "ESAA",
+    "EYVL",
+    "ULLL",
+    "UMMV"
+   ]
+  },
+  {
+   "icao": "EYVL",
+   "name": "Vilnius FIR",
+   "name_tr": "Vilnius FIR",
+   "countries": [
+    "LT"
+   ],
+   "bbox": [
+    53.8,
+    20.9,
+    56.5,
+    26.9
+   ],
+   "neighbors": [
+    "EPWW",
+    "EVRR",
+    "UMKK",
+    "UMMV"
+   ]
+  },
+  {
+   "icao": "FAJA",
+   "name": "Johannesburg FIR",
+   "name_tr": "Johannesburg FIR",
+   "countries": [
+    "ZA",
+    "BW",
+    "NA",
+    "LS",
+    "SZ"
+   ],
+   "bbox": [
+    -35.0,
+    16.3,
+    -22.0,
+    33.1
+   ],
+   "neighbors": [
+    "FLFI",
+    "FNAN",
+    "FQBE",
+    "FZZA"
+   ]
+  },
+  {
+   "icao": "FCCC",
+   "name": "Brazzaville FIR",
+   "name_tr": "Brazzaville FIR",
+   "countries": [
+    "CG",
+    "GA",
+    "CM",
+    "GQ"
+   ],
+   "bbox": [
+    -6.1,
+    7.9,
+    8.1,
+    19.6
+   ],
+   "neighbors": [
+    "DNKK",
+    "FNAN",
+    "FTTT",
+    "FZZA"
+   ]
+  },
+  {
+   "icao": "FIMM",
+   "name": "Mauritius FIR",
+   "name_tr": "Mauritius FIR",
+   "countries": [
+    "MU"
+   ],
+   "bbox": [
+    -25.1,
+    51.9,
+    -4.9,
+    75.1
+   ],
+   "neighbors": [
+    "FMMM",
+    "FSSS"
+   ]
+  },
+  {
+   "icao": "FLFI",
+   "name": "Lusaka FIR",
+   "name_tr": "Lusaka FIR",
+   "countries": [
+    "ZM",
+    "ZW",
+    "MW"
+   ],
+   "bbox": [
+    -18.6,
+    21.4,
+    -7.9,
+    34.1
+   ],
+   "neighbors": [
+    "FAJA",
+    "FNAN",
+    "FQBE",
+    "FZZA",
+    "HTDC"
+   ]
+  },
+  {
+   "icao": "FMMM",
+   "name": "Antananarivo FIR",
+   "name_tr": "Antananarivo FIR",
+   "countries": [
+    "MG",
+    "KM"
+   ],
+   "bbox": [
+    -27.1,
+    39.9,
+    -5.9,
+    60.1
+   ],
+   "neighbors": [
+    "FIMM",
+    "FQBE",
+    "FSSS"
+   ]
+  },
+  {
+   "icao": "FNAN",
+   "name": "Luanda FIR",
+   "name_tr": "Luanda FIR",
+   "countries": [
+    "AO"
+   ],
+   "bbox": [
+    -18.6,
+    8.0,
+    -3.9,
+    24.6
+   ],
+   "neighbors": [
+    "FAJA",
+    "FCCC",
+    "FLFI",
+    "FZZA"
+   ]
+  },
+  {
+   "icao": "FQBE",
+   "name": "Beira FIR",
+   "name_tr": "Beira FIR",
+   "countries": [
+    "MZ"
+   ],
+   "bbox": [
+    -27.0,
+    30.1,
+    -10.3,
+    41.1
+   ],
+   "neighbors": [
+    "FAJA",
+    "FLFI",
+    "FMMM",
+    "FZZA",
+    "HTDC"
+   ]
+  },
+  {
+   "icao": "FSSS",
+   "name": "Seychelles FIR",
+   "name_tr": "Seyşeller FIR",
+   "countries": [
+    "SC"
+   ],
+   "bbox": [
+    -11.1,
+    45.9,
+    -2.9,
+    60.1
+   ],
+   "neighbors": [
+    "FIMM",
+    "FMMM",
+    "HCSM",
+    "HKNA"
+   ]
+  },
+  {
+   "icao": "FTTT",
+   "name": "N'Djamena FIR",
+   "name_tr": "Encemine FIR",
+   "countries": [
+    "TD",
+    "CF"
+   ],
+   "bbox": [
+    5.5,
+    13.3,
+    23.6,
+    24.1
+   ],
+   "neighbors": [
+    "DNKK",
+    "DRRR",
+    "FCCC",
+    "FZZA",
+    "HJJJ",
+    "HLLL",
+    "HSSS"
+   ]
+  },
+  {
+   "icao": "FZZA",
+   "name": "Kinshasa FIR",
+   "name_tr": "Kinşasa FIR",
+   "countries": [
+    "CD"
+   ],
+   "bbox": [
+    -13.6,
+    11.9,
+    5.5,
+    31.5
+   ],
+   "neighbors": [
+    "DNKK",
+    "FAJA",
+    "FCCC",
+    "FLFI",
+    "FNAN",
+    "FQBE",
+    "FTTT",
+    "HJJJ",
+    "HKNA",
+    "HTDC",
+    "HUEC"
+   ]
+  },
+  {
+   "icao": "GLRB",
+   "name": "Roberts FIR",
+   "name_tr": "Roberts FIR",
+   "countries": [
+    "LR",
+    "SL",
+    "GN"
+   ],
+   "bbox": [
+    2.0,
+    -14.0,
+    13.0,
+    -4.0
+   ],
+   "neighbors": [
+    "DGAC",
+    "GOOO"
+   ]
+  },
+  {
+   "icao": "GMMM",
+   "name": "Casablanca FIR",
+   "name_tr": "Kazablanka FIR",
+   "countries": [
+    "MA"
+   ],
+   "bbox": [
+    27.5,
+    -13.3,
+    36.0,
+    -0.9
+   ],
+   "neighbors": [
+    "DAAA",
+    "GOOO",
+    "LECM",
+    "LPPC"
+   ]
+  },
+  {
+   "icao": "GOOO",
+   "name": "Dakar FIR",
+   "name_tr": "Dakar FIR",
+   "countries": [
+    "SN",
+    "ML",
+    "MR",
+    "GM",
+    "GW",
+    "CV"
+   ],
+   "bbox": [
+    9.0,
+    -20.0,
+    26.5,
+    4.6
+   ],
+   "neighbors": [
+    "DAAA",
+    "DGAC",
+    "DRRR",
+    "GLRB",
+    "GMMM"
+   ]
+  },
+  {
+   "icao": "HAAA",
+   "name": "Addis Ababa FIR",
+   "name_tr": "Addis Ababa FIR",
+   "countries": [
+    "ET",
+    "DJ"
+   ],
+   "bbox": [
+    3.3,
+    32.9,
+    15.1,
+    48.1
+   ],
+   "neighbors": [
+    "HCSM",
+    "HHAA",
+    "HJJJ",
+    "HKNA",
+    "HSSS",
+    "OYSC"
+   ]
+  },
+  {
+   "icao": "HCSM",
+   "name": "Mogadishu FIR",
+   "name_tr": "Mogadişu FIR",
+   "countries": [
+    "SO",
+    "DJ"
+   ],
+   "bbox": [
+    -1.8,
+    40.8,
+    12.1,
+    51.6
+   ],
+   "neighbors": [
+    "FSSS",
+    "HAAA",
+    "HKNA",
+    "OYSC"
+   ]
+  },
+  {
+   "icao": "HECC",
+   "name": "Cairo FIR",
+   "name_tr": "Kahire FIR",
+   "countries": [
+    "EG"
+   ],
+   "bbox": [
+    21.7,
+    24.6,
+    32.0,
+    37.1
+   ],
+   "neighbors": [
+    "HLLL",
+    "HSSS",
+    "LCCC",
+    "LGGG",
+    "LLLL",
+    "OEJD",
+    "OJAC"
+   ]
+  },
+  {
+   "icao": "HHAA",
+   "name": "Asmara FIR",
+   "name_tr": "Asmara FIR",
+   "countries": [
+    "ER"
+   ],
+   "bbox": [
+    12.3,
+    36.4,
+    18.1,
+    43.3
+   ],
+   "neighbors": [
+    "HAAA",
+    "HSSS",
+    "OYSC"
+   ]
+  },
+  {
+   "icao": "HJJJ",
+   "name": "Juba FIR",
+   "name_tr": "Cuba FIR",
+   "countries": [
+    "SS"
+   ],
+   "bbox": [
+    3.3,
+    24.0,
+    12.3,
+    36.0
+   ],
+   "neighbors": [
+    "FTTT",
+    "FZZA",
+    "HAAA",
+    "HKNA",
+    "HSSS",
+    "HUEC"
+   ]
+  },
+  {
+   "icao": "HKNA",
+   "name": "Nairobi FIR",
+   "name_tr": "Nairobi FIR",
+   "countries": [
+    "KE"
+   ],
+   "bbox": [
+    -4.8,
+    33.8,
+    5.1,
+    42.0
+   ],
+   "neighbors": [
+    "FSSS",
+    "FZZA",
+    "HAAA",
+    "HCSM",
+    "HJJJ",
+    "HTDC",
+    "HUEC"
+   ]
+  },
+  {
+   "icao": "HLLL",
+   "name": "Tripoli FIR",
+   "name_tr": "Trablus FIR",
+   "countries": [
+    "LY"
+   ],
+   "bbox": [
+    19.4,
+    9.3,
+    33.3,
+    25.2
+   ],
+   "neighbors": [
+    "DAAA",
+    "DRRR",
+    "DTTC",
+    "FTTT",
+    "HECC",
+    "HSSS",
+    "LMMM"
+   ]
+  },
+  {
+   "icao": "HSSS",
+   "name": "Khartoum FIR",
+   "name_tr": "Hartum FIR",
+   "countries": [
+    "SD"
+   ],
+   "bbox": [
+    8.5,
+    21.7,
+    22.3,
+    38.7
+   ],
+   "neighbors": [
+    "FTTT",
+    "HAAA",
+    "HECC",
+    "HHAA",
+    "HJJJ",
+    "HLLL"
+   ]
+  },
+  {
+   "icao": "HTDC",
+   "name": "Dar es Salaam FIR",
+   "name_tr": "Darüsselam FIR",
+   "countries": [
+    "TZ"
+   ],
+   "bbox": [
+    -11.8,
+    29.3,
+    -0.9,
+    40.5
+   ],
+   "neighbors": [
+    "FLFI",
+    "FQBE",
+    "FZZA",
+    "HKNA",
+    "HUEC"
+   ]
+  },
+  {
+   "icao": "HUEC",
+   "name": "Kampala FIR",
+   "name_tr": "Kampala FIR",
+   "countries": [
+    "UG",
+    "RW",
+    "BI"
+   ],
+   "bbox": [
+    -2.6,
+    28.9,
+    4.6,
+    35.6
+   ],
+   "neighbors": [
+    "FZZA",
+    "HJJJ",
+    "HKNA",
+    "HTDC"
+   ]
+  },
+  {
+   "icao": "LAAA",
+   "name": "Tirana FIR",
+   "name_tr": "Tiran FIR",
+   "countries": [
+    "AL"
+   ],
+   "bbox": [
+    39.6,
+    19.2,
+    42.7,
+    21.1
+   ],
+   "neighbors": [
+    "LGGG",
+    "LIBB",
+    "LWSS",
+    "LYPG"
+   ]
+  },
+  {
+   "icao": "LBSR",
+   "name": "Sofia FIR",
+   "name_tr": "Sofya FIR",
+   "countries": [
+    "BG"
+   ],
+   "bbox": [
+    41.2,
+    22.3,
+    44.3,
+    28.7
+   ],
+   "neighbors": [
+    "LGGG",
+    "LRBB",
+    "LTBB",
+    "LWSS",
+    "LYBA"
+   ]
+  },
+  {
+   "icao": "LCCC",
+   "name": "Nicosia FIR",
+   "name_tr": "Lefkoşa FIR",
+   "countries": [
+    "CY"
+   ],
+   "bbox": [
+    33.6,
+    31.9,
+    35.9,
+    35.2
+   ],
+   "neighbors": [
+    "HECC",
+    "LGGG",
+    "LLLL",
+    "LTAA",
+    "LTBB",
+    "OLBB",
+    "OSTT"
+   ]
+  },
+  {
+   "icao": "LDZO",
+   "name": "Zagreb FIR",
+   "name_tr": "Zagreb FIR",
+   "countries": [
+    "HR"
+   ],
+   "bbox": [
+    42.3,
+    13.0,
+    46.6,
+    19.5
+   ],
+   "neighbors": [
+    "LHCC",
+    "LIMM",
+    "LJLA",
+    "LOVV",
+    "LQSB",
+    "LYBA",
+    "LYPG"
+   ]
+  },
+  {
+   "icao": "LECB",
+   "name": "Barcelona FIR",
+   "name_tr": "Barselona FIR",
+   "countries": [
+    "ES"
+   ],
+   "bbox": [
+    38.4,
+    -0.1,
+    43.0,
+    4.6
+   ],
+   "neighbors": [
+    "LECM",
+    "LFBB",
+    "LFMM"
+   ]
+  },
+  {
+   "icao": "LECM",
+   "name": "Madrid FIR",
+   "name_tr": "Madrid FIR",
+   "countries": [
+    "ES"
+   ],
+   "bbox": [
+    35.6,
+    -9.6,
+    43.8,
+    0.6
+   ],
+   "neighbors": [
+    "DAAA",
+    "GMMM",
+    "LECB",
+    "LFBB",
+    "LPPC"
+   ]
+  },
+  {
+   "icao": "LFBB",
+   "name": "Bordeaux FIR",
+   "name_tr": "Bordeaux FIR",
+   "countries": [
+    "FR"
+   ],
+   "bbox": [
+    42.3,
+    -2.0,
+    46.5,
+    3.1
+   ],
+   "neighbors": [
+    "LECB",
+    "LECM",
+    "LFFF",
+    "LFMM",
+    "LFRR"
+   ]
+  },
+  {
+   "icao": "LFFF",
+   "name": "Paris FIR",
+   "name_tr": "Paris FIR",
+   "countries": [
+    "FR"
+   ],
+   "bbox": [
+    46.0,
+    0.9,
+    51.1,
+    5.6
+   ],
+   "neighbors": [
+    "EBBU",
+    "EDGG",
+    "EGTT",
+    "LFBB",
+    "LFMM",
+    "LFRR",
+    "LSAS"
+   ]
+  },
+  {
+   "icao": "LFMM",
+   "name": "Marseille FIR",
+   "name_tr": "Marsilya FIR",
+   "countries": [
+    "FR"
+   ],
+   "bbox": [
+    41.3,
+    2.9,
+    46.5,
+    9.6
+   ],
+   "neighbors": [
+    "LECB",
+    "LFBB",
+    "LFFF",
+    "LIMM",
+    "LIRR",
+    "LSAS"
+   ]
+  },
+  {
+   "icao": "LFRR",
+   "name": "Brest FIR",
+   "name_tr": "Brest FIR",
+   "countries": [
+    "FR"
+   ],
+   "bbox": [
+    43.0,
+    -8.0,
+    49.5,
+    0.9
+   ],
+   "neighbors": [
+    "EGTT",
+    "LFBB",
+    "LFFF"
+   ]
+  },
+  {
+   "icao": "LGGG",
+   "name": "Athinai FIR",
+   "name_tr": "Atina FIR",
+   "countries": [
+    "GR"
+   ],
+   "bbox": [
+    33.9,
+    19.3,
+    41.8,
+    29.8
+   ],
+   "neighbors": [
+    "HECC",
+    "LAAA",
+    "LBSR",
+    "LCCC",
+    "LIBB",
+    "LMMM",
+    "LTBB",
+    "LWSS"
+   ]
+  },
+  {
+   "icao": "LHCC",
+   "name": "Budapest FIR",
+   "name_tr": "Budapeşte FIR",
+   "countries": [
+    "HU"
+   ],
+   "bbox": [
+    45.7,
+    16.1,
+    48.6,
+    22.9
+   ],
+   "neighbors": [
+    "LDZO",
+    "LJLA",
+    "LOVV",
+    "LRBB",
+    "LYBA",
+    "LZBB",
+    "UKLV"
+   ]
+  },
+  {
+   "icao": "LIBB",
+   "name": "Brindisi FIR",
+   "name_tr": "Brindisi FIR",
+   "countries": [
+    "IT"
+   ],
+   "bbox": [
+    36.5,
+    12.0,
+    42.6,
+    20.0
+   ],
+   "neighbors": [
+    "LAAA",
+    "LGGG",
+    "LIRR",
+    "LMMM",
+    "LYBA",
+    "LYPG"
+   ]
+  },
+  {
+   "icao": "LIMM",
+   "name": "Milano FIR",
+   "name_tr": "Milano FIR",
+   "countries": [
+    "IT"
+   ],
+   "bbox": [
+    43.4,
+    6.6,
+    47.1,
+    13.6
+   ],
+   "neighbors": [
+    "LDZO",
+    "LFMM",
+    "LIRR",
+    "LJLA",
+    "LOVV",
+    "LSAS"
+   ]
+  },
+  {
+   "icao": "LIRR",
+   "name": "Roma FIR",
+   "name_tr": "Roma FIR",
+   "countries": [
+    "IT"
+   ],
+   "bbox": [
+    36.6,
+    6.6,
+    43.6,
+    18.6
+   ],
+   "neighbors": [
+    "LFMM",
+    "LIBB",
+    "LIMM",
+    "LMMM"
+   ]
+  },
+  {
+   "icao": "LJLA",
+   "name": "Ljubljana FIR",
+   "name_tr": "Ljubljana FIR",
+   "countries": [
+    "SI"
+   ],
+   "bbox": [
+    45.4,
+    13.3,
+    46.9,
+    16.6
+   ],
+   "neighbors": [
+    "LDZO",
+    "LHCC",
+    "LIMM",
+    "LOVV"
+   ]
+  },
+  {
+   "icao": "LKAA",
+   "name": "Praha FIR",
+   "name_tr": "Prag FIR",
+   "countries": [
+    "CZ"
+   ],
+   "bbox": [
+    48.5,
+    12.0,
+    51.1,
+    18.9
+   ],
+   "neighbors": [
+    "EDGG",
+    "EDMM",
+    "EDWW",
+    "EPWW",
+    "LOVV",
+    "LZBB"
+   ]
+  },
+  {
+   "icao": "LLLL",
+   "name": "Tel Aviv FIR",
+   "name_tr": "Tel Aviv FIR",
+   "countries": [
+    "IL"
+   ],
+   "bbox": [
+    29.3,
+    33.9,
+    33.4,
+    35.9
+   ],
+   "neighbors": [
+    "HECC",
+    "LCCC",
+    "OJAC",
+    "OLBB",
+    "OSTT"
+   ]
+  },
+  {
+   "icao": "LMMM",
+   "name": "Malta FIR",
+   "name_tr": "Malta FIR",
+   "countries": [
+    "MT"
+   ],
+   "bbox": [
+    33.0,
+    12.0,
+    36.6,
+    18.0
+   ],
+   "neighbors": [
+    "DTTC",
+    "HLLL",
+    "LGGG",
+    "LIBB",
+    "LIRR"
+   ]
+  },
+  {
+   "icao": "LOVV",
+   "name": "Wien FIR",
+   "name_tr": "Viyana FIR",
+   "countries": [
+    "AT"
+   ],
+   "bbox": [
+    46.3,
+    9.5,
+    49.1,
+    17.2
+   ],
+   "neighbors": [
+    "EDMM",
+    "LDZO",
+    "LHCC",
+    "LIMM",
+    "LJLA",
+    "LKAA",
+    "LSAS",
+    "LZBB"
+   ]
+  },
+  {
+   "icao": "LPPC",
+   "name": "Lisboa FIR",
+   "name_tr": "Lizbon FIR",
+   "countries": [
+    "PT"
+   ],
+   "bbox": [
+    36.0,
+    -9.7,
+    42.2,
+    -6.1
+   ],
+   "neighbors": [
+    "GMMM",
+    "LECM"
+   ]
+  },
+  {
+   "icao": "LQSB",
+   "name": "Sarajevo FIR",
+   "name_tr": "Saraybosna FIR",
+   "countries": [
+    "BA"
+   ],
+   "bbox": [
+    42.5,
+    15.7,
+    45.3,
+    19.7
+   ],
+   "neighbors": [
+    "LDZO",
+    "LYBA",
+    "LYPG"
+   ]
+  },
+  {
+   "icao": "LRBB",
+   "name": "Bucuresti FIR",
+   "name_tr": "Bükreş FIR",
+   "countries": [
+    "RO"
+   ],
+   "bbox": [
+    43.4,
+    20.2,
+    48.3,
+    29.7
+   ],
+   "neighbors": [
+    "LBSR",
+    "LHCC",
+    "LTBB",
+    "LUUU",
+    "LYBA",
+    "UKLV",
+    "UKOV"
+   ]
+  },
+  {
+   "icao": "LSAS",
+   "name": "Switzerland FIR",
+   "name_tr": "İsviçre FIR",
+   "countries": [
+    "CH"
+   ],
+   "bbox": [
+    45.8,
+    5.9,
+    47.9,
+    10.5
+   ],
+   "neighbors": [
+    "EDGG",
+    "EDMM",
+    "LFFF",
+    "LFMM",
+    "LIMM",
+    "LOVV"
+   ]
+  },
+  {
+   "icao": "LTAA",
+   "name": "Ankara FIR",
+   "name_tr": "Ankara FIR",
+   "countries": [
+    "TR"
+   ],
+   "bbox": [
+    34.5,
+    30.0,
+    42.2,
+    45.0
+   ],
+   "neighbors": [
+    "LCCC",
+    "LTBB",
+    "OIIX",
+    "ORBB",
+    "OSTT",
+    "UBBA",
+    "UDDD",
+    "UGGG"
+   ]
+  },
+  {
+   "icao": "LTBB",
+   "name": "Istanbul FIR",
+   "name_tr": "İstanbul FIR",
+   "countries": [
+    "TR"
+   ],
+   "bbox": [
+    35.8,
+    25.6,
+    42.2,
+    30.0
+   ],
+   "neighbors": [
+    "LBSR",
+    "LCCC",
+    "LGGG",
+    "LRBB",
+    "LTAA",
+    "UKFV",
+    "UKOV"
+   ]
+  },
+  {
+   "icao": "LUUU",
+   "name": "Chisinau FIR",
+   "name_tr": "Kişinev FIR",
+   "countries": [
+    "MD"
+   ],
+   "bbox": [
+    45.4,
+    26.6,
+    48.5,
+    30.2
+   ],
+   "neighbors": [
+    "LRBB",
+    "UKLV",
+    "UKOV"
+   ]
+  },
+  {
+   "icao": "LWSS",
+   "name": "Skopje FIR",
+   "name_tr": "Üsküp FIR",
+   "countries": [
+    "MK"
+   ],
+   "bbox": [
+    40.8,
+    20.4,
+    42.4,
+    23.1
+   ],
+   "neighbors": [
+    "LAAA",
+    "LBSR",
+    "LGGG",
+    "LYBA"
+   ]
+  },
+  {
+   "icao": "LYBA",
+   "name": "Beograd FIR",
+   "name_tr": "Belgrad FIR",
+   "countries": [
+    "RS"
+   ],
+   "bbox": [
+    42.2,
+    18.8,
+    46.2,
+    23.0
+   ],
+   "neighbors": [
+    "LBSR",
+    "LDZO",
+    "LHCC",
+    "LIBB",
+    "LQSB",
+    "LRBB",
+    "LWSS",
+    "LYPG"
+   ]
+  },
+  {
+   "icao": "LYPG",
+   "name": "Podgorica FIR",
+   "name_tr": "Podgorica FIR",
+   "countries": [
+    "ME"
+   ],
+   "bbox": [
+    41.7,
+    18.3,
+    43.6,
+    20.5
+   ],
+   "neighbors": [
+    "LAAA",
+    "LDZO",
+    "LIBB",
+    "LQSB",
+    "LYBA"
+   ]
+  },
+  {
+   "icao": "LZBB",
+   "name": "Bratislava FIR",
+   "name_tr": "Bratislava FIR",
+   "countries": [
+    "SK"
+   ],
+   "bbox": [
+    47.7,
+    16.8,
+    49.7,
+    22.6
+   ],
+   "neighbors": [
+    "EPWW",
+    "LHCC",
+    "LKAA",
+    "LOVV",
+    "UKLV"
+   ]
+  },
+  {
+   "icao": "MHTG",
+   "name": "Central America FIR",
+   "name_tr": "Orta Amerika FIR",
+   "countries": [
+    "HN",
+    "GT",
+    "SV",
+    "NI",
+    "CR",
+    "BZ"
+   ],
+   "bbox": [
+    12.4,
+    -92.6,
+    18.6,
+    -82.9
+   ],
+   "neighbors": [
+    "MMFR",
+    "MPZL",
+    "MTEG",
+    "MUFH",
+    "SKED"
+   ]
+  },
+  {
+   "icao": "MMFR",
+   "name": "Mexico FIR",
+   "name_tr": "Meksika FIR",
+   "countries": [
+    "MX"
+   ],
+   "bbox": [
+    14.0,
+    -118.1,
+    32.9,
+    -85.9
+   ],
+   "neighbors": [
+    "MHTG",
+    "MUFH"
+   ]
+  },
+  {
+   "icao": "MPZL",
+   "name": "Panama FIR",
+   "name_tr": "Panama FIR",
+   "countries": [
+    "PA"
+   ],
+   "bbox": [
+    4.9,
+    -83.7,
+    12.6,
+    -76.8
+   ],
+   "neighbors": [
+    "MHTG",
+    "SKED"
+   ]
+  },
+  {
+   "icao": "MTEG",
+   "name": "Port-au-Prince FIR",
+   "name_tr": "Port-au-Prince FIR",
+   "countries": [
+    "HT"
+   ],
+   "bbox": [
+    17.4,
+    -75.1,
+    20.6,
+    -71.4
+   ],
+   "neighbors": [
+    "MHTG",
+    "MUFH",
+    "SKED"
+   ]
+  },
+  {
+   "icao": "MUFH",
+   "name": "Habana FIR",
+   "name_tr": "Havana FIR",
+   "countries": [
+    "CU"
+   ],
+   "bbox": [
+    19.0,
+    -85.6,
+    24.6,
+    -73.4
+   ],
+   "neighbors": [
+    "MHTG",
+    "MMFR",
+    "MTEG"
+   ]
+  },
+  {
+   "icao": "OAKX",
+   "name": "Kabul FIR",
+   "name_tr": "Kabil FIR",
+   "countries": [
+    "AF"
+   ],
+   "bbox": [
+    29.3,
+    60.4,
+    38.6,
+    75.0
+   ],
+   "neighbors": [
+    "OIIX",
+    "OPKR",
+    "OPLR",
+    "UTAA",
+    "UTDD",
+    "UTTR"
+   ]
+  },
+  {
+   "icao": "OBBB",
+   "name": "Bahrain FIR",
+   "name_tr": "Bahreyn FIR",
+   "countries": [
+    "BH"
+   ],
+   "bbox": [
+    23.4,
+    48.9,
+    27.7,
+    53.7
+   ],
+   "neighbors": [
+    "OEJD",
+    "OIIX",
+    "OKAC",
+    "OMAE",
+    "OTDF"
+   ]
+  },
+  {
+   "icao": "OEJD",
+   "name": "Jeddah FIR",
+   "name_tr": "Cidde FIR",
+   "countries": [
+    "SA"
+   ],
+   "bbox": [
+    15.9,
+    34.0,
+    32.3,
+    55.8
+   ],
+   "neighbors": [
+    "HECC",
+    "OBBB",
+    "OJAC",
+    "OKAC",
+    "OMAE",
+    "OOMM",
+    "ORBB",
+    "OTDF",
+    "OYSC"
+   ]
+  },
+  {
+   "icao": "OIIX",
+   "name": "Tehran FIR",
+   "name_tr": "Tahran FIR",
+   "countries": [
+    "IR"
+   ],
+   "bbox": [
+    25.0,
+    44.0,
+    39.8,
+    63.4
+   ],
+   "neighbors": [
+    "LTAA",
+    "OAKX",
+    "OBBB",
+    "OKAC",
+    "OMAE",
+    "OOMM",
+    "OPKR",
+    "ORBB",
+    "UBBA",
+    "UDDD",
+    "UTAA"
+   ]
+  },
+  {
+   "icao": "OJAC",
+   "name": "Amman FIR",
+   "name_tr": "Amman FIR",
+   "countries": [
+    "JO"
+   ],
+   "bbox": [
+    29.1,
+    34.9,
+    33.4,
+    39.4
+   ],
+   "neighbors": [
+    "HECC",
+    "LLLL",
+    "OEJD",
+    "ORBB",
+    "OSTT"
+   ]
+  },
+  {
+   "icao": "OKAC",
+   "name": "Kuwait FIR",
+   "name_tr": "Kuveyt FIR",
+   "countries": [
+    "KW"
+   ],
+   "bbox": [
+    28.4,
+    46.4,
+    30.2,
+    48.6
+   ],
+   "neighbors": [
+    "OBBB",
+    "OEJD",
+    "OIIX",
+    "ORBB"
+   ]
+  },
+  {
+   "icao": "OLBB",
+   "name": "Beirut FIR",
+   "name_tr": "Beyrut FIR",
+   "countries": [
+    "LB"
+   ],
+   "bbox": [
+    33.0,
+    34.0,
+    34.8,
+    36.7
+   ],
+   "neighbors": [
+    "LCCC",
+    "LLLL",
+    "OSTT"
+   ]
+  },
+  {
+   "icao": "OMAE",
+   "name": "Emirates FIR",
+   "name_tr": "BAE FIR",
+   "countries": [
+    "AE"
+   ],
+   "bbox": [
+    22.4,
+    51.0,
+    26.6,
+    57.1
+   ],
+   "neighbors": [
+    "OBBB",
+    "OEJD",
+    "OIIX",
+    "OOMM",
+    "OTDF"
+   ]
+  },
+  {
+   "icao": "OOMM",
+   "name": "Muscat FIR",
+   "name_tr": "Maskat FIR",
+   "countries": [
+    "OM"
+   ],
+   "bbox": [
+    15.9,
+    52.0,
+    26.6,
+    60.5
+   ],
+   "neighbors": [
+    "OEJD",
+    "OIIX",
+    "OMAE",
+    "OPKR",
+    "OYSC",
+    "VABF"
+   ]
+  },
+  {
+   "icao": "OPKR",
+   "name": "Karachi FIR",
+   "name_tr": "Karaçi FIR",
+   "countries": [
+    "PK"
+   ],
+   "bbox": [
+    23.5,
+    60.8,
+    29.6,
+    71.2
+   ],
+   "neighbors": [
+    "OAKX",
+    "OIIX",
+    "OOMM",
+    "OPLR",
+    "VABF",
+    "VIDF"
+   ]
+  },
+  {
+   "icao": "OPLR",
+   "name": "Lahore FIR",
+   "name_tr": "Lahor FIR",
+   "countries": [
+    "PK"
+   ],
+   "bbox": [
+    27.4,
+    68.0,
+    37.2,
+    77.1
+   ],
+   "neighbors": [
+    "OAKX",
+    "OPKR",
+    "VIDF",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "ORBB",
+   "name": "Baghdad FIR",
+   "name_tr": "Bağdat FIR",
+   "countries": [
+    "IQ"
+   ],
+   "bbox": [
+    29.0,
+    38.7,
+    37.4,
+    48.7
+   ],
+   "neighbors": [
+    "LTAA",
+    "OEJD",
+    "OIIX",
+    "OJAC",
+    "OKAC",
+    "OSTT"
+   ]
+  },
+  {
+   "icao": "OSTT",
+   "name": "Damascus FIR",
+   "name_tr": "Şam FIR",
+   "countries": [
+    "SY"
+   ],
+   "bbox": [
+    32.3,
+    35.6,
+    37.4,
+    42.4
+   ],
+   "neighbors": [
+    "LCCC",
+    "LLLL",
+    "LTAA",
+    "OJAC",
+    "OLBB",
+    "ORBB"
+   ]
+  },
+  {
+   "icao": "OTDF",
+   "name": "Doha FIR",
+   "name_tr": "Doha FIR",
+   "countries": [
+    "QA"
+   ],
+   "bbox": [
+    24.4,
+    50.4,
+    26.6,
+    52.1
+   ],
+   "neighbors": [
+    "OBBB",
+    "OEJD",
+    "OMAE"
+   ]
+  },
+  {
+   "icao": "OYSC",
+   "name": "Sanaa FIR",
+   "name_tr": "Sana FIR",
+   "countries": [
+    "YE"
+   ],
+   "bbox": [
+    11.9,
+    41.9,
+    19.1,
+    54.1
+   ],
+   "neighbors": [
+    "HAAA",
+    "HCSM",
+    "HHAA",
+    "OEJD",
+    "OOMM"
+   ]
+  },
+  {
+   "icao": "RCAA",
+   "name": "Taipei FIR",
+   "name_tr": "Taipei FIR",
+   "countries": [
+    "TW"
+   ],
+   "bbox": [
+    19.9,
+    117.4,
+    26.6,
+    124.1
+   ],
+   "neighbors": [
+    "RJJJ",
+    "RPHI",
+    "VHHK",
+    "ZGZU",
+    "ZSHA"
+   ]
+  },
+  {
+   "icao": "RJJJ",
+   "name": "Fukuoka FIR",
+   "name_tr": "Fukuoka FIR",
+   "countries": [
+    "JP"
+   ],
+   "bbox": [
+    23.9,
+    122.9,
+    46.1,
+    146.1
+   ],
+   "neighbors": [
+    "RCAA",
+    "RKRR",
+    "ZSHA"
+   ]
+  },
+  {
+   "icao": "RKRR",
+   "name": "Incheon FIR",
+   "name_tr": "İncheon FIR",
+   "countries": [
+    "KR"
+   ],
+   "bbox": [
+    32.0,
+    123.9,
+    39.1,
+    132.1
+   ],
+   "neighbors": [
+    "RJJJ",
+    "ZBPE",
+    "ZSHA"
+   ]
+  },
+  {
+   "icao": "RPHI",
+   "name": "Manila FIR",
+   "name_tr": "Manila FIR",
+   "countries": [
+    "PH"
+   ],
+   "bbox": [
+    4.9,
+    116.0,
+    21.1,
+    135.1
+   ],
+   "neighbors": [
+    "RCAA",
+    "VHHK",
+    "VVTS",
+    "WAAF",
+    "WSJC",
+    "ZGZU"
+   ]
+  },
+  {
+   "icao": "SAEF",
+   "name": "Ezeiza FIR",
+   "name_tr": "Ezeiza FIR",
+   "countries": [
+    "AR"
+   ],
+   "bbox": [
+    -42.1,
+    -73.6,
+    -21.4,
+    -52.9
+   ],
+   "neighbors": [
+    "SBBS",
+    "SCEZ"
+   ]
+  },
+  {
+   "icao": "SBBS",
+   "name": "Brasilia FIR",
+   "name_tr": "Brezilya FIR",
+   "countries": [
+    "BR"
+   ],
+   "bbox": [
+    -25.1,
+    -60.1,
+    -1.9,
+    -40.9
+   ],
+   "neighbors": [
+    "SAEF",
+    "SKED",
+    "SPIM"
+   ]
+  },
+  {
+   "icao": "SCEZ",
+   "name": "Santiago FIR",
+   "name_tr": "Santiago FIR",
+   "countries": [
+    "CL"
+   ],
+   "bbox": [
+    -46.1,
+    -80.1,
+    -17.4,
+    -66.0
+   ],
+   "neighbors": [
+    "SAEF",
+    "SPIM"
+   ]
+  },
+  {
+   "icao": "SEFG",
+   "name": "Guayaquil FIR",
+   "name_tr": "Guayaquil FIR",
+   "countries": [
+    "EC"
+   ],
+   "bbox": [
+    -5.6,
+    -84.1,
+    2.1,
+    -74.9
+   ],
+   "neighbors": [
+    "SKED",
+    "SPIM"
+   ]
+  },
+  {
+   "icao": "SKED",
+   "name": "Bogota FIR",
+   "name_tr": "Bogota FIR",
+   "countries": [
+    "CO"
+   ],
+   "bbox": [
+    -4.6,
+    -79.6,
+    13.6,
+    -66.4
+   ],
+   "neighbors": [
+    "MHTG",
+    "MPZL",
+    "MTEG",
+    "SBBS",
+    "SEFG",
+    "SPIM",
+    "SVZM"
+   ]
+  },
+  {
+   "icao": "SPIM",
+   "name": "Lima FIR",
+   "name_tr": "Lima FIR",
+   "countries": [
+    "PE"
+   ],
+   "bbox": [
+    -19.1,
+    -84.1,
+    0.6,
+    -68.0
+   ],
+   "neighbors": [
+    "SBBS",
+    "SCEZ",
+    "SEFG",
+    "SKED"
+   ]
+  },
+  {
+   "icao": "SVZM",
+   "name": "Maiquetia FIR",
+   "name_tr": "Maiquetia FIR",
+   "countries": [
+    "VE"
+   ],
+   "bbox": [
+    0.4,
+    -73.6,
+    13.1,
+    -59.4
+   ],
+   "neighbors": [
+    "SKED"
+   ]
+  },
+  {
+   "icao": "UAAX",
+   "name": "Almaty FIR",
+   "name_tr": "Almatı FIR",
+   "countries": [
+    "KZ"
+   ],
+   "bbox": [
+    40.5,
+    46.4,
+    55.6,
+    87.5
+   ],
+   "neighbors": [
+    "UCFM",
+    "URRV",
+    "USSV",
+    "UTAA",
+    "UTTR",
+    "UWWW",
+    "ZMUB",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "UBBA",
+   "name": "Baku FIR",
+   "name_tr": "Bakü FIR",
+   "countries": [
+    "AZ"
+   ],
+   "bbox": [
+    38.3,
+    44.7,
+    42.1,
+    50.8
+   ],
+   "neighbors": [
+    "LTAA",
+    "OIIX",
+    "UDDD",
+    "UGGG",
+    "URRV",
+    "UTAA"
+   ]
+  },
+  {
+   "icao": "UCFM",
+   "name": "Bishkek FIR",
+   "name_tr": "Bişkek FIR",
+   "countries": [
+    "KG"
+   ],
+   "bbox": [
+    39.1,
+    69.2,
+    43.4,
+    80.4
+   ],
+   "neighbors": [
+    "UAAX",
+    "UTDD",
+    "UTTR",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "UDDD",
+   "name": "Yerevan FIR",
+   "name_tr": "Erivan FIR",
+   "countries": [
+    "AM"
+   ],
+   "bbox": [
+    38.8,
+    43.4,
+    41.4,
+    46.7
+   ],
+   "neighbors": [
+    "LTAA",
+    "OIIX",
+    "UBBA",
+    "UGGG"
+   ]
+  },
+  {
+   "icao": "UGGG",
+   "name": "Tbilisi FIR",
+   "name_tr": "Tiflis FIR",
+   "countries": [
+    "GE"
+   ],
+   "bbox": [
+    41.0,
+    40.0,
+    43.7,
+    46.8
+   ],
+   "neighbors": [
+    "LTAA",
+    "UBBA",
+    "UDDD",
+    "URRV"
+   ]
+  },
+  {
+   "icao": "UKBV",
+   "name": "Kyiv FIR",
+   "name_tr": "Kiev FIR",
+   "countries": [
+    "UA"
+   ],
+   "bbox": [
+    48.5,
+    26.5,
+    52.4,
+    35.6
+   ],
+   "neighbors": [
+    "UKDV",
+    "UKLV",
+    "UKOV",
+    "UMMV",
+    "UUWV"
+   ]
+  },
+  {
+   "icao": "UKDV",
+   "name": "Dnipro FIR",
+   "name_tr": "Dnipro FIR",
+   "countries": [
+    "UA"
+   ],
+   "bbox": [
+    46.2,
+    33.5,
+    50.5,
+    40.3
+   ],
+   "neighbors": [
+    "UKBV",
+    "UKFV",
+    "UKOV",
+    "URRV",
+    "UUWV"
+   ]
+  },
+  {
+   "icao": "UKFV",
+   "name": "Simferopol FIR",
+   "name_tr": "Simferopol FIR",
+   "countries": [
+    "UA"
+   ],
+   "bbox": [
+    43.3,
+    32.4,
+    46.3,
+    36.8
+   ],
+   "neighbors": [
+    "LTBB",
+    "UKDV",
+    "UKOV",
+    "URRV"
+   ]
+  },
+  {
+   "icao": "UKLV",
+   "name": "Lviv FIR",
+   "name_tr": "Lviv FIR",
+   "countries": [
+    "UA"
+   ],
+   "bbox": [
+    47.8,
+    22.6,
+    51.6,
+    27.6
+   ],
+   "neighbors": [
+    "EPWW",
+    "LHCC",
+    "LRBB",
+    "LUUU",
+    "LZBB",
+    "UKBV",
+    "UKOV",
+    "UMMV"
+   ]
+  },
+  {
+   "icao": "UKOV",
+   "name": "Odesa FIR",
+   "name_tr": "Odesa FIR",
+   "countries": [
+    "UA"
+   ],
+   "bbox": [
+    44.5,
+    28.2,
+    48.6,
+    33.8
+   ],
+   "neighbors": [
+    "LRBB",
+    "LTBB",
+    "LUUU",
+    "UKBV",
+    "UKDV",
+    "UKFV",
+    "UKLV"
+   ]
+  },
+  {
+   "icao": "ULLL",
+   "name": "St Petersburg FIR",
+   "name_tr": "St. Petersburg FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    56.0,
+    27.0,
+    70.5,
+    47.0
+   ],
+   "neighbors": [
+    "EETT",
+    "EFIN",
+    "ENOR",
+    "EVRR",
+    "UMMV",
+    "UUWV"
+   ]
+  },
+  {
+   "icao": "UMKK",
+   "name": "Kaliningrad FIR",
+   "name_tr": "Kaliningrad FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    54.2,
+    19.4,
+    55.4,
+    22.9
+   ],
+   "neighbors": [
+    "EPWW",
+    "ESAA",
+    "EYVL"
+   ]
+  },
+  {
+   "icao": "UMMV",
+   "name": "Minsk FIR",
+   "name_tr": "Minsk FIR",
+   "countries": [
+    "BY"
+   ],
+   "bbox": [
+    51.2,
+    23.1,
+    56.2,
+    32.8
+   ],
+   "neighbors": [
+    "EPWW",
+    "EVRR",
+    "EYVL",
+    "UKBV",
+    "UKLV",
+    "ULLL",
+    "UUWV"
+   ]
+  },
+  {
+   "icao": "URRV",
+   "name": "Rostov FIR",
+   "name_tr": "Rostov FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    43.0,
+    36.0,
+    52.5,
+    47.6
+   ],
+   "neighbors": [
+    "UAAX",
+    "UBBA",
+    "UGGG",
+    "UKDV",
+    "UKFV",
+    "UUWV",
+    "UWWW"
+   ]
+  },
+  {
+   "icao": "USSV",
+   "name": "Yekaterinburg FIR",
+   "name_tr": "Yekaterinburg FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    51.5,
+    57.0,
+    66.5,
+    75.5
+   ],
+   "neighbors": [
+    "UAAX",
+    "UWWW",
+    "ZMUB"
+   ]
+  },
+  {
+   "icao": "UTAA",
+   "name": "Ashgabat FIR",
+   "name_tr": "Aşkabat FIR",
+   "countries": [
+    "TM"
+   ],
+   "bbox": [
+    35.1,
+    52.4,
+    42.9,
+    66.8
+   ],
+   "neighbors": [
+    "OAKX",
+    "OIIX",
+    "UAAX",
+    "UBBA",
+    "UTTR"
+   ]
+  },
+  {
+   "icao": "UTDD",
+   "name": "Dushanbe FIR",
+   "name_tr": "Duşanbe FIR",
+   "countries": [
+    "TJ"
+   ],
+   "bbox": [
+    36.6,
+    67.3,
+    41.1,
+    75.3
+   ],
+   "neighbors": [
+    "OAKX",
+    "UCFM",
+    "UTTR",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "UTTR",
+   "name": "Tashkent FIR",
+   "name_tr": "Taşkent FIR",
+   "countries": [
+    "UZ"
+   ],
+   "bbox": [
+    37.1,
+    55.9,
+    45.7,
+    73.3
+   ],
+   "neighbors": [
+    "OAKX",
+    "UAAX",
+    "UCFM",
+    "UTAA",
+    "UTDD"
+   ]
+  },
+  {
+   "icao": "UUWV",
+   "name": "Moscow FIR",
+   "name_tr": "Moskova FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    52.5,
+    30.0,
+    60.0,
+    47.0
+   ],
+   "neighbors": [
+    "UKBV",
+    "UKDV",
+    "ULLL",
+    "UMMV",
+    "URRV",
+    "UWWW"
+   ]
+  },
+  {
+   "icao": "UWWW",
+   "name": "Samara FIR",
+   "name_tr": "Samara FIR",
+   "countries": [
+    "RU"
+   ],
+   "bbox": [
+    49.5,
+    45.0,
+    58.5,
+    60.5
+   ],
+   "neighbors": [
+    "UAAX",
+    "URRV",
+    "USSV",
+    "UUWV"
+   ]
+  },
+  {
+   "icao": "VABF",
+   "name": "Mumbai FIR",
+   "name_tr": "Mumbai FIR",
+   "countries": [
+    "IN"
+   ],
+   "bbox": [
+    7.9,
+    60.0,
+    24.6,
+    77.1
+   ],
+   "neighbors": [
+    "OOMM",
+    "OPKR",
+    "VCCF",
+    "VIDF",
+    "VOMF",
+    "VRMF"
+   ]
+  },
+  {
+   "icao": "VCCF",
+   "name": "Colombo FIR",
+   "name_tr": "Kolombo FIR",
+   "countries": [
+    "LK"
+   ],
+   "bbox": [
+    1.9,
+    73.0,
+    10.1,
+    84.1
+   ],
+   "neighbors": [
+    "VABF",
+    "VOMF",
+    "VRMF"
+   ]
+  },
+  {
+   "icao": "VECF",
+   "name": "Kolkata FIR",
+   "name_tr": "Kalküta FIR",
+   "countries": [
+    "IN"
+   ],
+   "bbox": [
+    16.9,
+    80.0,
+    28.6,
+    92.6
+   ],
+   "neighbors": [
+    "VGFR",
+    "VIDF",
+    "VNSM",
+    "VOMF",
+    "VYYF"
+   ]
+  },
+  {
+   "icao": "VGFR",
+   "name": "Dhaka FIR",
+   "name_tr": "Dakka FIR",
+   "countries": [
+    "BD"
+   ],
+   "bbox": [
+    20.4,
+    88.0,
+    26.8,
+    92.8
+   ],
+   "neighbors": [
+    "VECF",
+    "VYYF"
+   ]
+  },
+  {
+   "icao": "VHHK",
+   "name": "Hong Kong FIR",
+   "name_tr": "Hong Kong FIR",
+   "countries": [
+    "HK"
+   ],
+   "bbox": [
+    17.9,
+    109.9,
+    23.6,
+    117.6
+   ],
+   "neighbors": [
+    "RCAA",
+    "RPHI",
+    "VVTS",
+    "ZGZU"
+   ]
+  },
+  {
+   "icao": "VIDF",
+   "name": "Delhi FIR",
+   "name_tr": "Delhi FIR",
+   "countries": [
+    "IN"
+   ],
+   "bbox": [
+    22.9,
+    68.0,
+    35.7,
+    82.1
+   ],
+   "neighbors": [
+    "OPKR",
+    "OPLR",
+    "VABF",
+    "VECF",
+    "VNSM",
+    "VOMF",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "VNSM",
+   "name": "Kathmandu FIR",
+   "name_tr": "Katmandu FIR",
+   "countries": [
+    "NP"
+   ],
+   "bbox": [
+    26.3,
+    80.0,
+    30.5,
+    88.3
+   ],
+   "neighbors": [
+    "VECF",
+    "VIDF"
+   ]
+  },
+  {
+   "icao": "VOMF",
+   "name": "Chennai FIR",
+   "name_tr": "Chennai FIR",
+   "countries": [
+    "IN"
+   ],
+   "bbox": [
+    4.9,
+    74.0,
+    19.1,
+    85.1
+   ],
+   "neighbors": [
+    "VABF",
+    "VCCF",
+    "VECF",
+    "VIDF"
+   ]
+  },
+  {
+   "icao": "VRMF",
+   "name": "Male FIR",
+   "name_tr": "Male FIR",
+   "countries": [
+    "MV"
+   ],
+   "bbox": [
+    -1.1,
+    70.9,
+    8.1,
+    76.1
+   ],
+   "neighbors": [
+    "VABF",
+    "VCCF"
+   ]
+  },
+  {
+   "icao": "VTBB",
+   "name": "Bangkok FIR",
+   "name_tr": "Bangkok FIR",
+   "countries": [
+    "TH"
+   ],
+   "bbox": [
+    5.4,
+    96.9,
+    20.6,
+    106.1
+   ],
+   "neighbors": [
+    "VVHN",
+    "VVTS",
+    "VYYF",
+    "WMFC",
+    "ZGZU",
+    "ZPKM"
+   ]
+  },
+  {
+   "icao": "VVHN",
+   "name": "Hanoi FIR",
+   "name_tr": "Hanoi FIR",
+   "countries": [
+    "VN"
+   ],
+   "bbox": [
+    17.0,
+    101.9,
+    23.6,
+    110.1
+   ],
+   "neighbors": [
+    "VTBB",
+    "VVTS",
+    "VYYF",
+    "ZGZU",
+    "ZPKM"
+   ]
+  },
+  {
+   "icao": "VVTS",
+   "name": "Ho Chi Minh FIR",
+   "name_tr": "Ho Chi Minh FIR",
+   "countries": [
+    "VN",
+    "KH"
+   ],
+   "bbox": [
+    6.9,
+    101.9,
+    17.1,
+    114.1
+   ],
+   "neighbors": [
+    "RPHI",
+    "VHHK",
+    "VTBB",
+    "VVHN",
+    "WSJC",
+    "ZGZU"
+   ]
+  },
+  {
+   "icao": "VYYF",
+   "name": "Yangon FIR",
+   "name_tr": "Yangon FIR",
+   "countries": [
+    "MM"
+   ],
+   "bbox": [
+    9.4,
+    91.9,
+    28.7,
+    101.3
+   ],
+   "neighbors": [
+    "VECF",
+    "VGFR",
+    "VTBB",
+    "VVHN",
+    "ZGZU",
+    "ZPKM"
+   ]
+  },
+  {
+   "icao": "WAAF",
+   "name": "Ujung Pandang FIR",
+   "name_tr": "Ujung Pandang FIR",
+   "countries": [
+    "ID"
+   ],
+   "bbox": [
+    -11.1,
+    115.0,
+    5.1,
+    141.1
+   ],
+   "neighbors": [
+    "RPHI",
+    "WIIF",
+    "YBBB"
+   ]
+  },
+  {
+   "icao": "WIIF",
+   "name": "Jakarta FIR",
+   "name_tr": "Cakarta FIR",
+   "countries": [
+    "ID"
+   ],
+   "bbox": [
+    -9.1,
+    95.0,
+    3.6,
+    119.1
+   ],
+   "neighbors": [
+    "WAAF",
+    "WMFC",
+    "WSJC",
+    "YBBB"
+   ]
+  },
+  {
+   "icao": "WMFC",
+   "name": "Kuala Lumpur FIR",
+   "name_tr": "Kuala Lumpur FIR",
+   "countries": [
+    "MY"
+   ],
+   "bbox": [
+    0.9,
+    99.0,
+    7.6,
+    105.1
+   ],
+   "neighbors": [
+    "VTBB",
+    "WIIF",
+    "WSJC"
+   ]
+  },
+  {
+   "icao": "WSJC",
+   "name": "Singapore FIR",
+   "name_tr": "Singapur FIR",
+   "countries": [
+    "SG"
+   ],
+   "bbox": [
+    -0.1,
+    102.0,
+    7.1,
+    109.1
+   ],
+   "neighbors": [
+    "RPHI",
+    "VVTS",
+    "WIIF",
+    "WMFC"
+   ]
+  },
+  {
+   "icao": "YBBB",
+   "name": "Brisbane FIR",
+   "name_tr": "Brisbane FIR",
+   "countries": [
+    "AU"
+   ],
+   "bbox": [
+    -45.1,
+    109.9,
+    -8.9,
+    163.1
+   ],
+   "neighbors": [
+    "WAAF",
+    "WIIF"
+   ]
+  },
+  {
+   "icao": "ZBPE",
+   "name": "Beijing FIR",
+   "name_tr": "Pekin FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    34.9,
+    104.9,
+    45.1,
+    127.1
+   ],
+   "neighbors": [
+    "RKRR",
+    "ZGZU",
+    "ZLHW",
+    "ZMUB",
+    "ZSHA",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "ZGZU",
+   "name": "Guangzhou FIR",
+   "name_tr": "Guangzhou FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    16.9,
+    104.9,
+    27.1,
+    120.1
+   ],
+   "neighbors": [
+    "RCAA",
+    "RPHI",
+    "VHHK",
+    "VTBB",
+    "VVHN",
+    "VVTS",
+    "VYYF",
+    "ZBPE",
+    "ZLHW",
+    "ZPKM",
+    "ZSHA",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "ZLHW",
+   "name": "Lanzhou FIR",
+   "name_tr": "Lanzhou FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    29.9,
+    96.4,
+    42.1,
+    111.1
+   ],
+   "neighbors": [
+    "ZBPE",
+    "ZGZU",
+    "ZMUB",
+    "ZPKM",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "ZMUB",
+   "name": "Ulaanbaatar FIR",
+   "name_tr": "Ulanbator FIR",
+   "countries": [
+    "MN"
+   ],
+   "bbox": [
+    41.4,
+    87.4,
+    52.3,
+    120.1
+   ],
+   "neighbors": [
+    "UAAX",
+    "USSV",
+    "ZBPE",
+    "ZLHW",
+    "ZWUQ"
+   ]
+  },
+  {
+   "icao": "ZPKM",
+   "name": "Kunming FIR",
+   "name_tr": "Kunming FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    20.9,
+    96.9,
+    30.0,
+    106.1
+   ],
+   "neighbors": [
+    "VTBB",
+    "VVHN",
+    "VYYF",
+    "ZGZU",
+    "ZLHW"
+   ]
+  },
+  {
+   "icao": "ZSHA",
+   "name": "Shanghai FIR",
+   "name_tr": "Şanghay FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    26.9,
+    116.0,
+    35.1,
+    125.1
+   ],
+   "neighbors": [
+    "RCAA",
+    "RJJJ",
+    "RKRR",
+    "ZBPE",
+    "ZGZU"
+   ]
+  },
+  {
+   "icao": "ZWUQ",
+   "name": "Urumqi FIR",
+   "name_tr": "Urumçi FIR",
+   "countries": [
+    "CN"
+   ],
+   "bbox": [
+    34.0,
+    73.0,
+    49.2,
+    96.5
+   ],
+   "neighbors": [
+    "OPLR",
+    "UAAX",
+    "UCFM",
+    "UTDD",
+    "VIDF",
+    "ZBPE",
+    "ZGZU",
+    "ZLHW",
+    "ZMUB"
+   ]
+  }
+ ],
+ "airports": [
+  {
+   "iata": "AUH",
+   "icao": "OMAA",
+   "name": "Abu Dhabi Zayed",
+   "name_tr": "Abu Dabi Zayed",
+   "city": "Abu Dhabi",
+   "country": "AE",
+   "lat": 24.433,
+   "lon": 54.651,
+   "tier": "hub"
+  },
+  {
+   "iata": "DWC",
+   "icao": "OMDW",
+   "name": "Dubai Al Maktoum",
+   "name_tr": "Dubai Al Maktoum",
+   "city": "Dubai",
+   "country": "AE",
+   "lat": 24.896,
+   "lon": 55.161,
+   "tier": "major"
+  },
+  {
+   "iata": "DXB",
+   "icao": "OMDB",
+   "name": "Dubai International",
+   "name_tr": "Dubai",
+   "city": "Dubai",
+   "country": "AE",
+   "lat": 25.253,
+   "lon": 55.365,
+   "tier": "hub"
+  },
+  {
+   "iata": "SHJ",
+   "icao": "OMSJ",
+   "name": "Sharjah",
+   "name_tr": "Şarika",
+   "city": "Sharjah",
+   "country": "AE",
+   "lat": 25.328,
+   "lon": 55.517,
+   "tier": "major"
+  },
+  {
+   "iata": "KBL",
+   "icao": "OAKB",
+   "name": "Kabul Hamid Karzai",
+   "name_tr": "Kabil",
+   "city": "Kabul",
+   "country": "AF",
+   "lat": 34.566,
+   "lon": 69.212,
+   "tier": "major"
+  },
+  {
+   "iata": "KDH",
+   "icao": "OAKN",
+   "name": "Kandahar",
+   "name_tr": "Kandahar",
+   "city": "Kandahar",
+   "country": "AF",
+   "lat": 31.506,
+   "lon": 65.848,
+   "tier": "regional"
+  },
+  {
+   "iata": "MZR",
+   "icao": "OAMS",
+   "name": "Mazar-i-Sharif",
+   "name_tr": "Mezar-ı Şerif",
+   "city": "Mazar-i-Sharif",
+   "country": "AF",
+   "lat": 36.707,
+   "lon": 67.209,
+   "tier": "regional"
+  },
+  {
+   "iata": "TIA",
+   "icao": "LATI",
+   "name": "Tirana Nënë Tereza",
+   "name_tr": "Tiran",
+   "city": "Tirana",
+   "country": "AL",
+   "lat": 41.415,
+   "lon": 19.72,
+   "tier": "regional"
+  },
+  {
+   "iata": "EVN",
+   "icao": "UDYZ",
+   "name": "Yerevan Zvartnots",
+   "name_tr": "Erivan Zvartnots",
+   "city": "Yerevan",
+   "country": "AM",
+   "lat": 40.147,
+   "lon": 44.396,
+   "tier": "major"
+  },
+  {
+   "iata": "LAD",
+   "icao": null,
+   "name": "Luanda Quatro de Fevereiro",
+   "name_tr": "Luanda Quatro de Fevereiro",
+   "city": "Luanda",
+   "country": "AO",
+   "lat": -8.8273,
+   "lon": 13.244,
+   "tier": "regional"
+  },
+  {
+   "iata": "EZE",
+   "icao": null,
+   "name": "Ministro Pistarini International Airport",
+   "name_tr": "Ministro Pistarini International Airport",
+   "city": "Buenos Aires",
+   "country": "AR",
+   "lat": -34.8168,
+   "lon": -58.5474,
+   "tier": "regional"
+  },
+  {
+   "iata": "GRZ",
+   "icao": null,
+   "name": "Graz Airport",
+   "name_tr": "Graz Airport",
+   "city": "Graz",
+   "country": "AT",
+   "lat": 46.9887,
+   "lon": 15.44,
+   "tier": "regional"
+  },
+  {
+   "iata": "INN",
+   "icao": "LOWI",
+   "name": "Innsbruck",
+   "name_tr": "Innsbruck",
+   "city": "Innsbruck",
+   "country": "AT",
+   "lat": 47.26,
+   "lon": 11.344,
+   "tier": "regional"
+  },
+  {
+   "iata": "LNZ",
+   "icao": null,
+   "name": "Linz Blue Danube Airport",
+   "name_tr": "Linz Blue Danube Airport",
+   "city": "Linz",
+   "country": "AT",
+   "lat": 48.2364,
+   "lon": 14.1877,
+   "tier": "regional"
+  },
+  {
+   "iata": "SZG",
+   "icao": "LOWS",
+   "name": "Salzburg",
+   "name_tr": "Salzburg",
+   "city": "Salzburg",
+   "country": "AT",
+   "lat": 47.794,
+   "lon": 13.004,
+   "tier": "regional"
+  },
+  {
+   "iata": "VIE",
+   "icao": "LOWW",
+   "name": "Vienna Schwechat",
+   "name_tr": "Viyana",
+   "city": "Vienna",
+   "country": "AT",
+   "lat": 48.11,
+   "lon": 16.57,
+   "tier": "hub"
+  },
+  {
+   "iata": "MEL",
+   "icao": null,
+   "name": "Melbourne Havalimanı",
+   "name_tr": "Melbourne Havalimanı",
+   "city": "Melbourne",
+   "country": "AU",
+   "lat": -37.8142,
+   "lon": 144.9632,
+   "tier": "regional"
+  },
+  {
+   "iata": "GNJ",
+   "icao": "UBBG",
+   "name": "Ganja",
+   "name_tr": "Gence",
+   "city": "Ganja",
+   "country": "AZ",
+   "lat": 40.738,
+   "lon": 46.317,
+   "tier": "regional"
+  },
+  {
+   "iata": "GYD",
+   "icao": "UBBB",
+   "name": "Baku Heydar Aliyev",
+   "name_tr": "Bakü Haydar Aliyev",
+   "city": "Baku",
+   "country": "AZ",
+   "lat": 40.467,
+   "lon": 50.047,
+   "tier": "major"
+  },
+  {
+   "iata": "NAJ",
+   "icao": null,
+   "name": "Nakhchivan International Airport",
+   "name_tr": "Nakhchivan International Airport",
+   "city": "Nakhchivan",
+   "country": "AZ",
+   "lat": 39.2175,
+   "lon": 45.407,
+   "tier": "regional"
+  },
+  {
+   "iata": "SJJ",
+   "icao": "LQSA",
+   "name": "Sarajevo",
+   "name_tr": "Saraybosna",
+   "city": "Sarajevo",
+   "country": "BA",
+   "lat": 43.825,
+   "lon": 18.331,
+   "tier": "regional"
+  },
+  {
+   "iata": "CGP",
+   "icao": null,
+   "name": "Chittagong Shah Amanat Airport",
+   "name_tr": "Chittagong Shah Amanat Airport",
+   "city": "Chittagong",
+   "country": "BD",
+   "lat": 22.3338,
+   "lon": 91.8344,
+   "tier": "regional"
+  },
+  {
+   "iata": "DAC",
+   "icao": null,
+   "name": "Hazrat Shahjalal International Airport",
+   "name_tr": "Hazrat Shahjalal International Airport",
+   "city": "Dhaka",
+   "country": "BD",
+   "lat": 23.8431,
+   "lon": 90.4053,
+   "tier": "regional"
+  },
+  {
+   "iata": "BRU",
+   "icao": "EBBR",
+   "name": "Brussels",
+   "name_tr": "Brüksel",
+   "city": "Brussels",
+   "country": "BE",
+   "lat": 50.901,
+   "lon": 4.484,
+   "tier": "hub"
+  },
+  {
+   "iata": "CRL",
+   "icao": "EBCI",
+   "name": "Brussels South Charleroi",
+   "name_tr": "Charleroi",
+   "city": "Charleroi",
+   "country": "BE",
+   "lat": 50.459,
+   "lon": 4.454,
+   "tier": "regional"
+  },
+  {
+   "iata": "LGG",
+   "icao": "EBLG",
+   "name": "Liège",
+   "name_tr": "Liège",
+   "city": "Liège",
+   "country": "BE",
+   "lat": 50.637,
+   "lon": 5.443,
+   "tier": "regional"
+  },
+  {
+   "iata": "OST",
+   "icao": "EBOS",
+   "name": "Ostend-Bruges",
+   "name_tr": "Ostend",
+   "city": "Ostend",
+   "country": "BE",
+   "lat": 51.199,
+   "lon": 2.863,
+   "tier": "regional"
+  },
+  {
+   "iata": "OUA",
+   "icao": "DFFD",
+   "name": "Ouagadougou",
+   "name_tr": "Ouagadougou",
+   "city": "Ouagadougou",
+   "country": "BF",
+   "lat": 12.353,
+   "lon": -1.512,
+   "tier": "regional"
+  },
+  {
+   "iata": "BOJ",
+   "icao": "LBBG",
+   "name": "Burgas",
+   "name_tr": "Burgaz",
+   "city": "Burgas",
+   "country": "BG",
+   "lat": 42.57,
+   "lon": 27.515,
+   "tier": "regional"
+  },
+  {
+   "iata": "SOF",
+   "icao": "LBSF",
+   "name": "Sofia",
+   "name_tr": "Sofya",
+   "city": "Sofia",
+   "country": "BG",
+   "lat": 42.696,
+   "lon": 23.411,
+   "tier": "major"
+  },
+  {
+   "iata": "VAR",
+   "icao": "LBWN",
+   "name": "Varna",
+   "name_tr": "Varna",
+   "city": "Varna",
+   "country": "BG",
+   "lat": 43.232,
+   "lon": 27.825,
+   "tier": "regional"
+  },
+  {
+   "iata": "BAH",
+   "icao": "OBBI",
+   "name": "Bahrain International",
+   "name_tr": "Bahreyn",
+   "city": "Manama",
+   "country": "BH",
+   "lat": 26.271,
+   "lon": 50.634,
+   "tier": "major"
+  },
+  {
+   "iata": "COO",
+   "icao": null,
+   "name": "Cardinal Bernadin Gantin International Airport",
+   "name_tr": "Cardinal Bernadin Gantin International Airport",
+   "city": "Cotonou",
+   "country": "BJ",
+   "lat": 6.3677,
+   "lon": 2.4253,
+   "tier": "regional"
+  },
+  {
+   "iata": "GRU",
+   "icao": null,
+   "name": "São Paulo/Guarulhos–Governador André Franco Montoro Int. Airport",
+   "name_tr": "São Paulo/Guarulhos–Governador André Franco Montoro Int. Airport",
+   "city": "Sao Paulo",
+   "country": "BR",
+   "lat": -23.5507,
+   "lon": -46.6334,
+   "tier": "regional"
+  },
+  {
+   "iata": "BQT",
+   "icao": "UMBB",
+   "name": "Brest",
+   "name_tr": "Brest",
+   "city": "Brest",
+   "country": "BY",
+   "lat": 52.108,
+   "lon": 23.898,
+   "tier": "regional"
+  },
+  {
+   "iata": "GME",
+   "icao": "UMGG",
+   "name": "Gomel",
+   "name_tr": "Gomel",
+   "city": "Gomel",
+   "country": "BY",
+   "lat": 52.527,
+   "lon": 31.017,
+   "tier": "regional"
+  },
+  {
+   "iata": "MSQ",
+   "icao": "UMMS",
+   "name": "Minsk National",
+   "name_tr": "Minsk",
+   "city": "Minsk",
+   "country": "BY",
+   "lat": 53.885,
+   "lon": 28.031,
+   "tier": "major"
+  },
+  {
+   "iata": "FIH",
+   "icao": null,
+   "name": "N'djili Airport",
+   "name_tr": "N'djili Airport",
+   "city": "Kinshasa",
+   "country": "CD",
+   "lat": -4.3197,
+   "lon": 15.3424,
+   "tier": "regional"
+  },
+  {
+   "iata": "PNR",
+   "icao": null,
+   "name": "Pointe Noire Agostinho-Neto",
+   "name_tr": "Pointe Noire Agostinho-Neto",
+   "city": "Pointe Noire",
+   "country": "CG",
+   "lat": -4.7975,
+   "lon": 11.8503,
+   "tier": "regional"
+  },
+  {
+   "iata": "BSL",
+   "icao": null,
+   "name": "EuroAirport Basel-Mulhouse-Freiburg",
+   "name_tr": "EuroAirport Basel-Mulhouse-Freiburg",
+   "city": "Basel",
+   "country": "CH",
+   "lat": 47.5581,
+   "lon": 7.5878,
+   "tier": "regional"
+  },
+  {
+   "iata": "GVA",
+   "icao": null,
+   "name": "Geneva Airport",
+   "name_tr": "Geneva Airport",
+   "city": "Geneva",
+   "country": "CH",
+   "lat": 46.2378,
+   "lon": 6.1081,
+   "tier": "regional"
+  },
+  {
+   "iata": "ZRH",
+   "icao": null,
+   "name": "Zürich Airport",
+   "name_tr": "Zürich Airport",
+   "city": "Zurich",
+   "country": "CH",
+   "lat": 47.4634,
+   "lon": 8.5534,
+   "tier": "regional"
+  },
+  {
+   "iata": "ABJ",
+   "icao": null,
+   "name": "Port Bouet Airport",
+   "name_tr": "Port Bouet Airport",
+   "city": "Abidjan",
+   "country": "CI",
+   "lat": 5.2649,
+   "lon": -3.926,
+   "tier": "regional"
+  },
+  {
+   "iata": "SCL",
+   "icao": null,
+   "name": "SANTIAGO AIRPORT",
+   "name_tr": "SANTIAGO AIRPORT",
+   "city": "Santiago",
+   "country": "CL",
+   "lat": -29.2156,
+   "lon": -54.8406,
+   "tier": "regional"
+  },
+  {
+   "iata": "DLA",
+   "icao": null,
+   "name": "Douala International Airport",
+   "name_tr": "Douala International Airport",
+   "city": "Douala",
+   "country": "CM",
+   "lat": 4.013,
+   "lon": 9.7161,
+   "tier": "regional"
+  },
+  {
+   "iata": "NSI",
+   "icao": null,
+   "name": "Yaoundé Nsimalen International Airport",
+   "name_tr": "Yaoundé Nsimalen International Airport",
+   "city": "Yaounde",
+   "country": "CM",
+   "lat": 3.869,
+   "lon": 11.5213,
+   "tier": "regional"
+  },
+  {
+   "iata": "CAN",
+   "icao": "ZGGG",
+   "name": "Guangzhou Baiyun",
+   "name_tr": "Guangzhou",
+   "city": "Guangzhou",
+   "country": "CN",
+   "lat": 23.392,
+   "lon": 113.299,
+   "tier": "hub"
+  },
+  {
+   "iata": "PEK",
+   "icao": "ZBAA",
+   "name": "Beijing Capital",
+   "name_tr": "Pekin",
+   "city": "Beijing",
+   "country": "CN",
+   "lat": 40.08,
+   "lon": 116.585,
+   "tier": "hub"
+  },
+  {
+   "iata": "PKX",
+   "icao": "ZBAD",
+   "name": "Beijing Daxing",
+   "name_tr": "Pekin Daxing",
+   "city": "Beijing",
+   "country": "CN",
+   "lat": 39.51,
+   "lon": 116.411,
+   "tier": "hub"
+  },
+  {
+   "iata": "PVG",
+   "icao": "ZSPD",
+   "name": "Shanghai Pudong",
+   "name_tr": "Şanghay Pudong",
+   "city": "Shanghai",
+   "country": "CN",
+   "lat": 31.143,
+   "lon": 121.805,
+   "tier": "hub"
+  },
+  {
+   "iata": "URC",
+   "icao": "ZWWW",
+   "name": "Urumqi Diwopu",
+   "name_tr": "Urumçi",
+   "city": "Urumqi",
+   "country": "CN",
+   "lat": 43.907,
+   "lon": 87.474,
+   "tier": "major"
+  },
+  {
+   "iata": "XIY",
+   "icao": "ZLXY",
+   "name": "Xi'an Xianyang",
+   "name_tr": "Xi'an Xianyang",
+   "city": "Xi'an",
+   "country": "CN",
+   "lat": 34.447,
+   "lon": 108.752,
+   "tier": "major"
+  },
+  {
+   "iata": "BOG",
+   "icao": "SKBO",
+   "name": "Bogotá El Dorado",
+   "name_tr": "Bogota",
+   "city": "Bogotá",
+   "country": "CO",
+   "lat": 4.702,
+   "lon": -74.147,
+   "tier": "hub"
+  },
+  {
+   "iata": "HAV",
+   "icao": null,
+   "name": "José Martí International Airport",
+   "name_tr": "José Martí International Airport",
+   "city": "Havana",
+   "country": "CU",
+   "lat": 22.9874,
+   "lon": -82.4143,
+   "tier": "regional"
+  },
+  {
+   "iata": "ECN",
+   "icao": "LCEN",
+   "name": "Ercan",
+   "name_tr": "Ercan",
+   "city": "Nicosia",
+   "country": "CY",
+   "lat": 35.155,
+   "lon": 33.5,
+   "tier": "regional"
+  },
+  {
+   "iata": "LCA",
+   "icao": "LCLK",
+   "name": "Larnaca",
+   "name_tr": "Larnaka",
+   "city": "Larnaca",
+   "country": "CY",
+   "lat": 34.875,
+   "lon": 33.625,
+   "tier": "major"
+  },
+  {
+   "iata": "PFO",
+   "icao": "LCPH",
+   "name": "Paphos",
+   "name_tr": "Baf",
+   "city": "Paphos",
+   "country": "CY",
+   "lat": 34.718,
+   "lon": 32.486,
+   "tier": "regional"
+  },
+  {
+   "iata": "BRQ",
+   "icao": "LKTB",
+   "name": "Brno-Tuřany",
+   "name_tr": "Brno",
+   "city": "Brno",
+   "country": "CZ",
+   "lat": 49.151,
+   "lon": 16.694,
+   "tier": "regional"
+  },
+  {
+   "iata": "OSR",
+   "icao": "LKMT",
+   "name": "Ostrava",
+   "name_tr": "Ostrava",
+   "city": "Ostrava",
+   "country": "CZ",
+   "lat": 49.696,
+   "lon": 18.111,
+   "tier": "regional"
+  },
+  {
+   "iata": "PRG",
+   "icao": "LKPR",
+   "name": "Prague Václav Havel",
+   "name_tr": "Prag",
+   "city": "Prague",
+   "country": "CZ",
+   "lat": 50.101,
+   "lon": 14.26,
+   "tier": "hub"
+  },
+  {
+   "iata": "BER",
+   "icao": "EDDB",
+   "name": "Berlin Brandenburg",
+   "name_tr": "Berlin Brandenburg",
+   "city": "Berlin",
+   "country": "DE",
+   "lat": 52.362,
+   "lon": 13.501,
+   "tier": "hub"
+  },
+  {
+   "iata": "BRE",
+   "icao": null,
+   "name": "Bremen Airport",
+   "name_tr": "Bremen Airport",
+   "city": "Bremen",
+   "country": "DE",
+   "lat": 53.0453,
+   "lon": 8.7896,
+   "tier": "regional"
+  },
+  {
+   "iata": "CGN",
+   "icao": "EDDK",
+   "name": "Cologne Bonn",
+   "name_tr": "Köln Bonn",
+   "city": "Cologne",
+   "country": "DE",
+   "lat": 50.866,
+   "lon": 7.143,
+   "tier": "major"
+  },
+  {
+   "iata": "DUS",
+   "icao": "EDDL",
+   "name": "Düsseldorf",
+   "name_tr": "Düsseldorf",
+   "city": "Düsseldorf",
+   "country": "DE",
+   "lat": 51.289,
+   "lon": 6.767,
+   "tier": "major"
+  },
+  {
+   "iata": "FDH",
+   "icao": null,
+   "name": "Bodensee Airport Friedrichshafen",
+   "name_tr": "Bodensee Airport Friedrichshafen",
+   "city": "Friedrichshafen",
+   "country": "DE",
+   "lat": 47.6714,
+   "lon": 9.5115,
+   "tier": "regional"
+  },
+  {
+   "iata": "FKB",
+   "icao": null,
+   "name": "Karlsruhe/Baden-Baden Airport",
+   "name_tr": "Karlsruhe/Baden-Baden Airport",
+   "city": "Baden Baden",
+   "country": "DE",
+   "lat": 48.7787,
+   "lon": 8.082,
+   "tier": "regional"
+  },
+  {
+   "iata": "FMO",
+   "icao": null,
+   "name": "Münster Osnabrück International Airport",
+   "name_tr": "Münster Osnabrück International Airport",
+   "city": "Munster",
+   "country": "DE",
+   "lat": 51.9625,
+   "lon": 7.6252,
+   "tier": "regional"
+  },
+  {
+   "iata": "FRA",
+   "icao": "EDDF",
+   "name": "Frankfurt",
+   "name_tr": "Frankfurt",
+   "city": "Frankfurt",
+   "country": "DE",
+   "lat": 50.033,
+   "lon": 8.571,
+   "tier": "hub"
+  },
+  {
+   "iata": "HAJ",
+   "icao": null,
+   "name": "Hannover Airport",
+   "name_tr": "Hannover Airport",
+   "city": "Hannover",
+   "country": "DE",
+   "lat": 52.4614,
+   "lon": 9.6863,
+   "tier": "regional"
+  },
+  {
+   "iata": "HAM",
+   "icao": "EDDH",
+   "name": "Hamburg",
+   "name_tr": "Hamburg",
+   "city": "Hamburg",
+   "country": "DE",
+   "lat": 53.63,
+   "lon": 9.988,
+   "tier": "major"
+  },
+  {
+   "iata": "LEJ",
+   "icao": "EDDP",
+   "name": "Leipzig/Halle",
+   "name_tr": "Leipzig",
+   "city": "Leipzig",
+   "country": "DE",
+   "lat": 51.424,
+   "lon": 12.236,
+   "tier": "regional"
+  },
+  {
+   "iata": "MUC",
+   "icao": "EDDM",
+   "name": "Munich",
+   "name_tr": "Münih",
+   "city": "Munich",
+   "country": "DE",
+   "lat": 48.354,
+   "lon": 11.786,
+   "tier": "hub"
+  },
+  {
+   "iata": "NUE",
+   "icao": null,
+   "name": "Nuremberg Airport",
+   "name_tr": "Nuremberg Airport",
+   "city": "Nuremberg",
+   "country": "DE",
+   "lat": 49.4983,
+   "lon": 11.0781,
+   "tier": "regional"
+  },
+  {
+   "iata": "STR",
+   "icao": "EDDS",
+   "name": "Stuttgart",
+   "name_tr": "Stuttgart",
+   "city": "Stuttgart",
+   "country": "DE",
+   "lat": 48.69,
+   "lon": 9.222,
+   "tier": "major"
+  },
+  {
+   "iata": "TXL",
+   "icao": null,
+   "name": "Berlin Tegel Airport",
+   "name_tr": "Berlin Tegel Airport",
+   "city": "Berlin",
+   "country": "DE",
+   "lat": 52.5174,
+   "lon": 13.3951,
+   "tier": "regional"
+  },
+  {
+   "iata": "JIB",
+   "icao": null,
+   "name": "Djibouti–Ambouli International Airport",
+   "name_tr": "Djibouti–Ambouli International Airport",
+   "city": "Djibouti",
+   "country": "DJ",
+   "lat": 11.547,
+   "lon": 43.1591,
+   "tier": "regional"
+  },
+  {
+   "iata": "AAL",
+   "icao": null,
+   "name": "Aalborg Airport",
+   "name_tr": "Aalborg Airport",
+   "city": "Aalborg",
+   "country": "DK",
+   "lat": 57.0864,
+   "lon": 9.868,
+   "tier": "regional"
+  },
+  {
+   "iata": "BLL",
+   "icao": "EKBI",
+   "name": "Billund",
+   "name_tr": "Billund",
+   "city": "Billund",
+   "country": "DK",
+   "lat": 55.74,
+   "lon": 9.152,
+   "tier": "regional"
+  },
+  {
+   "iata": "CPH",
+   "icao": "EKCH",
+   "name": "Copenhagen Kastrup",
+   "name_tr": "Kopenhag",
+   "city": "Copenhagen",
+   "country": "DK",
+   "lat": 55.618,
+   "lon": 12.656,
+   "tier": "hub"
+  },
+  {
+   "iata": "ALG",
+   "icao": null,
+   "name": "Houari Boumediene Airport",
+   "name_tr": "Houari Boumediene Airport",
+   "city": "Algiers",
+   "country": "DZ",
+   "lat": 36.7014,
+   "lon": 3.2293,
+   "tier": "regional"
+  },
+  {
+   "iata": "BLJ",
+   "icao": null,
+   "name": "Mostepha Ben Boulaid Airport",
+   "name_tr": "Mostepha Ben Boulaid Airport",
+   "city": "Batna",
+   "country": "DZ",
+   "lat": 35.7538,
+   "lon": 6.3094,
+   "tier": "regional"
+  },
+  {
+   "iata": "CZL",
+   "icao": null,
+   "name": "Mohammed Boudiaf International Airport",
+   "name_tr": "Mohammed Boudiaf International Airport",
+   "city": "Constantine",
+   "country": "DZ",
+   "lat": 36.3642,
+   "lon": 6.6084,
+   "tier": "regional"
+  },
+  {
+   "iata": "ORN",
+   "icao": null,
+   "name": "Ahmed Ben Bella Airport",
+   "name_tr": "Ahmed Ben Bella Airport",
+   "city": "Oran",
+   "country": "DZ",
+   "lat": 35.6206,
+   "lon": -0.6225,
+   "tier": "regional"
+  },
+  {
+   "iata": "TLM",
+   "icao": null,
+   "name": "Zenata-Messali El Hadj Airport",
+   "name_tr": "Zenata-Messali El Hadj Airport",
+   "city": "Tlemcen",
+   "country": "DZ",
+   "lat": 35.013,
+   "lon": -1.4554,
+   "tier": "regional"
+  },
+  {
+   "iata": "GYE",
+   "icao": "SEGU",
+   "name": "Guayaquil José Joaquín de Olmedo",
+   "name_tr": "Guayaquil",
+   "city": "Guayaquil",
+   "country": "EC",
+   "lat": -2.157,
+   "lon": -79.884,
+   "tier": "major"
+  },
+  {
+   "iata": "UIO",
+   "icao": "SEQM",
+   "name": "Quito Mariscal Sucre",
+   "name_tr": "Quito",
+   "city": "Quito",
+   "country": "EC",
+   "lat": -0.129,
+   "lon": -78.358,
+   "tier": "major"
+  },
+  {
+   "iata": "TAY",
+   "icao": "EETU",
+   "name": "Tartu",
+   "name_tr": "Tartu",
+   "city": "Tartu",
+   "country": "EE",
+   "lat": 58.307,
+   "lon": 26.69,
+   "tier": "regional"
+  },
+  {
+   "iata": "TLL",
+   "icao": "EETN",
+   "name": "Tallinn Lennart Meri",
+   "name_tr": "Tallinn",
+   "city": "Tallinn",
+   "country": "EE",
+   "lat": 59.413,
+   "lon": 24.833,
+   "tier": "major"
+  },
+  {
+   "iata": "ATZ",
+   "icao": "HEAT",
+   "name": "Assiut",
+   "name_tr": "Asyut",
+   "city": "Assiut",
+   "country": "EG",
+   "lat": 27.046,
+   "lon": 31.012,
+   "tier": "regional"
+  },
+  {
+   "iata": "CAI",
+   "icao": "HECA",
+   "name": "Cairo",
+   "name_tr": "Kahire",
+   "city": "Cairo",
+   "country": "EG",
+   "lat": 30.112,
+   "lon": 31.4,
+   "tier": "hub"
+  },
+  {
+   "iata": "HBE",
+   "icao": null,
+   "name": "Borg El Arab Int. Airport",
+   "name_tr": "Borg El Arab Int. Airport",
+   "city": "Alexandria",
+   "country": "EG",
+   "lat": 44.835,
+   "lon": 8.745,
+   "tier": "regional"
+  },
+  {
+   "iata": "HRG",
+   "icao": "HEGN",
+   "name": "Hurghada",
+   "name_tr": "Hurgada",
+   "city": "Hurghada",
+   "country": "EG",
+   "lat": 27.178,
+   "lon": 33.799,
+   "tier": "major"
+  },
+  {
+   "iata": "LXR",
+   "icao": null,
+   "name": "Luxor International Airport",
+   "name_tr": "Luxor International Airport",
+   "city": "Luxor",
+   "country": "EG",
+   "lat": 25.6706,
+   "lon": 32.7065,
+   "tier": "regional"
+  },
+  {
+   "iata": "SSH",
+   "icao": "HESH",
+   "name": "Sharm el-Sheikh",
+   "name_tr": "Şarm El Şeyh",
+   "city": "Sharm el-Sheikh",
+   "country": "EG",
+   "lat": 27.977,
+   "lon": 34.395,
+   "tier": "major"
+  },
+  {
+   "iata": "ASM",
+   "icao": null,
+   "name": "Asmara International Airport",
+   "name_tr": "Asmara International Airport",
+   "city": "Asmara",
+   "country": "ER",
+   "lat": 15.2933,
+   "lon": 38.9162,
+   "tier": "regional"
+  },
+  {
+   "iata": "AGP",
+   "icao": null,
+   "name": "Málaga Airport",
+   "name_tr": "Málaga Airport",
+   "city": "Malaga",
+   "country": "ES",
+   "lat": 36.6785,
+   "lon": -4.5,
+   "tier": "regional"
+  },
+  {
+   "iata": "BCN",
+   "icao": null,
+   "name": "Barcelona–El Prat Airport",
+   "name_tr": "Barcelona–El Prat Airport",
+   "city": "Barcelona",
+   "country": "ES",
+   "lat": 41.2969,
+   "lon": 2.079,
+   "tier": "regional"
+  },
+  {
+   "iata": "BIO",
+   "icao": null,
+   "name": "Bilbao Airport",
+   "name_tr": "Bilbao Airport",
+   "city": "Bilbao",
+   "country": "ES",
+   "lat": 43.263,
+   "lon": -2.935,
+   "tier": "regional"
+  },
+  {
+   "iata": "MAD",
+   "icao": null,
+   "name": "Adolfo Suárez Madrid–Barajas Airport",
+   "name_tr": "Adolfo Suárez Madrid–Barajas Airport",
+   "city": "Madrid",
+   "country": "ES",
+   "lat": 40.4952,
+   "lon": -3.5734,
+   "tier": "regional"
+  },
+  {
+   "iata": "VLC",
+   "icao": null,
+   "name": "Valencia Airport",
+   "name_tr": "Valencia Airport",
+   "city": "Valencia",
+   "country": "ES",
+   "lat": 39.4879,
+   "lon": -0.4812,
+   "tier": "regional"
+  },
+  {
+   "iata": "ADD",
+   "icao": "HAAB",
+   "name": "Addis Ababa Bole",
+   "name_tr": "Addis Ababa Bole",
+   "city": "Addis Ababa",
+   "country": "ET",
+   "lat": 8.978,
+   "lon": 38.799,
+   "tier": "hub"
+  },
+  {
+   "iata": "HEL",
+   "icao": "EFHK",
+   "name": "Helsinki-Vantaa",
+   "name_tr": "Helsinki-Vantaa",
+   "city": "Helsinki",
+   "country": "FI",
+   "lat": 60.317,
+   "lon": 24.963,
+   "tier": "hub"
+  },
+  {
+   "iata": "RVN",
+   "icao": "EFRO",
+   "name": "Rovaniemi",
+   "name_tr": "Rovaniemi",
+   "city": "Rovaniemi",
+   "country": "FI",
+   "lat": 66.565,
+   "lon": 25.83,
+   "tier": "regional"
+  },
+  {
+   "iata": "BOD",
+   "icao": null,
+   "name": "Bordeaux–Mérignac Airport",
+   "name_tr": "Bordeaux–Mérignac Airport",
+   "city": "Bordeaux",
+   "country": "FR",
+   "lat": 44.8293,
+   "lon": -0.7126,
+   "tier": "regional"
+  },
+  {
+   "iata": "CDG",
+   "icao": null,
+   "name": "Paris Charles de Gaulle Airport",
+   "name_tr": "Paris Charles de Gaulle Airport",
+   "city": "Paris",
+   "country": "FR",
+   "lat": 48.8589,
+   "lon": 2.32,
+   "tier": "regional"
+  },
+  {
+   "iata": "LYS",
+   "icao": null,
+   "name": "Lyon–Saint Exupéry Airport",
+   "name_tr": "Lyon–Saint Exupéry Airport",
+   "city": "Lyon",
+   "country": "FR",
+   "lat": 45.7244,
+   "lon": 5.0865,
+   "tier": "regional"
+  },
+  {
+   "iata": "MRS",
+   "icao": null,
+   "name": "Marseille Provence Airport",
+   "name_tr": "Marseille Provence Airport",
+   "city": "Marseille",
+   "country": "FR",
+   "lat": 43.2962,
+   "lon": 5.37,
+   "tier": "regional"
+  },
+  {
+   "iata": "NCE",
+   "icao": null,
+   "name": "Nice Côte d'Azur Airport",
+   "name_tr": "Nice Côte d'Azur Airport",
+   "city": "Nice",
+   "country": "FR",
+   "lat": 43.6598,
+   "lon": 7.2137,
+   "tier": "regional"
+  },
+  {
+   "iata": "SXB",
+   "icao": null,
+   "name": "Strasbourg Airport",
+   "name_tr": "Strasbourg Airport",
+   "city": "Strasbourg",
+   "country": "FR",
+   "lat": 48.5389,
+   "lon": 7.6254,
+   "tier": "regional"
+  },
+  {
+   "iata": "TLS",
+   "icao": null,
+   "name": "Toulouse Blagnac Airport",
+   "name_tr": "Toulouse Blagnac Airport",
+   "city": "Toulouse",
+   "country": "FR",
+   "lat": 43.63,
+   "lon": 1.3608,
+   "tier": "regional"
+  },
+  {
+   "iata": "LBV",
+   "icao": null,
+   "name": "Libreville International Airport",
+   "name_tr": "Libreville International Airport",
+   "city": "Libreville",
+   "country": "GA",
+   "lat": 0.462,
+   "lon": 9.4113,
+   "tier": "regional"
+  },
+  {
+   "iata": "BFS",
+   "icao": "EGAA",
+   "name": "Belfast International",
+   "name_tr": "Belfast",
+   "city": "Belfast",
+   "country": "GB",
+   "lat": 54.658,
+   "lon": -6.216,
+   "tier": "regional"
+  },
+  {
+   "iata": "BHX",
+   "icao": "EGBB",
+   "name": "Birmingham",
+   "name_tr": "Birmingham",
+   "city": "Birmingham",
+   "country": "GB",
+   "lat": 52.454,
+   "lon": -1.748,
+   "tier": "major"
+  },
+  {
+   "iata": "EDI",
+   "icao": "EGPH",
+   "name": "Edinburgh",
+   "name_tr": "Edinburgh",
+   "city": "Edinburgh",
+   "country": "GB",
+   "lat": 55.95,
+   "lon": -3.372,
+   "tier": "major"
+  },
+  {
+   "iata": "GLA",
+   "icao": "EGPF",
+   "name": "Glasgow",
+   "name_tr": "Glasgow",
+   "city": "Glasgow",
+   "country": "GB",
+   "lat": 55.872,
+   "lon": -4.433,
+   "tier": "regional"
+  },
+  {
+   "iata": "LGW",
+   "icao": "EGKK",
+   "name": "London Gatwick",
+   "name_tr": "Londra Gatwick",
+   "city": "London",
+   "country": "GB",
+   "lat": 51.148,
+   "lon": -0.19,
+   "tier": "major"
+  },
+  {
+   "iata": "LHR",
+   "icao": "EGLL",
+   "name": "London Heathrow",
+   "name_tr": "Londra Heathrow",
+   "city": "London",
+   "country": "GB",
+   "lat": 51.47,
+   "lon": -0.454,
+   "tier": "hub"
+  },
+  {
+   "iata": "LTN",
+   "icao": "EGGW",
+   "name": "London Luton",
+   "name_tr": "Londra Luton",
+   "city": "London",
+   "country": "GB",
+   "lat": 51.875,
+   "lon": -0.368,
+   "tier": "regional"
+  },
+  {
+   "iata": "MAN",
+   "icao": "EGCC",
+   "name": "Manchester",
+   "name_tr": "Manchester",
+   "city": "Manchester",
+   "country": "GB",
+   "lat": 53.365,
+   "lon": -2.273,
+   "tier": "major"
+  },
+  {
+   "iata": "STN",
+   "icao": "EGSS",
+   "name": "London Stansted",
+   "name_tr": "Londra Stansted",
+   "city": "London",
+   "country": "GB",
+   "lat": 51.885,
+   "lon": 0.235,
+   "tier": "major"
+  },
+  {
+   "iata": "BUS",
+   "icao": "UGSB",
+   "name": "Batumi",
+   "name_tr": "Batum",
+   "city": "Batumi",
+   "country": "GE",
+   "lat": 41.61,
+   "lon": 41.6,
+   "tier": "regional"
+  },
+  {
+   "iata": "KUT",
+   "icao": "UGKO",
+   "name": "Kutaisi",
+   "name_tr": "Kutaisi",
+   "city": "Kutaisi",
+   "country": "GE",
+   "lat": 42.177,
+   "lon": 42.483,
+   "tier": "regional"
+  },
+  {
+   "iata": "TBS",
+   "icao": "UGTB",
+   "name": "Tbilisi",
+   "name_tr": "Tiflis",
+   "city": "Tbilisi",
+   "country": "GE",
+   "lat": 41.669,
+   "lon": 44.955,
+   "tier": "major"
+  },
+  {
+   "iata": "ACC",
+   "icao": null,
+   "name": "Kotoka International Airport",
+   "name_tr": "Kotoka International Airport",
+   "city": "Accra",
+   "country": "GH",
+   "lat": 5.6038,
+   "lon": -0.1683,
+   "tier": "regional"
+  },
+  {
+   "iata": "BJL",
+   "icao": null,
+   "name": "BANJUL",
+   "name_tr": "BANJUL",
+   "city": "Banjul",
+   "country": "GM",
+   "lat": 13.441,
+   "lon": -16.5628,
+   "tier": "regional"
+  },
+  {
+   "iata": "CKY",
+   "icao": null,
+   "name": "Conakry International Airport",
+   "name_tr": "Conakry International Airport",
+   "city": "Conakry",
+   "country": "GN",
+   "lat": 9.5766,
+   "lon": -13.6131,
+   "tier": "regional"
+  },
+  {
+   "iata": "SSG",
+   "icao": null,
+   "name": "MALABO",
+   "name_tr": "MALABO",
+   "city": "Malabo",
+   "country": "GQ",
+   "lat": 3.7419,
+   "lon": 8.7741,
+   "tier": "regional"
+  },
+  {
+   "iata": "ATH",
+   "icao": "LGAV",
+   "name": "Athens Eleftherios Venizelos",
+   "name_tr": "Atina",
+   "city": "Athens",
+   "country": "GR",
+   "lat": 37.936,
+   "lon": 23.947,
+   "tier": "hub"
+  },
+  {
+   "iata": "CFU",
+   "icao": "LGKR",
+   "name": "Corfu",
+   "name_tr": "Korfu",
+   "city": "Corfu",
+   "country": "GR",
+   "lat": 39.602,
+   "lon": 19.912,
+   "tier": "regional"
+  },
+  {
+   "iata": "HER",
+   "icao": "LGIR",
+   "name": "Heraklion",
+   "name_tr": "Heraklion",
+   "city": "Heraklion",
+   "country": "GR",
+   "lat": 35.34,
+   "lon": 25.18,
+   "tier": "major"
+  },
+  {
+   "iata": "RHO",
+   "icao": "LGRP",
+   "name": "Rhodes",
+   "name_tr": "Rodos",
+   "city": "Rhodes",
+   "country": "GR",
+   "lat": 36.405,
+   "lon": 28.086,
+   "tier": "regional"
+  },
+  {
+   "iata": "SKG",
+   "icao": "LGTS",
+   "name": "Thessaloniki",
+   "name_tr": "Selanik",
+   "city": "Thessaloniki",
+   "country": "GR",
+   "lat": 40.52,
+   "lon": 22.971,
+   "tier": "major"
+  },
+  {
+   "iata": "OXB",
+   "icao": null,
+   "name": "Bissau Osvaldo Vieira Airport",
+   "name_tr": "Bissau Osvaldo Vieira Airport",
+   "city": "Bissau",
+   "country": "GW",
+   "lat": 11.8613,
+   "lon": -15.5831,
+   "tier": "regional"
+  },
+  {
+   "iata": "HKG",
+   "icao": null,
+   "name": "Hong Kong International Airport",
+   "name_tr": "Hong Kong International Airport",
+   "city": "Hong Kong",
+   "country": "HK",
+   "lat": 22.3126,
+   "lon": 113.9173,
+   "tier": "regional"
+  },
+  {
+   "iata": "DBV",
+   "icao": "LDDU",
+   "name": "Dubrovnik",
+   "name_tr": "Dubrovnik",
+   "city": "Dubrovnik",
+   "country": "HR",
+   "lat": 42.561,
+   "lon": 18.268,
+   "tier": "regional"
+  },
+  {
+   "iata": "SPU",
+   "icao": "LDSP",
+   "name": "Split",
+   "name_tr": "Split",
+   "city": "Split",
+   "country": "HR",
+   "lat": 43.539,
+   "lon": 16.298,
+   "tier": "regional"
+  },
+  {
+   "iata": "ZAG",
+   "icao": "LDZA",
+   "name": "Zagreb Franjo Tuđman",
+   "name_tr": "Zagreb",
+   "city": "Zagreb",
+   "country": "HR",
+   "lat": 45.743,
+   "lon": 16.069,
+   "tier": "major"
+  },
+  {
+   "iata": "PAP",
+   "icao": "MTPP",
+   "name": "Port-au-Prince Toussaint Louverture",
+   "name_tr": "Port-au-Prince",
+   "city": "Port-au-Prince",
+   "country": "HT",
+   "lat": 18.58,
+   "lon": -72.293,
+   "tier": "regional"
+  },
+  {
+   "iata": "BUD",
+   "icao": "LHBP",
+   "name": "Budapest Ferenc Liszt",
+   "name_tr": "Budapeşte",
+   "city": "Budapest",
+   "country": "HU",
+   "lat": 47.437,
+   "lon": 19.256,
+   "tier": "hub"
+  },
+  {
+   "iata": "DEB",
+   "icao": "LHDC",
+   "name": "Debrecen",
+   "name_tr": "Debrecen",
+   "city": "Debrecen",
+   "country": "HU",
+   "lat": 47.489,
+   "lon": 21.615,
+   "tier": "regional"
+  },
+  {
+   "iata": "CGK",
+   "icao": null,
+   "name": "Soekarno–Hatta International Airport",
+   "name_tr": "Soekarno–Hatta International Airport",
+   "city": "Jakarta",
+   "country": "ID",
+   "lat": -6.1798,
+   "lon": 106.7924,
+   "tier": "regional"
+  },
+  {
+   "iata": "DPS",
+   "icao": null,
+   "name": "Denpasar Bali Airport",
+   "name_tr": "Denpasar Bali Airport",
+   "city": "Denpasar",
+   "country": "ID",
+   "lat": -8.7459,
+   "lon": 115.1673,
+   "tier": "regional"
+  },
+  {
+   "iata": "DUB",
+   "icao": null,
+   "name": "Dublin Airport",
+   "name_tr": "Dublin Airport",
+   "city": "Dublin",
+   "country": "IE",
+   "lat": 53.4283,
+   "lon": -6.2473,
+   "tier": "regional"
+  },
+  {
+   "iata": "ETM",
+   "icao": "LLER",
+   "name": "Ramon",
+   "name_tr": "Ramon",
+   "city": "Eilat",
+   "country": "IL",
+   "lat": 29.723,
+   "lon": 35.011,
+   "tier": "regional"
+  },
+  {
+   "iata": "HFA",
+   "icao": "LLHA",
+   "name": "Haifa",
+   "name_tr": "Hayfa",
+   "city": "Haifa",
+   "country": "IL",
+   "lat": 32.809,
+   "lon": 35.043,
+   "tier": "regional"
+  },
+  {
+   "iata": "TLV",
+   "icao": "LLBG",
+   "name": "Tel Aviv Ben Gurion",
+   "name_tr": "Tel Aviv Ben Gurion",
+   "city": "Tel Aviv",
+   "country": "IL",
+   "lat": 32.011,
+   "lon": 34.887,
+   "tier": "hub"
+  },
+  {
+   "iata": "BOM",
+   "icao": "VABB",
+   "name": "Mumbai Chhatrapati Shivaji",
+   "name_tr": "Mumbai",
+   "city": "Mumbai",
+   "country": "IN",
+   "lat": 19.089,
+   "lon": 72.868,
+   "tier": "hub"
+  },
+  {
+   "iata": "CCU",
+   "icao": "VECC",
+   "name": "Kolkata Netaji Subhas",
+   "name_tr": "Kalküta",
+   "city": "Kolkata",
+   "country": "IN",
+   "lat": 22.655,
+   "lon": 88.447,
+   "tier": "major"
+  },
+  {
+   "iata": "DEL",
+   "icao": "VIDP",
+   "name": "Delhi Indira Gandhi",
+   "name_tr": "Delhi",
+   "city": "Delhi",
+   "country": "IN",
+   "lat": 28.556,
+   "lon": 77.1,
+   "tier": "hub"
+  },
+  {
+   "iata": "MAA",
+   "icao": "VOMM",
+   "name": "Chennai",
+   "name_tr": "Chennai",
+   "city": "Chennai",
+   "country": "IN",
+   "lat": 12.994,
+   "lon": 80.18,
+   "tier": "major"
+  },
+  {
+   "iata": "SXR",
+   "icao": "VISR",
+   "name": "Srinagar",
+   "name_tr": "Srinagar",
+   "city": "Srinagar",
+   "country": "IN",
+   "lat": 33.987,
+   "lon": 74.774,
+   "tier": "regional"
+  },
+  {
+   "iata": "BGW",
+   "icao": "ORBI",
+   "name": "Baghdad",
+   "name_tr": "Bağdat",
+   "city": "Baghdad",
+   "country": "IQ",
+   "lat": 33.263,
+   "lon": 44.235,
+   "tier": "major"
+  },
+  {
+   "iata": "BSR",
+   "icao": "ORMM",
+   "name": "Basra",
+   "name_tr": "Basra",
+   "city": "Basra",
+   "country": "IQ",
+   "lat": 30.549,
+   "lon": 47.662,
+   "tier": "regional"
+  },
+  {
+   "iata": "EBL",
+   "icao": "ORER",
+   "name": "Erbil",
+   "name_tr": "Erbil",
+   "city": "Erbil",
+   "country": "IQ",
+   "lat": 36.238,
+   "lon": 43.963,
+   "tier": "major"
+  },
+  {
+   "iata": "ISU",
+   "icao": "ORSU",
+   "name": "Sulaymaniyah",
+   "name_tr": "Süleymaniye",
+   "city": "Sulaymaniyah",
+   "country": "IQ",
+   "lat": 35.562,
+   "lon": 45.317,
+   "tier": "regional"
+  },
+  {
+   "iata": "NJF",
+   "icao": "ORNI",
+   "name": "Najaf",
+   "name_tr": "Necef",
+   "city": "Najaf",
+   "country": "IQ",
+   "lat": 31.99,
+   "lon": 44.404,
+   "tier": "regional"
+  },
+  {
+   "iata": "OSM",
+   "icao": null,
+   "name": "Mosul International Airport",
+   "name_tr": "Mosul International Airport",
+   "city": "Mosul",
+   "country": "IQ",
+   "lat": 36.2951,
+   "lon": 43.1505,
+   "tier": "regional"
+  },
+  {
+   "iata": "AWZ",
+   "icao": "OIAW",
+   "name": "Ahvaz",
+   "name_tr": "Ahvaz",
+   "city": "Ahvaz",
+   "country": "IR",
+   "lat": 31.337,
+   "lon": 48.76,
+   "tier": "regional"
+  },
+  {
+   "iata": "BND",
+   "icao": "OIKB",
+   "name": "Bandar Abbas",
+   "name_tr": "Bender Abbas",
+   "city": "Bandar Abbas",
+   "country": "IR",
+   "lat": 27.218,
+   "lon": 56.378,
+   "tier": "regional"
+  },
+  {
+   "iata": "IFN",
+   "icao": "OIFM",
+   "name": "Isfahan",
+   "name_tr": "İsfahan",
+   "city": "Isfahan",
+   "country": "IR",
+   "lat": 32.751,
+   "lon": 51.861,
+   "tier": "major"
+  },
+  {
+   "iata": "IKA",
+   "icao": "OIIE",
+   "name": "Tehran Imam Khomeini",
+   "name_tr": "Tahran İmam Humeyni",
+   "city": "Tehran",
+   "country": "IR",
+   "lat": 35.416,
+   "lon": 51.152,
+   "tier": "hub"
+  },
+  {
+   "iata": "KSH",
+   "icao": null,
+   "name": "Shahid Ashrafi Esfahani Airport",
+   "name_tr": "Shahid Ashrafi Esfahani Airport",
+   "city": "Kermanshah",
+   "country": "IR",
+   "lat": 34.3476,
+   "lon": 47.1689,
+   "tier": "regional"
+  },
+  {
+   "iata": "MHD",
+   "icao": "OIMM",
+   "name": "Mashhad",
+   "name_tr": "Meşhed",
+   "city": "Mashhad",
+   "country": "IR",
+   "lat": 36.235,
+   "lon": 59.641,
+   "tier": "major"
+  },
+  {
+   "iata": "OMH",
+   "icao": null,
+   "name": "Urmia Airport",
+   "name_tr": "Urmia Airport",
+   "city": "Urmiye",
+   "country": "IR",
+   "lat": 37.6717,
+   "lon": 45.0712,
+   "tier": "regional"
+  },
+  {
+   "iata": "SYZ",
+   "icao": "OISS",
+   "name": "Shiraz",
+   "name_tr": "Şiraz",
+   "city": "Shiraz",
+   "country": "IR",
+   "lat": 29.539,
+   "lon": 52.59,
+   "tier": "regional"
+  },
+  {
+   "iata": "TBZ",
+   "icao": "OITT",
+   "name": "Tabriz",
+   "name_tr": "Tebriz",
+   "city": "Tabriz",
+   "country": "IR",
+   "lat": 38.134,
+   "lon": 46.235,
+   "tier": "regional"
+  },
+  {
+   "iata": "THR",
+   "icao": "OIII",
+   "name": "Tehran Mehrabad",
+   "name_tr": "Tahran Mehrabad",
+   "city": "Tehran",
+   "country": "IR",
+   "lat": 35.689,
+   "lon": 51.313,
+   "tier": "major"
+  },
+  {
+   "iata": "BLQ",
+   "icao": null,
+   "name": "Bologna Guglielmo Marconi Airport",
+   "name_tr": "Bologna Guglielmo Marconi Airport",
+   "city": "Bologna",
+   "country": "IT",
+   "lat": 44.5344,
+   "lon": 11.2884,
+   "tier": "regional"
+  },
+  {
+   "iata": "BRI",
+   "icao": null,
+   "name": "Bari Karol Wojty?a Airport",
+   "name_tr": "Bari Karol Wojty?a Airport",
+   "city": "Bari",
+   "country": "IT",
+   "lat": 41.1258,
+   "lon": 16.862,
+   "tier": "regional"
+  },
+  {
+   "iata": "CTA",
+   "icao": null,
+   "name": "Catania–Fontanarossa Airport",
+   "name_tr": "Catania–Fontanarossa Airport",
+   "city": "Catania",
+   "country": "IT",
+   "lat": 37.4672,
+   "lon": 15.0676,
+   "tier": "regional"
+  },
+  {
+   "iata": "FCO",
+   "icao": null,
+   "name": "Fiumicino – Leonardo da Vinci International Airport",
+   "name_tr": "Fiumicino – Leonardo da Vinci International Airport",
+   "city": "Rome",
+   "country": "IT",
+   "lat": 41.8933,
+   "lon": 12.4829,
+   "tier": "regional"
+  },
+  {
+   "iata": "GOA",
+   "icao": null,
+   "name": "Goa International Airport",
+   "name_tr": "Goa International Airport",
+   "city": "Genova",
+   "country": "IT",
+   "lat": 44.4073,
+   "lon": 8.9339,
+   "tier": "regional"
+  },
+  {
+   "iata": "MXP",
+   "icao": null,
+   "name": "Milan–Malpensa Airport",
+   "name_tr": "Milan–Malpensa Airport",
+   "city": "Milano",
+   "country": "IT",
+   "lat": 45.4642,
+   "lon": 9.1896,
+   "tier": "regional"
+  },
+  {
+   "iata": "NAP",
+   "icao": null,
+   "name": "Naples International Airport",
+   "name_tr": "Naples International Airport",
+   "city": "Naples",
+   "country": "IT",
+   "lat": 40.884,
+   "lon": 14.2845,
+   "tier": "regional"
+  },
+  {
+   "iata": "PMO",
+   "icao": null,
+   "name": "Falcone–Borsellino Airport",
+   "name_tr": "Falcone–Borsellino Airport",
+   "city": "Palermo",
+   "country": "IT",
+   "lat": 38.1765,
+   "lon": 13.0916,
+   "tier": "regional"
+  },
+  {
+   "iata": "PSA",
+   "icao": null,
+   "name": "Pisa International Airport",
+   "name_tr": "Pisa International Airport",
+   "city": "Pisa",
+   "country": "IT",
+   "lat": 43.6848,
+   "lon": 10.3955,
+   "tier": "regional"
+  },
+  {
+   "iata": "TRN",
+   "icao": null,
+   "name": "Turin Airport",
+   "name_tr": "Turin Airport",
+   "city": "Torino",
+   "country": "IT",
+   "lat": 45.201,
+   "lon": 7.649,
+   "tier": "regional"
+  },
+  {
+   "iata": "VCE",
+   "icao": null,
+   "name": "Venice Marco Polo Airport",
+   "name_tr": "Venice Marco Polo Airport",
+   "city": "Venice",
+   "country": "IT",
+   "lat": 45.5035,
+   "lon": 12.3426,
+   "tier": "regional"
+  },
+  {
+   "iata": "AMM",
+   "icao": "OJAI",
+   "name": "Amman Queen Alia",
+   "name_tr": "Amman Kraliçe Alia",
+   "city": "Amman",
+   "country": "JO",
+   "lat": 31.723,
+   "lon": 35.993,
+   "tier": "major"
+  },
+  {
+   "iata": "AQJ",
+   "icao": "OJAQ",
+   "name": "Aqaba King Hussein",
+   "name_tr": "Akabe",
+   "city": "Aqaba",
+   "country": "JO",
+   "lat": 29.612,
+   "lon": 35.018,
+   "tier": "regional"
+  },
+  {
+   "iata": "HND",
+   "icao": null,
+   "name": "Haneda Airport",
+   "name_tr": "Haneda Airport",
+   "city": "Tokyo",
+   "country": "JP",
+   "lat": 35.5457,
+   "lon": 139.7761,
+   "tier": "regional"
+  },
+  {
+   "iata": "KIX",
+   "icao": null,
+   "name": "Kansai International Airport",
+   "name_tr": "Kansai International Airport",
+   "city": "Osaka",
+   "country": "JP",
+   "lat": 34.4342,
+   "lon": 135.2225,
+   "tier": "regional"
+  },
+  {
+   "iata": "NRT",
+   "icao": null,
+   "name": "Narita International Airport",
+   "name_tr": "Narita International Airport",
+   "city": "Narita",
+   "country": "JP",
+   "lat": 35.7759,
+   "lon": 140.3933,
+   "tier": "regional"
+  },
+  {
+   "iata": "MBA",
+   "icao": "HKMO",
+   "name": "Mombasa Moi",
+   "name_tr": "Mombasa",
+   "city": "Mombasa",
+   "country": "KE",
+   "lat": -4.035,
+   "lon": 39.594,
+   "tier": "regional"
+  },
+  {
+   "iata": "NBO",
+   "icao": "HKJK",
+   "name": "Nairobi Jomo Kenyatta",
+   "name_tr": "Nairobi",
+   "city": "Nairobi",
+   "country": "KE",
+   "lat": -1.319,
+   "lon": 36.928,
+   "tier": "hub"
+  },
+  {
+   "iata": "FRU",
+   "icao": null,
+   "name": "Manas International Airport",
+   "name_tr": "Manas International Airport",
+   "city": "Bishkek",
+   "country": "KG",
+   "lat": 42.8761,
+   "lon": 74.6037,
+   "tier": "regional"
+  },
+  {
+   "iata": "PNH",
+   "icao": null,
+   "name": "Phnom Penh International Airport",
+   "name_tr": "Phnom Penh International Airport",
+   "city": "Phnom Penh",
+   "country": "KH",
+   "lat": 11.5537,
+   "lon": 104.8441,
+   "tier": "regional"
+  },
+  {
+   "iata": "HAH",
+   "icao": null,
+   "name": "Moroni Prince Said Ibrahim International",
+   "name_tr": "Moroni Prince Said Ibrahim International",
+   "city": "Moroni",
+   "country": "KM",
+   "lat": -11.6931,
+   "lon": 43.2543,
+   "tier": "regional"
+  },
+  {
+   "iata": "ICN",
+   "icao": null,
+   "name": "Incheon International Airport",
+   "name_tr": "Incheon International Airport",
+   "city": "Seoul",
+   "country": "KR",
+   "lat": 37.5851,
+   "lon": 126.8106,
+   "tier": "regional"
+  },
+  {
+   "iata": "KWI",
+   "icao": "OKKK",
+   "name": "Kuwait International",
+   "name_tr": "Kuveyt",
+   "city": "Kuwait City",
+   "country": "KW",
+   "lat": 29.227,
+   "lon": 47.969,
+   "tier": "major"
+  },
+  {
+   "iata": "ALA",
+   "icao": null,
+   "name": "Almaty International Airport",
+   "name_tr": "Almaty International Airport",
+   "city": "Almaty",
+   "country": "KZ",
+   "lat": 43.3557,
+   "lon": 77.0426,
+   "tier": "regional"
+  },
+  {
+   "iata": "GUW",
+   "icao": null,
+   "name": "Atyrau Airport",
+   "name_tr": "Atyrau Airport",
+   "city": "Atyrau",
+   "country": "KZ",
+   "lat": 47.1212,
+   "lon": 51.8233,
+   "tier": "regional"
+  },
+  {
+   "iata": "HSA",
+   "icao": null,
+   "name": "Turkistan International Airport",
+   "name_tr": "Turkistan International Airport",
+   "city": "Turkistan",
+   "country": "KZ",
+   "lat": 43.3155,
+   "lon": 68.5469,
+   "tier": "regional"
+  },
+  {
+   "iata": "NQZ",
+   "icao": null,
+   "name": "Astana International Airport",
+   "name_tr": "Astana International Airport",
+   "city": "Astana",
+   "country": "KZ",
+   "lat": 51.1282,
+   "lon": 71.4307,
+   "tier": "regional"
+  },
+  {
+   "iata": "SCO",
+   "icao": null,
+   "name": "Aktau International Airport",
+   "name_tr": "Aktau International Airport",
+   "city": "Aktau",
+   "country": "KZ",
+   "lat": 43.8589,
+   "lon": 51.0931,
+   "tier": "regional"
+  },
+  {
+   "iata": "BEY",
+   "icao": "OLBA",
+   "name": "Beirut Rafic Hariri",
+   "name_tr": "Beyrut Rafik Hariri",
+   "city": "Beirut",
+   "country": "LB",
+   "lat": 33.821,
+   "lon": 35.488,
+   "tier": "major"
+  },
+  {
+   "iata": "CMB",
+   "icao": null,
+   "name": "Bandaranaike International Airport",
+   "name_tr": "Bandaranaike International Airport",
+   "city": "Colombo",
+   "country": "LK",
+   "lat": 6.9389,
+   "lon": 79.8542,
+   "tier": "regional"
+  },
+  {
+   "iata": "KUN",
+   "icao": "EYKA",
+   "name": "Kaunas",
+   "name_tr": "Kaunas",
+   "city": "Kaunas",
+   "country": "LT",
+   "lat": 54.964,
+   "lon": 24.085,
+   "tier": "regional"
+  },
+  {
+   "iata": "PLQ",
+   "icao": "EYPA",
+   "name": "Palanga",
+   "name_tr": "Palanga",
+   "city": "Palanga",
+   "country": "LT",
+   "lat": 55.973,
+   "lon": 21.094,
+   "tier": "regional"
+  },
+  {
+   "iata": "VNO",
+   "icao": "EYVI",
+   "name": "Vilnius",
+   "name_tr": "Vilnius",
+   "city": "Vilnius",
+   "country": "LT",
+   "lat": 54.634,
+   "lon": 25.286,
+   "tier": "major"
+  },
+  {
+   "iata": "LUX",
+   "icao": null,
+   "name": "Luxembourg Airport",
+   "name_tr": "Luxembourg Airport",
+   "city": "Luxembourg",
+   "country": "LU",
+   "lat": 49.6264,
+   "lon": 6.2094,
+   "tier": "regional"
+  },
+  {
+   "iata": "RIX",
+   "icao": "EVRA",
+   "name": "Riga",
+   "name_tr": "Riga",
+   "city": "Riga",
+   "country": "LV",
+   "lat": 56.924,
+   "lon": 23.971,
+   "tier": "major"
+  },
+  {
+   "iata": "BEN",
+   "icao": "HLLB",
+   "name": "Benghazi Benina",
+   "name_tr": "Bingazi Benina",
+   "city": "Benghazi",
+   "country": "LY",
+   "lat": 32.097,
+   "lon": 20.269,
+   "tier": "regional"
+  },
+  {
+   "iata": "MJI",
+   "icao": null,
+   "name": "Mitiga Uluslararası Havalimanı",
+   "name_tr": "Mitiga Uluslararası Havalimanı",
+   "city": "Tripoli",
+   "country": "LY",
+   "lat": 32.8967,
+   "lon": 13.1778,
+   "tier": "regional"
+  },
+  {
+   "iata": "MRA",
+   "icao": "HLMS",
+   "name": "Misrata",
+   "name_tr": "Misrata",
+   "city": "Misrata",
+   "country": "LY",
+   "lat": 32.325,
+   "lon": 15.061,
+   "tier": "regional"
+  },
+  {
+   "iata": "SEB",
+   "icao": null,
+   "name": "Sebha International Airport",
+   "name_tr": "Sebha International Airport",
+   "city": "Sebha",
+   "country": "LY",
+   "lat": 26.9927,
+   "lon": 14.4661,
+   "tier": "regional"
+  },
+  {
+   "iata": "TIP",
+   "icao": "HLLT",
+   "name": "Tripoli Mitiga",
+   "name_tr": "Trablus Mitiga",
+   "city": "Tripoli",
+   "country": "LY",
+   "lat": 32.894,
+   "lon": 13.276,
+   "tier": "regional"
+  },
+  {
+   "iata": "CMN",
+   "icao": null,
+   "name": "Mohammed V International Airport",
+   "name_tr": "Mohammed V International Airport",
+   "city": "Casablanca",
+   "country": "MA",
+   "lat": 33.5945,
+   "lon": -7.62,
+   "tier": "regional"
+  },
+  {
+   "iata": "RAK",
+   "icao": null,
+   "name": "Marrakesh Menara Airport",
+   "name_tr": "Marrakesh Menara Airport",
+   "city": "Marrakesh",
+   "country": "MA",
+   "lat": 31.6258,
+   "lon": -7.9892,
+   "tier": "regional"
+  },
+  {
+   "iata": "KIV",
+   "icao": "LUKK",
+   "name": "Chișinău",
+   "name_tr": "Kişinev",
+   "city": "Chișinău",
+   "country": "MD",
+   "lat": 46.928,
+   "lon": 28.931,
+   "tier": "major"
+  },
+  {
+   "iata": "TGD",
+   "icao": "LYPG",
+   "name": "Podgorica",
+   "name_tr": "Podgorica",
+   "city": "Podgorica",
+   "country": "ME",
+   "lat": 42.359,
+   "lon": 19.252,
+   "tier": "regional"
+  },
+  {
+   "iata": "TIV",
+   "icao": "LYTV",
+   "name": "Tivat",
+   "name_tr": "Tivat",
+   "city": "Tivat",
+   "country": "ME",
+   "lat": 42.404,
+   "lon": 18.723,
+   "tier": "regional"
+  },
+  {
+   "iata": "TNR",
+   "icao": null,
+   "name": "Ivato International Airport",
+   "name_tr": "Ivato International Airport",
+   "city": "Antananarivo",
+   "country": "MG",
+   "lat": -18.7961,
+   "lon": 47.4734,
+   "tier": "regional"
+  },
+  {
+   "iata": "SKP",
+   "icao": "LWSK",
+   "name": "Skopje",
+   "name_tr": "Üsküp",
+   "city": "Skopje",
+   "country": "MK",
+   "lat": 41.962,
+   "lon": 21.621,
+   "tier": "regional"
+  },
+  {
+   "iata": "BKO",
+   "icao": "GABS",
+   "name": "Bamako Modibo Keïta",
+   "name_tr": "Bamako",
+   "city": "Bamako",
+   "country": "ML",
+   "lat": 12.534,
+   "lon": -7.95,
+   "tier": "regional"
+  },
+  {
+   "iata": "GAQ",
+   "icao": "GAGO",
+   "name": "Gao",
+   "name_tr": "Gao",
+   "city": "Gao",
+   "country": "ML",
+   "lat": 16.248,
+   "lon": -0.005,
+   "tier": "regional"
+  },
+  {
+   "iata": "RGN",
+   "icao": "VYYY",
+   "name": "Yangon",
+   "name_tr": "Yangon",
+   "city": "Yangon",
+   "country": "MM",
+   "lat": 16.907,
+   "lon": 96.133,
+   "tier": "regional"
+  },
+  {
+   "iata": "UBN",
+   "icao": null,
+   "name": "Chinggis Khaan International Airport",
+   "name_tr": "Chinggis Khaan International Airport",
+   "city": "Ulaan Baatar",
+   "country": "MN",
+   "lat": 47.843,
+   "lon": 106.7668,
+   "tier": "regional"
+  },
+  {
+   "iata": "NKC",
+   "icao": null,
+   "name": "Nouakchott–Oumtounsy International Airport",
+   "name_tr": "Nouakchott–Oumtounsy International Airport",
+   "city": "Nouakchott",
+   "country": "MR",
+   "lat": 18.0995,
+   "lon": -15.9717,
+   "tier": "regional"
+  },
+  {
+   "iata": "MLA",
+   "icao": null,
+   "name": "Malta International Airport",
+   "name_tr": "Malta International Airport",
+   "city": "Luqa",
+   "country": "MT",
+   "lat": 35.8492,
+   "lon": 14.4953,
+   "tier": "regional"
+  },
+  {
+   "iata": "MRU",
+   "icao": null,
+   "name": "Sir Seewoosagur Ramgoolam International Airport",
+   "name_tr": "Sir Seewoosagur Ramgoolam International Airport",
+   "city": "Port Louis",
+   "country": "MU",
+   "lat": -20.1625,
+   "lon": 57.5028,
+   "tier": "regional"
+  },
+  {
+   "iata": "MLE",
+   "icao": null,
+   "name": "Velana International Airport",
+   "name_tr": "Velana International Airport",
+   "city": "Male",
+   "country": "MV",
+   "lat": 4.1962,
+   "lon": 73.5301,
+   "tier": "regional"
+  },
+  {
+   "iata": "CUN",
+   "icao": "MMUN",
+   "name": "Cancún",
+   "name_tr": "Cancun",
+   "city": "Cancún",
+   "country": "MX",
+   "lat": 21.037,
+   "lon": -86.877,
+   "tier": "major"
+  },
+  {
+   "iata": "MEX",
+   "icao": "MMMX",
+   "name": "Mexico City Benito Juárez",
+   "name_tr": "Meksiko",
+   "city": "Mexico City",
+   "country": "MX",
+   "lat": 19.436,
+   "lon": -99.072,
+   "tier": "hub"
+  },
+  {
+   "iata": "KUL",
+   "icao": null,
+   "name": "Kuala Lumpur International Airport",
+   "name_tr": "Kuala Lumpur International Airport",
+   "city": "Kuala Lumpur",
+   "country": "MY",
+   "lat": 3.1527,
+   "lon": 101.7022,
+   "tier": "regional"
+  },
+  {
+   "iata": "MPM",
+   "icao": null,
+   "name": "Maputo International Airport",
+   "name_tr": "Maputo International Airport",
+   "city": "Maputo",
+   "country": "MZ",
+   "lat": -25.9064,
+   "lon": 32.5826,
+   "tier": "regional"
+  },
+  {
+   "iata": "NIM",
+   "icao": "DRRN",
+   "name": "Niamey Diori Hamani",
+   "name_tr": "Niamey",
+   "city": "Niamey",
+   "country": "NE",
+   "lat": 13.481,
+   "lon": 2.184,
+   "tier": "regional"
+  },
+  {
+   "iata": "ABV",
+   "icao": "DNAA",
+   "name": "Abuja Nnamdi Azikiwe",
+   "name_tr": "Abuja",
+   "city": "Abuja",
+   "country": "NG",
+   "lat": 9.007,
+   "lon": 7.263,
+   "tier": "major"
+  },
+  {
+   "iata": "KAN",
+   "icao": "DNKN",
+   "name": "Kano Mallam Aminu",
+   "name_tr": "Kano",
+   "city": "Kano",
+   "country": "NG",
+   "lat": 12.048,
+   "lon": 8.524,
+   "tier": "regional"
+  },
+  {
+   "iata": "LOS",
+   "icao": "DNMM",
+   "name": "Lagos Murtala Muhammed",
+   "name_tr": "Lagos",
+   "city": "Lagos",
+   "country": "NG",
+   "lat": 6.577,
+   "lon": 3.321,
+   "tier": "hub"
+  },
+  {
+   "iata": "MIU",
+   "icao": "DNMA",
+   "name": "Maiduguri",
+   "name_tr": "Maiduguri",
+   "city": "Maiduguri",
+   "country": "NG",
+   "lat": 11.855,
+   "lon": 13.081,
+   "tier": "regional"
+  },
+  {
+   "iata": "PHC",
+   "icao": null,
+   "name": "Port Harcourt International Airport",
+   "name_tr": "Port Harcourt International Airport",
+   "city": "Port Harcourt",
+   "country": "NG",
+   "lat": 4.7677,
+   "lon": 7.0189,
+   "tier": "regional"
+  },
+  {
+   "iata": "AMS",
+   "icao": null,
+   "name": "Amsterdam Airport Schiphol",
+   "name_tr": "Amsterdam Airport Schiphol",
+   "city": "Amsterdam",
+   "country": "NL",
+   "lat": 52.3731,
+   "lon": 4.8925,
+   "tier": "regional"
+  },
+  {
+   "iata": "RTM",
+   "icao": null,
+   "name": "Rotterdam The Hague Airport",
+   "name_tr": "Rotterdam The Hague Airport",
+   "city": "Rotterdam",
+   "country": "NL",
+   "lat": 51.9563,
+   "lon": 4.4397,
+   "tier": "regional"
+  },
+  {
+   "iata": "BGO",
+   "icao": "ENBR",
+   "name": "Bergen Flesland",
+   "name_tr": "Bergen",
+   "city": "Bergen",
+   "country": "NO",
+   "lat": 60.293,
+   "lon": 5.218,
+   "tier": "major"
+  },
+  {
+   "iata": "OSL",
+   "icao": "ENGM",
+   "name": "Oslo Gardermoen",
+   "name_tr": "Oslo Gardermoen",
+   "city": "Oslo",
+   "country": "NO",
+   "lat": 60.194,
+   "lon": 11.1,
+   "tier": "hub"
+  },
+  {
+   "iata": "TOS",
+   "icao": "ENTC",
+   "name": "Tromsø",
+   "name_tr": "Tromsø",
+   "city": "Tromsø",
+   "country": "NO",
+   "lat": 69.683,
+   "lon": 18.919,
+   "tier": "regional"
+  },
+  {
+   "iata": "KTM",
+   "icao": null,
+   "name": "Tribhuvan International Airport",
+   "name_tr": "Tribhuvan International Airport",
+   "city": "Kathmandu",
+   "country": "NP",
+   "lat": 27.6939,
+   "lon": 85.3582,
+   "tier": "regional"
+  },
+  {
+   "iata": "MCT",
+   "icao": "OOMS",
+   "name": "Muscat",
+   "name_tr": "Maskat",
+   "city": "Muscat",
+   "country": "OM",
+   "lat": 23.593,
+   "lon": 58.284,
+   "tier": "major"
+  },
+  {
+   "iata": "SLL",
+   "icao": "OOSA",
+   "name": "Salalah",
+   "name_tr": "Selale",
+   "city": "Salalah",
+   "country": "OM",
+   "lat": 17.039,
+   "lon": 54.091,
+   "tier": "regional"
+  },
+  {
+   "iata": "PTY",
+   "icao": "MPTO",
+   "name": "Panama Tocumen",
+   "name_tr": "Panama Tocumen",
+   "city": "Panama City",
+   "country": "PA",
+   "lat": 9.071,
+   "lon": -79.383,
+   "tier": "hub"
+  },
+  {
+   "iata": "CEB",
+   "icao": null,
+   "name": "Cebu International Airport",
+   "name_tr": "Cebu International Airport",
+   "city": "Cebu",
+   "country": "PH",
+   "lat": 10.47,
+   "lon": 123.83,
+   "tier": "regional"
+  },
+  {
+   "iata": "MNL",
+   "icao": null,
+   "name": "Ninoy Aquino International Airport",
+   "name_tr": "Ninoy Aquino International Airport",
+   "city": "Manila",
+   "country": "PH",
+   "lat": 14.5123,
+   "lon": 121.0219,
+   "tier": "regional"
+  },
+  {
+   "iata": "ISB",
+   "icao": "OPIS",
+   "name": "Islamabad",
+   "name_tr": "İslamabad",
+   "city": "Islamabad",
+   "country": "PK",
+   "lat": 33.549,
+   "lon": 72.826,
+   "tier": "major"
+  },
+  {
+   "iata": "KHI",
+   "icao": "OPKC",
+   "name": "Karachi Jinnah",
+   "name_tr": "Karaçi Cinnah",
+   "city": "Karachi",
+   "country": "PK",
+   "lat": 24.907,
+   "lon": 67.161,
+   "tier": "hub"
+  },
+  {
+   "iata": "LHE",
+   "icao": "OPLA",
+   "name": "Lahore Allama Iqbal",
+   "name_tr": "Lahor",
+   "city": "Lahore",
+   "country": "PK",
+   "lat": 31.522,
+   "lon": 74.404,
+   "tier": "major"
+  },
+  {
+   "iata": "PEW",
+   "icao": "OPPS",
+   "name": "Peshawar Bacha Khan",
+   "name_tr": "Peşaver",
+   "city": "Peshawar",
+   "country": "PK",
+   "lat": 33.994,
+   "lon": 71.515,
+   "tier": "regional"
+  },
+  {
+   "iata": "UET",
+   "icao": "OPQT",
+   "name": "Quetta",
+   "name_tr": "Quetta",
+   "city": "Quetta",
+   "country": "PK",
+   "lat": 30.251,
+   "lon": 66.938,
+   "tier": "regional"
+  },
+  {
+   "iata": "BZG",
+   "icao": "EPBY",
+   "name": "Bydgoszcz",
+   "name_tr": "Bydgoszcz",
+   "city": "Bydgoszcz",
+   "country": "PL",
+   "lat": 53.097,
+   "lon": 17.978,
+   "tier": "regional"
+  },
+  {
+   "iata": "GDN",
+   "icao": "EPGD",
+   "name": "Gdańsk Lech Wałęsa",
+   "name_tr": "Gdansk",
+   "city": "Gdańsk",
+   "country": "PL",
+   "lat": 54.378,
+   "lon": 18.466,
+   "tier": "major"
+  },
+  {
+   "iata": "KRK",
+   "icao": "EPKK",
+   "name": "Kraków John Paul II",
+   "name_tr": "Krakov",
+   "city": "Kraków",
+   "country": "PL",
+   "lat": 50.078,
+   "lon": 19.785,
+   "tier": "major"
+  },
+  {
+   "iata": "KTW",
+   "icao": "EPKT",
+   "name": "Katowice",
+   "name_tr": "Katoviçe",
+   "city": "Katowice",
+   "country": "PL",
+   "lat": 50.474,
+   "lon": 19.08,
+   "tier": "major"
+  },
+  {
+   "iata": "LCJ",
+   "icao": "EPLL",
+   "name": "Łódź",
+   "name_tr": "Lodz",
+   "city": "Łódź",
+   "country": "PL",
+   "lat": 51.722,
+   "lon": 19.398,
+   "tier": "regional"
+  },
+  {
+   "iata": "LUZ",
+   "icao": "EPLB",
+   "name": "Lublin",
+   "name_tr": "Lublin",
+   "city": "Lublin",
+   "country": "PL",
+   "lat": 51.24,
+   "lon": 22.714,
+   "tier": "regional"
+  },
+  {
+   "iata": "POZ",
+   "icao": "EPPO",
+   "name": "Poznań Ławica",
+   "name_tr": "Poznan",
+   "city": "Poznań",
+   "country": "PL",
+   "lat": 52.421,
+   "lon": 16.826,
+   "tier": "major"
+  },
+  {
+   "iata": "RZE",
+   "icao": "EPRZ",
+   "name": "Rzeszów–Jasionka",
+   "name_tr": "Rzeszow–Jasionka",
+   "city": "Rzeszów",
+   "country": "PL",
+   "lat": 50.11,
+   "lon": 22.019,
+   "tier": "regional"
+  },
+  {
+   "iata": "SZZ",
+   "icao": "EPSC",
+   "name": "Szczecin–Goleniów",
+   "name_tr": "Szczecin",
+   "city": "Szczecin",
+   "country": "PL",
+   "lat": 53.585,
+   "lon": 14.902,
+   "tier": "regional"
+  },
+  {
+   "iata": "WAW",
+   "icao": "EPWA",
+   "name": "Warsaw Chopin",
+   "name_tr": "Varşova Chopin",
+   "city": "Warsaw",
+   "country": "PL",
+   "lat": 52.166,
+   "lon": 20.967,
+   "tier": "hub"
+  },
+  {
+   "iata": "WMI",
+   "icao": "EPMO",
+   "name": "Warsaw Modlin",
+   "name_tr": "Varşova Modlin",
+   "city": "Warsaw",
+   "country": "PL",
+   "lat": 52.451,
+   "lon": 20.652,
+   "tier": "regional"
+  },
+  {
+   "iata": "WRO",
+   "icao": "EPWR",
+   "name": "Wrocław Copernicus",
+   "name_tr": "Vroclav",
+   "city": "Wrocław",
+   "country": "PL",
+   "lat": 51.103,
+   "lon": 16.886,
+   "tier": "major"
+  },
+  {
+   "iata": "LIS",
+   "icao": null,
+   "name": "Lisbon Humberto Delgado Airport",
+   "name_tr": "Lisbon Humberto Delgado Airport",
+   "city": "Lisbon",
+   "country": "PT",
+   "lat": 38.781,
+   "lon": -9.1319,
+   "tier": "regional"
+  },
+  {
+   "iata": "OPO",
+   "icao": null,
+   "name": "Francisco Sá Carneiro Airport",
+   "name_tr": "Francisco Sá Carneiro Airport",
+   "city": "Porto",
+   "country": "PT",
+   "lat": 41.249,
+   "lon": -8.6803,
+   "tier": "regional"
+  },
+  {
+   "iata": "DOH",
+   "icao": "OTHH",
+   "name": "Doha Hamad",
+   "name_tr": "Doha Hamad",
+   "city": "Doha",
+   "country": "QA",
+   "lat": 25.273,
+   "lon": 51.608,
+   "tier": "hub"
+  },
+  {
+   "iata": "CLJ",
+   "icao": "LRCL",
+   "name": "Cluj-Napoca",
+   "name_tr": "Kluj",
+   "city": "Cluj-Napoca",
+   "country": "RO",
+   "lat": 46.785,
+   "lon": 23.686,
+   "tier": "major"
+  },
+  {
+   "iata": "CND",
+   "icao": "LRCK",
+   "name": "Constanța Mihail Kogălniceanu",
+   "name_tr": "Köstence",
+   "city": "Constanța",
+   "country": "RO",
+   "lat": 44.362,
+   "lon": 28.488,
+   "tier": "regional"
+  },
+  {
+   "iata": "IAS",
+   "icao": "LRIA",
+   "name": "Iași",
+   "name_tr": "Yaş",
+   "city": "Iași",
+   "country": "RO",
+   "lat": 47.179,
+   "lon": 27.621,
+   "tier": "regional"
+  },
+  {
+   "iata": "OTP",
+   "icao": "LROP",
+   "name": "Bucharest Henri Coandă",
+   "name_tr": "Bükreş Otopeni",
+   "city": "Bucharest",
+   "country": "RO",
+   "lat": 44.572,
+   "lon": 26.102,
+   "tier": "hub"
+  },
+  {
+   "iata": "SCV",
+   "icao": "LRSV",
+   "name": "Suceava",
+   "name_tr": "Suceava",
+   "city": "Suceava",
+   "country": "RO",
+   "lat": 47.687,
+   "lon": 26.354,
+   "tier": "regional"
+  },
+  {
+   "iata": "TSR",
+   "icao": "LRTR",
+   "name": "Timișoara",
+   "name_tr": "Timişoara",
+   "city": "Timișoara",
+   "country": "RO",
+   "lat": 45.81,
+   "lon": 21.338,
+   "tier": "regional"
+  },
+  {
+   "iata": "BEG",
+   "icao": "LYBE",
+   "name": "Belgrade Nikola Tesla",
+   "name_tr": "Belgrad",
+   "city": "Belgrade",
+   "country": "RS",
+   "lat": 44.818,
+   "lon": 20.309,
+   "tier": "major"
+  },
+  {
+   "iata": "INI",
+   "icao": "LYNI",
+   "name": "Niš",
+   "name_tr": "Niş",
+   "city": "Niš",
+   "country": "RS",
+   "lat": 43.337,
+   "lon": 21.854,
+   "tier": "regional"
+  },
+  {
+   "iata": "AER",
+   "icao": "URSS",
+   "name": "Sochi",
+   "name_tr": "Soçi",
+   "city": "Sochi",
+   "country": "RU",
+   "lat": 43.45,
+   "lon": 39.957,
+   "tier": "major"
+  },
+  {
+   "iata": "ASF",
+   "icao": null,
+   "name": "Narimanovo Airport",
+   "name_tr": "Narimanovo Airport",
+   "city": "Astrakhan",
+   "country": "RU",
+   "lat": 46.2873,
+   "lon": 47.9998,
+   "tier": "regional"
+  },
+  {
+   "iata": "BZK",
+   "icao": "UUBP",
+   "name": "Bryansk",
+   "name_tr": "Bryansk",
+   "city": "Bryansk",
+   "country": "RU",
+   "lat": 53.214,
+   "lon": 34.176,
+   "tier": "regional"
+  },
+  {
+   "iata": "DME",
+   "icao": "UUDD",
+   "name": "Moscow Domodedovo",
+   "name_tr": "Moskova Domodedovo",
+   "city": "Moscow",
+   "country": "RU",
+   "lat": 55.408,
+   "lon": 37.906,
+   "tier": "hub"
+  },
+  {
+   "iata": "EGO",
+   "icao": "UUOB",
+   "name": "Belgorod",
+   "name_tr": "Belgorod",
+   "city": "Belgorod",
+   "country": "RU",
+   "lat": 50.644,
+   "lon": 36.59,
+   "tier": "regional"
+  },
+  {
+   "iata": "KGD",
+   "icao": "UMKK",
+   "name": "Kaliningrad Khrabrovo",
+   "name_tr": "Kaliningrad",
+   "city": "Kaliningrad",
+   "country": "RU",
+   "lat": 54.89,
+   "lon": 20.593,
+   "tier": "regional"
+  },
+  {
+   "iata": "KRR",
+   "icao": "URKK",
+   "name": "Krasnodar",
+   "name_tr": "Krasnodar",
+   "city": "Krasnodar",
+   "country": "RU",
+   "lat": 45.035,
+   "lon": 39.171,
+   "tier": "major"
+  },
+  {
+   "iata": "KUF",
+   "icao": null,
+   "name": "Kurumoch International Airport",
+   "name_tr": "Kurumoch International Airport",
+   "city": "Samara",
+   "country": "RU",
+   "lat": 53.5058,
+   "lon": 50.157,
+   "tier": "regional"
+  },
+  {
+   "iata": "KZN",
+   "icao": "UWKD",
+   "name": "Kazan",
+   "name_tr": "Kazan",
+   "city": "Kazan",
+   "country": "RU",
+   "lat": 55.606,
+   "lon": 49.279,
+   "tier": "major"
+  },
+  {
+   "iata": "LED",
+   "icao": "ULLI",
+   "name": "St Petersburg Pulkovo",
+   "name_tr": "St. Petersburg Pulkovo",
+   "city": "St Petersburg",
+   "country": "RU",
+   "lat": 59.8,
+   "lon": 30.263,
+   "tier": "hub"
+  },
+  {
+   "iata": "MRV",
+   "icao": "URMM",
+   "name": "Mineralnye Vody",
+   "name_tr": "Mineralnye Vody",
+   "city": "Mineralnye Vody",
+   "country": "RU",
+   "lat": 44.225,
+   "lon": 43.082,
+   "tier": "regional"
+  },
+  {
+   "iata": "OVB",
+   "icao": null,
+   "name": "Novosibirsk Tolmachevo Airport",
+   "name_tr": "Novosibirsk Tolmachevo Airport",
+   "city": "Novosibirsk",
+   "country": "RU",
+   "lat": 55.029,
+   "lon": 82.5998,
+   "tier": "regional"
+  },
+  {
+   "iata": "ROV",
+   "icao": "URRP",
+   "name": "Rostov-on-Don Platov",
+   "name_tr": "Rostov Platov",
+   "city": "Rostov-on-Don",
+   "country": "RU",
+   "lat": 47.494,
+   "lon": 39.925,
+   "tier": "major"
+  },
+  {
+   "iata": "STW",
+   "icao": null,
+   "name": "Stavropol Shpakovskoye Airport",
+   "name_tr": "Stavropol Shpakovskoye Airport",
+   "city": "Stavropol",
+   "country": "RU",
+   "lat": 45.1109,
+   "lon": 42.1162,
+   "tier": "regional"
+  },
+  {
+   "iata": "SVO",
+   "icao": "UUEE",
+   "name": "Moscow Sheremetyevo",
+   "name_tr": "Moskova Şeremetyevo",
+   "city": "Moscow",
+   "country": "RU",
+   "lat": 55.973,
+   "lon": 37.415,
+   "tier": "hub"
+  },
+  {
+   "iata": "SVX",
+   "icao": "USSS",
+   "name": "Yekaterinburg Koltsovo",
+   "name_tr": "Yekaterinburg",
+   "city": "Yekaterinburg",
+   "country": "RU",
+   "lat": 56.743,
+   "lon": 60.803,
+   "tier": "major"
+  },
+  {
+   "iata": "UFA",
+   "icao": null,
+   "name": "Ufa International Airport",
+   "name_tr": "Ufa International Airport",
+   "city": "Ufa",
+   "country": "RU",
+   "lat": 54.5544,
+   "lon": 55.8822,
+   "tier": "regional"
+  },
+  {
+   "iata": "URS",
+   "icao": "UUOK",
+   "name": "Kursk Vostochny",
+   "name_tr": "Kursk",
+   "city": "Kursk",
+   "country": "RU",
+   "lat": 51.751,
+   "lon": 36.296,
+   "tier": "regional"
+  },
+  {
+   "iata": "VKO",
+   "icao": "UUWW",
+   "name": "Moscow Vnukovo",
+   "name_tr": "Moskova Vnukovo",
+   "city": "Moscow",
+   "country": "RU",
+   "lat": 55.596,
+   "lon": 37.261,
+   "tier": "major"
+  },
+  {
+   "iata": "VOG",
+   "icao": "URWW",
+   "name": "Volgograd",
+   "name_tr": "Volgograd",
+   "city": "Volgograd",
+   "country": "RU",
+   "lat": 48.782,
+   "lon": 44.346,
+   "tier": "regional"
+  },
+  {
+   "iata": "VOZ",
+   "icao": null,
+   "name": "Chertovitskoye Uluslararası Havalimanı",
+   "name_tr": "Chertovitskoye Uluslararası Havalimanı",
+   "city": "Voronezh",
+   "country": "RU",
+   "lat": 51.8146,
+   "lon": 39.2218,
+   "tier": "regional"
+  },
+  {
+   "iata": "KGL",
+   "icao": null,
+   "name": "Kigali International Airport",
+   "name_tr": "Kigali International Airport",
+   "city": "Kigali",
+   "country": "RW",
+   "lat": -1.9683,
+   "lon": 30.1376,
+   "tier": "regional"
+  },
+  {
+   "iata": "AHB",
+   "icao": "OEAB",
+   "name": "Abha",
+   "name_tr": "Ebha",
+   "city": "Abha",
+   "country": "SA",
+   "lat": 18.24,
+   "lon": 42.657,
+   "tier": "regional"
+  },
+  {
+   "iata": "DMM",
+   "icao": "OEDF",
+   "name": "Dammam King Fahd",
+   "name_tr": "Dammam Kral Fahd",
+   "city": "Dammam",
+   "country": "SA",
+   "lat": 26.471,
+   "lon": 49.798,
+   "tier": "major"
+  },
+  {
+   "iata": "ELQ",
+   "icao": null,
+   "name": "Prince Nayef bin Abdulaziz Regional Airport",
+   "name_tr": "Prince Nayef bin Abdulaziz Regional Airport",
+   "city": "Al Qassim",
+   "country": "SA",
+   "lat": 26.1942,
+   "lon": 43.4566,
+   "tier": "regional"
+  },
+  {
+   "iata": "JED",
+   "icao": "OEJN",
+   "name": "Jeddah King Abdulaziz",
+   "name_tr": "Cidde Kral Abdülaziz",
+   "city": "Jeddah",
+   "country": "SA",
+   "lat": 21.68,
+   "lon": 39.157,
+   "tier": "hub"
+  },
+  {
+   "iata": "MED",
+   "icao": "OEMA",
+   "name": "Medina",
+   "name_tr": "Medine",
+   "city": "Medina",
+   "country": "SA",
+   "lat": 24.554,
+   "lon": 39.705,
+   "tier": "major"
+  },
+  {
+   "iata": "RUH",
+   "icao": "OERK",
+   "name": "Riyadh King Khalid",
+   "name_tr": "Riyad Kral Halid",
+   "city": "Riyadh",
+   "country": "SA",
+   "lat": 24.958,
+   "lon": 46.7,
+   "tier": "hub"
+  },
+  {
+   "iata": "TIF",
+   "icao": null,
+   "name": "Ta'if Regional Airport",
+   "name_tr": "Ta'if Regional Airport",
+   "city": "Taif",
+   "country": "SA",
+   "lat": 21.2703,
+   "lon": 40.4158,
+   "tier": "regional"
+  },
+  {
+   "iata": "YNB",
+   "icao": null,
+   "name": "Yanbu Airport",
+   "name_tr": "Yanbu Airport",
+   "city": "Yanbu",
+   "country": "SA",
+   "lat": 24.148,
+   "lon": 38.0627,
+   "tier": "regional"
+  },
+  {
+   "iata": "SEZ",
+   "icao": null,
+   "name": "Seychelles International Airport",
+   "name_tr": "Seychelles International Airport",
+   "city": "Seychelles",
+   "country": "SC",
+   "lat": -4.6743,
+   "lon": 55.5212,
+   "tier": "regional"
+  },
+  {
+   "iata": "KRT",
+   "icao": "HSSS",
+   "name": "Khartoum",
+   "name_tr": "Hartum",
+   "city": "Khartoum",
+   "country": "SD",
+   "lat": 15.59,
+   "lon": 32.553,
+   "tier": "regional"
+  },
+  {
+   "iata": "PZU",
+   "icao": "HSPN",
+   "name": "Port Sudan",
+   "name_tr": "Port Sudan",
+   "city": "Port Sudan",
+   "country": "SD",
+   "lat": 19.434,
+   "lon": 37.234,
+   "tier": "regional"
+  },
+  {
+   "iata": "ARN",
+   "icao": "ESSA",
+   "name": "Stockholm Arlanda",
+   "name_tr": "Stockholm Arlanda",
+   "city": "Stockholm",
+   "country": "SE",
+   "lat": 59.652,
+   "lon": 17.919,
+   "tier": "hub"
+  },
+  {
+   "iata": "GOT",
+   "icao": "ESGG",
+   "name": "Gothenburg Landvetter",
+   "name_tr": "Göteborg",
+   "city": "Gothenburg",
+   "country": "SE",
+   "lat": 57.663,
+   "lon": 12.28,
+   "tier": "major"
+  },
+  {
+   "iata": "MMX",
+   "icao": "ESMS",
+   "name": "Malmö",
+   "name_tr": "Malmö",
+   "city": "Malmö",
+   "country": "SE",
+   "lat": 55.53,
+   "lon": 13.372,
+   "tier": "regional"
+  },
+  {
+   "iata": "SIN",
+   "icao": null,
+   "name": "Singapore Changi Airport",
+   "name_tr": "Singapore Changi Airport",
+   "city": "Changi",
+   "country": "SG",
+   "lat": 1.353,
+   "lon": 103.9961,
+   "tier": "regional"
+  },
+  {
+   "iata": "LJU",
+   "icao": "LJLJ",
+   "name": "Ljubljana Jože Pučnik",
+   "name_tr": "Ljubljana",
+   "city": "Ljubljana",
+   "country": "SI",
+   "lat": 46.224,
+   "lon": 14.458,
+   "tier": "regional"
+  },
+  {
+   "iata": "BTS",
+   "icao": "LZIB",
+   "name": "Bratislava",
+   "name_tr": "Bratislava",
+   "city": "Bratislava",
+   "country": "SK",
+   "lat": 48.17,
+   "lon": 17.213,
+   "tier": "major"
+  },
+  {
+   "iata": "KSC",
+   "icao": "LZKZ",
+   "name": "Košice",
+   "name_tr": "Koşice",
+   "city": "Košice",
+   "country": "SK",
+   "lat": 48.663,
+   "lon": 21.241,
+   "tier": "regional"
+  },
+  {
+   "iata": "FNA",
+   "icao": null,
+   "name": "Lungi International Airport",
+   "name_tr": "Lungi International Airport",
+   "city": "Freetown",
+   "country": "SL",
+   "lat": 8.479,
+   "lon": -13.268,
+   "tier": "regional"
+  },
+  {
+   "iata": "DSS",
+   "icao": null,
+   "name": "Blaise Diagne International Airport",
+   "name_tr": "Blaise Diagne International Airport",
+   "city": "Dakar",
+   "country": "SN",
+   "lat": 14.6934,
+   "lon": -17.4479,
+   "tier": "regional"
+  },
+  {
+   "iata": "HGA",
+   "icao": "HCMH",
+   "name": "Hargeisa",
+   "name_tr": "Hargeysa",
+   "city": "Hargeisa",
+   "country": "SO",
+   "lat": 9.518,
+   "lon": 44.089,
+   "tier": "regional"
+  },
+  {
+   "iata": "MGQ",
+   "icao": "HCMM",
+   "name": "Mogadishu Aden Adde",
+   "name_tr": "Mogadişu",
+   "city": "Mogadishu",
+   "country": "SO",
+   "lat": 2.014,
+   "lon": 45.305,
+   "tier": "regional"
+  },
+  {
+   "iata": "JUB",
+   "icao": null,
+   "name": "Juba Uluslararası Havalimanı",
+   "name_tr": "Juba Uluslararası Havalimanı",
+   "city": "Juba",
+   "country": "SS",
+   "lat": 4.8459,
+   "lon": 31.5959,
+   "tier": "regional"
+  },
+  {
+   "iata": "ALP",
+   "icao": "OSAP",
+   "name": "Aleppo",
+   "name_tr": "Halep",
+   "city": "Aleppo",
+   "country": "SY",
+   "lat": 36.181,
+   "lon": 37.224,
+   "tier": "regional"
+  },
+  {
+   "iata": "DAM",
+   "icao": "OSDI",
+   "name": "Damascus",
+   "name_tr": "Şam",
+   "city": "Damascus",
+   "country": "SY",
+   "lat": 33.411,
+   "lon": 36.516,
+   "tier": "major"
+  },
+  {
+   "iata": "LTK",
+   "icao": "OSLK",
+   "name": "Latakia Bassel al-Assad",
+   "name_tr": "Lazkiye",
+   "city": "Latakia",
+   "country": "SY",
+   "lat": 35.401,
+   "lon": 35.949,
+   "tier": "regional"
+  },
+  {
+   "iata": "NDJ",
+   "icao": null,
+   "name": "N'Djamena International Airport",
+   "name_tr": "N'Djamena International Airport",
+   "city": "N'Djamena",
+   "country": "TD",
+   "lat": 12.1361,
+   "lon": 15.0348,
+   "tier": "regional"
+  },
+  {
+   "iata": "BKK",
+   "icao": null,
+   "name": "Suvarnabhumi Airport",
+   "name_tr": "Suvarnabhumi Airport",
+   "city": "Bangkok",
+   "country": "TH",
+   "lat": 13.7228,
+   "lon": 100.7272,
+   "tier": "regional"
+  },
+  {
+   "iata": "HKT",
+   "icao": null,
+   "name": "PHUKET",
+   "name_tr": "PHUKET",
+   "city": "Phuket",
+   "country": "TH",
+   "lat": 7.8848,
+   "lon": 98.3892,
+   "tier": "regional"
+  },
+  {
+   "iata": "DYU",
+   "icao": null,
+   "name": "Dushanbe International Airport",
+   "name_tr": "Dushanbe International Airport",
+   "city": "Dushanbe",
+   "country": "TJ",
+   "lat": 38.5456,
+   "lon": 68.8236,
+   "tier": "regional"
+  },
+  {
+   "iata": "LBD",
+   "icao": null,
+   "name": "Khujand International Airport",
+   "name_tr": "Khujand International Airport",
+   "city": "Khujand",
+   "country": "TJ",
+   "lat": 40.2844,
+   "lon": 69.6192,
+   "tier": "regional"
+  },
+  {
+   "iata": "ASB",
+   "icao": null,
+   "name": "Ashgabat International Airport",
+   "name_tr": "Ashgabat International Airport",
+   "city": "Ashgabat",
+   "country": "TM",
+   "lat": 37.9838,
+   "lon": 58.3627,
+   "tier": "regional"
+  },
+  {
+   "iata": "TUN",
+   "icao": null,
+   "name": "Tunis–Carthage Airport",
+   "name_tr": "Tunis–Carthage Airport",
+   "city": "Tunis",
+   "country": "TN",
+   "lat": 36.8518,
+   "lon": 10.2295,
+   "tier": "regional"
+  },
+  {
+   "iata": "ADA",
+   "icao": "LTAF",
+   "name": "Adana Şakirpaşa",
+   "name_tr": "Adana Şakirpaşa",
+   "city": "Adana",
+   "country": "TR",
+   "lat": 36.982,
+   "lon": 35.28,
+   "tier": "major"
+  },
+  {
+   "iata": "ADB",
+   "icao": "LTBJ",
+   "name": "İzmir Adnan Menderes",
+   "name_tr": "İzmir Adnan Menderes",
+   "city": "İzmir",
+   "country": "TR",
+   "lat": 38.292,
+   "lon": 27.157,
+   "tier": "major"
+  },
+  {
+   "iata": "AYT",
+   "icao": "LTAI",
+   "name": "Antalya",
+   "name_tr": "Antalya",
+   "city": "Antalya",
+   "country": "TR",
+   "lat": 36.899,
+   "lon": 30.8,
+   "tier": "hub"
+  },
+  {
+   "iata": "BJV",
+   "icao": "LTFE",
+   "name": "Bodrum Milas",
+   "name_tr": "Bodrum Milas",
+   "city": "Bodrum",
+   "country": "TR",
+   "lat": 37.251,
+   "lon": 27.664,
+   "tier": "regional"
+  },
+  {
+   "iata": "DIY",
+   "icao": "LTCC",
+   "name": "Diyarbakır",
+   "name_tr": "Diyarbakır",
+   "city": "Diyarbakır",
+   "country": "TR",
+   "lat": 37.894,
+   "lon": 40.201,
+   "tier": "regional"
+  },
+  {
+   "iata": "DLM",
+   "icao": "LTBS",
+   "name": "Dalaman",
+   "name_tr": "Dalaman",
+   "city": "Dalaman",
+   "country": "TR",
+   "lat": 36.713,
+   "lon": 28.793,
+   "tier": "regional"
+  },
+  {
+   "iata": "ESB",
+   "icao": "LTAC",
+   "name": "Ankara Esenboğa",
+   "name_tr": "Ankara Esenboğa",
+   "city": "Ankara",
+   "country": "TR",
+   "lat": 40.128,
+   "lon": 32.995,
+   "tier": "major"
+  },
+  {
+   "iata": "GZT",
+   "icao": "LTAJ",
+   "name": "Gaziantep",
+   "name_tr": "Gaziantep",
+   "city": "Gaziantep",
+   "country": "TR",
+   "lat": 36.947,
+   "lon": 37.479,
+   "tier": "regional"
+  },
+  {
+   "iata": "HTY",
+   "icao": "LTDA",
+   "name": "Hatay",
+   "name_tr": "Hatay",
+   "city": "Hatay",
+   "country": "TR",
+   "lat": 36.363,
+   "lon": 36.282,
+   "tier": "regional"
+  },
+  {
+   "iata": "IST",
+   "icao": "LTFM",
+   "name": "Istanbul Airport",
+   "name_tr": "İstanbul Havalimanı",
+   "city": "Istanbul",
+   "country": "TR",
+   "lat": 41.262,
+   "lon": 28.742,
+   "tier": "hub"
+  },
+  {
+   "iata": "SAW",
+   "icao": "LTFJ",
+   "name": "Istanbul Sabiha Gökçen",
+   "name_tr": "İstanbul Sabiha Gökçen",
+   "city": "Istanbul",
+   "country": "TR",
+   "lat": 40.899,
+   "lon": 29.309,
+   "tier": "hub"
+  },
+  {
+   "iata": "SXZ",
+   "icao": "LTCM",
+   "name": "Siirt",
+   "name_tr": "Siirt",
+   "city": "Siirt",
+   "country": "TR",
+   "lat": 37.978,
+   "lon": 41.84,
+   "tier": "regional"
+  },
+  {
+   "iata": "TZX",
+   "icao": "LTCG",
+   "name": "Trabzon",
+   "name_tr": "Trabzon",
+   "city": "Trabzon",
+   "country": "TR",
+   "lat": 40.995,
+   "lon": 39.79,
+   "tier": "regional"
+  },
+  {
+   "iata": "VAN",
+   "icao": "LTCI",
+   "name": "Van Ferit Melen",
+   "name_tr": "Van Ferit Melen",
+   "city": "Van",
+   "country": "TR",
+   "lat": 38.468,
+   "lon": 43.332,
+   "tier": "regional"
+  },
+  {
+   "iata": "TPE",
+   "icao": "RCTP",
+   "name": "Taipei Taoyuan",
+   "name_tr": "Taipei Taoyuan",
+   "city": "Taipei",
+   "country": "TW",
+   "lat": 25.078,
+   "lon": 121.233,
+   "tier": "hub"
+  },
+  {
+   "iata": "DAR",
+   "icao": null,
+   "name": "Julius Nyerere International Airport",
+   "name_tr": "Julius Nyerere International Airport",
+   "city": "Dar Es Salaam",
+   "country": "TZ",
+   "lat": -6.8742,
+   "lon": 39.2075,
+   "tier": "regional"
+  },
+  {
+   "iata": "JRO",
+   "icao": null,
+   "name": "Kilimanjaro International Airport",
+   "name_tr": "Kilimanjaro International Airport",
+   "city": "Kilimanjaro",
+   "country": "TZ",
+   "lat": -3.4281,
+   "lon": 37.0763,
+   "tier": "regional"
+  },
+  {
+   "iata": "ZNZ",
+   "icao": null,
+   "name": "ABEID AMANI KARUME INTERNATIONAL AIRPORT",
+   "name_tr": "ABEID AMANI KARUME INTERNATIONAL AIRPORT",
+   "city": "Zanzibar",
+   "country": "TZ",
+   "lat": -6.2241,
+   "lon": 39.2241,
+   "tier": "regional"
+  },
+  {
+   "iata": "DNK",
+   "icao": "UKDD",
+   "name": "Dnipro",
+   "name_tr": "Dnipro",
+   "city": "Dnipro",
+   "country": "UA",
+   "lat": 48.357,
+   "lon": 35.1,
+   "tier": "regional"
+  },
+  {
+   "iata": "DOK",
+   "icao": null,
+   "name": "Donetsk Sergey Prokofiev International Airport",
+   "name_tr": "Donetsk Sergey Prokofiev International Airport",
+   "city": "Donetsk",
+   "country": "UA",
+   "lat": 48.0159,
+   "lon": 37.8013,
+   "tier": "regional"
+  },
+  {
+   "iata": "HRK",
+   "icao": "UKHH",
+   "name": "Kharkiv",
+   "name_tr": "Harkiv",
+   "city": "Kharkiv",
+   "country": "UA",
+   "lat": 49.925,
+   "lon": 36.29,
+   "tier": "regional"
+  },
+  {
+   "iata": "IEV",
+   "icao": "UKKK",
+   "name": "Kyiv Zhuliany",
+   "name_tr": "Kiev Juliani",
+   "city": "Kyiv",
+   "country": "UA",
+   "lat": 50.402,
+   "lon": 30.452,
+   "tier": "major"
+  },
+  {
+   "iata": "IFO",
+   "icao": null,
+   "name": "Ivano-Frankivsk International Airport",
+   "name_tr": "Ivano-Frankivsk International Airport",
+   "city": "Ivano Frankivsk",
+   "country": "UA",
+   "lat": 48.8888,
+   "lon": 24.6881,
+   "tier": "regional"
+  },
+  {
+   "iata": "KBP",
+   "icao": "UKBB",
+   "name": "Kyiv Boryspil",
+   "name_tr": "Kiev Boryspil",
+   "city": "Kyiv",
+   "country": "UA",
+   "lat": 50.345,
+   "lon": 30.895,
+   "tier": "hub"
+  },
+  {
+   "iata": "KHE",
+   "icao": null,
+   "name": "Kherson International Airport",
+   "name_tr": "Kherson International Airport",
+   "city": "Kherson",
+   "country": "UA",
+   "lat": 46.6764,
+   "lon": 32.5086,
+   "tier": "regional"
+  },
+  {
+   "iata": "LWO",
+   "icao": "UKLL",
+   "name": "Lviv Danylo Halytskyi",
+   "name_tr": "Lviv",
+   "city": "Lviv",
+   "country": "UA",
+   "lat": 49.813,
+   "lon": 23.956,
+   "tier": "major"
+  },
+  {
+   "iata": "ODS",
+   "icao": "UKOO",
+   "name": "Odesa",
+   "name_tr": "Odesa",
+   "city": "Odesa",
+   "country": "UA",
+   "lat": 46.427,
+   "lon": 30.677,
+   "tier": "major"
+  },
+  {
+   "iata": "OZH",
+   "icao": "UKDE",
+   "name": "Zaporizhzhia",
+   "name_tr": "Zaporijya",
+   "city": "Zaporizhzhia",
+   "country": "UA",
+   "lat": 47.867,
+   "lon": 35.316,
+   "tier": "regional"
+  },
+  {
+   "iata": "SIP",
+   "icao": "UKFF",
+   "name": "Simferopol",
+   "name_tr": "Simferopol",
+   "city": "Simferopol",
+   "country": "UA",
+   "lat": 45.052,
+   "lon": 33.975,
+   "tier": "regional"
+  },
+  {
+   "iata": "EBB",
+   "icao": null,
+   "name": "Entebbe International Airport",
+   "name_tr": "Entebbe International Airport",
+   "city": "Entebbe",
+   "country": "UG",
+   "lat": 0.0391,
+   "lon": 32.4541,
+   "tier": "regional"
+  },
+  {
+   "iata": "DFW",
+   "icao": null,
+   "name": "Dallas Fort Worth",
+   "name_tr": "Dallas Fort Worth",
+   "city": "Dallas",
+   "country": "US",
+   "lat": 32.7695,
+   "lon": -96.8303,
+   "tier": "regional"
+  },
+  {
+   "iata": "IAH",
+   "icao": null,
+   "name": "George Bush Intercontinental Airport",
+   "name_tr": "George Bush Intercontinental Airport",
+   "city": "Houston",
+   "country": "US",
+   "lat": 29.9841,
+   "lon": -95.333,
+   "tier": "regional"
+  },
+  {
+   "iata": "BHK",
+   "icao": null,
+   "name": "BUHARA Uluslararası Havalimanı",
+   "name_tr": "BUHARA Uluslararası Havalimanı",
+   "city": "Buhara",
+   "country": "UZ",
+   "lat": 39.7749,
+   "lon": 64.4814,
+   "tier": "regional"
+  },
+  {
+   "iata": "FEG",
+   "icao": null,
+   "name": "Fergana Uluslararası Havalimanı",
+   "name_tr": "Fergana Uluslararası Havalimanı",
+   "city": "Fergana",
+   "country": "UZ",
+   "lat": 40.3765,
+   "lon": 71.7913,
+   "tier": "regional"
+  },
+  {
+   "iata": "SKD",
+   "icao": null,
+   "name": "Samarkand International Airport",
+   "name_tr": "Samarkand International Airport",
+   "city": "Samarkand",
+   "country": "UZ",
+   "lat": 39.6989,
+   "lon": 66.9912,
+   "tier": "regional"
+  },
+  {
+   "iata": "TAS",
+   "icao": null,
+   "name": "Tashkent International Airport",
+   "name_tr": "Tashkent International Airport",
+   "city": "Tashkent",
+   "country": "UZ",
+   "lat": 41.26,
+   "lon": 69.2851,
+   "tier": "regional"
+  },
+  {
+   "iata": "UGC",
+   "icao": null,
+   "name": "Urgench International Airport",
+   "name_tr": "Urgench International Airport",
+   "city": "Urgench",
+   "country": "UZ",
+   "lat": 41.5811,
+   "lon": 60.6449,
+   "tier": "regional"
+  },
+  {
+   "iata": "CCS",
+   "icao": "SVMI",
+   "name": "Caracas Simón Bolívar",
+   "name_tr": "Karakas",
+   "city": "Caracas",
+   "country": "VE",
+   "lat": 10.601,
+   "lon": -66.991,
+   "tier": "major"
+  },
+  {
+   "iata": "HAN",
+   "icao": null,
+   "name": "N?i Bài International Airport",
+   "name_tr": "N?i Bài International Airport",
+   "city": "Hanoi",
+   "country": "VN",
+   "lat": 21.0283,
+   "lon": 105.854,
+   "tier": "regional"
+  },
+  {
+   "iata": "SGN",
+   "icao": null,
+   "name": "Tân S?n Nh?t International Airport",
+   "name_tr": "Tân S?n Nh?t International Airport",
+   "city": "Ho Chi Minh",
+   "country": "VN",
+   "lat": 10.7755,
+   "lon": 106.7021,
+   "tier": "regional"
+  },
+  {
+   "iata": "PRN",
+   "icao": null,
+   "name": "Pristina International Airport",
+   "name_tr": "Pristina International Airport",
+   "city": "Prishtina",
+   "country": "XK",
+   "lat": 42.5767,
+   "lon": 21.0324,
+   "tier": "regional"
+  },
+  {
+   "iata": "ADE",
+   "icao": "OYAA",
+   "name": "Aden",
+   "name_tr": "Aden",
+   "city": "Aden",
+   "country": "YE",
+   "lat": 12.83,
+   "lon": 45.029,
+   "tier": "regional"
+  },
+  {
+   "iata": "SAH",
+   "icao": "OYSN",
+   "name": "Sanaa",
+   "name_tr": "Sana",
+   "city": "Sanaa",
+   "country": "YE",
+   "lat": 15.476,
+   "lon": 44.22,
+   "tier": "regional"
+  },
+  {
+   "iata": "CPT",
+   "icao": null,
+   "name": "Cape Town International Airport",
+   "name_tr": "Cape Town International Airport",
+   "city": "Cape Town",
+   "country": "ZA",
+   "lat": -33.9718,
+   "lon": 18.6021,
+   "tier": "regional"
+  },
+  {
+   "iata": "DUR",
+   "icao": null,
+   "name": "King Shaka International Airport",
+   "name_tr": "King Shaka International Airport",
+   "city": "Durban",
+   "country": "ZA",
+   "lat": -29.8618,
+   "lon": 31.0099,
+   "tier": "regional"
+  },
+  {
+   "iata": "JNB",
+   "icao": null,
+   "name": "O. R. Tambo International Airport",
+   "name_tr": "O. R. Tambo International Airport",
+   "city": "Johannesburg",
+   "country": "ZA",
+   "lat": -26.135,
+   "lon": 28.227,
+   "tier": "regional"
+  },
+  {
+   "iata": "LUN",
+   "icao": null,
+   "name": "Kenneth Kaunda International Airport",
+   "name_tr": "Kenneth Kaunda International Airport",
+   "city": "Lusaka",
+   "country": "ZM",
+   "lat": -15.3302,
+   "lon": 28.4532,
+   "tier": "regional"
+  }
+ ]
+}

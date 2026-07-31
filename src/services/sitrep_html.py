@@ -329,10 +329,120 @@ def _aviation_section(clusters: List[Dict[str, Any]], top_n: int = 8) -> str:
     )
 
 
+def _airspace_card(item: Dict[str, Any]) -> str:
+    """One event's airspace exposure: containing FIR, restricted neighbours, and
+    the commercial airports around it."""
+    fir = item.get("fir") or {}
+    point = item.get("point") or {}
+    located = item.get("scope") == "point"
+
+    head = (
+        f'<div style="font-size:13px;font-weight:600;color:#e2e8f0">'
+        f'{_esc(item.get("location") or "Ülke Geneli")}'
+        f'<span style="color:#5b6b8a;font-weight:400"> · '
+        f'{_esc(_event_type_label(item.get("event_type") or ""))}</span></div>'
+    )
+    fir_line = (
+        f'<div style="margin-top:6px;font-size:13px;color:#cbd5e1">'
+        f'✈ Hava sahası: <b style="color:#93c5fd">{_esc(fir.get("name") or "—")}</b> '
+        f'<code style="color:#7db3ff">{_esc(fir.get("icao") or "")}</code>'
+        + ('<span style="margin-left:6px;padding:1px 8px;border-radius:99px;font-size:10px;'
+           'background:#3b1111;color:#fca5a5;border:1px solid #7f1d1d">EASA CZIB AKTİF</span>'
+           if fir.get("czib_active") else "")
+        + "</div>"
+    )
+
+    restricted = [n for n in (item.get("neighbor_firs") or []) if n.get("czib_active")]
+    others = [n for n in (item.get("neighbor_firs") or []) if not n.get("czib_active")]
+    neigh = ""
+    if restricted:
+        neigh += (
+            '<div style="margin-top:5px;font-size:12px;color:#fca5a5;line-height:1.6">'
+            "⚠ Aktif EASA CZIB kısıtlaması bulunan komşu hava sahaları: "
+            + _esc(", ".join(f"{n['name']} ({n['icao']})" for n in restricted[:4]))
+            + "</div>"
+        )
+    if others:
+        neigh += (
+            '<div style="margin-top:4px;font-size:11px;color:#5b6b8a;line-height:1.6">'
+            "Diğer komşu hava sahaları: "
+            + _esc(", ".join(n["icao"] for n in others[:8]))
+            + "</div>"
+        )
+
+    airports = item.get("airports") or []
+    if airports and located:
+        rows = "".join(
+            f'<div style="display:flex;justify-content:space-between;gap:10px;'
+            f'padding:3px 0;font-size:12px;color:#cbd5e1">'
+            f'<span><code style="color:#7db3ff">{_esc(a["iata"])}</code> '
+            f'{_esc(a["name"])}<span style="color:#5b6b8a"> · {_esc(a["country"])}</span></span>'
+            f'<span style="color:#8b9cb8;white-space:nowrap">{a["distance_km"]} km</span></div>'
+            for a in airports
+        )
+        title = f'{item.get("radius_km")} km yarıçapındaki ticari havalimanları'
+    elif airports:
+        rows = "".join(
+            f'<div style="padding:3px 0;font-size:12px;color:#cbd5e1">'
+            f'<code style="color:#7db3ff">{_esc(a["iata"])}</code> {_esc(a["name"])}</div>'
+            for a in airports
+        )
+        title = "Ülkenin başlıca ticari havalimanları"
+    else:
+        rows, title = "", ""
+
+    ap_block = (
+        f'<div style="margin-top:8px;font-size:11px;color:#5b6b8a;'
+        f'text-transform:uppercase;letter-spacing:.8px">{_esc(title)}</div>{rows}'
+    ) if rows else ""
+
+    precision = ""
+    if located and point.get("source") != "event":
+        precision = (
+            '<div style="margin-top:6px;font-size:10px;color:#5b6b8a">'
+            "Konum, olay metnindeki yer adından çözümlendi (şehir merkezi baz alınmıştır)."
+            "</div>"
+        )
+
+    return (
+        f'<div style="border:1px solid #1e293b;border-radius:10px;padding:12px;'
+        f'margin-top:10px;background:#0d1526">'
+        f"{head}{fir_line}{neigh}{ap_block}{precision}</div>"
+    )
+
+
+def _airspace_section(airspace: Optional[Dict[str, Any]]) -> str:
+    """Deterministic airspace-exposure block.
+
+    Computed from the event's coordinates against a static FIR/airport reference
+    (src/core/airspace.py), so it cannot be dropped by the narrative or invented
+    by it. Framed explicitly as proximity: confirmed closures live in the
+    aviation-disruption block above, which is sourced from reporting.
+    """
+    items = (airspace or {}).get("assessments") or []
+    if not items:
+        return ""
+    return (
+        _section_header("HAVA SAHASI ETKİ ANALİZİ", "✈")
+        + '<div style="font-size:11px;color:#5b6b8a;margin:6px 0 2px;line-height:1.6">'
+        "Olayların konumu ile hava sahası yapısının sistem tarafından hesaplanan "
+        "yakınlık analizi: olayın içinde gerçekleştiği FIR, komşu hava sahaları ve "
+        "yarıçap içindeki ticari havalimanları.</div>"
+        + "".join(_airspace_card(i) for i in items)
+        + '<div style="margin-top:10px;font-size:11px;color:#5b6b8a;line-height:1.6;'
+        'border-left:2px solid #1e293b;padding-left:10px">'
+        "<b>Not:</b> Bu blok coğrafi yakınlık analizidir; teyit edilmiş bir hava "
+        "sahası veya havalimanı kapanış bildirimi DEĞİLDİR. Fiilen gerçekleşen uçuş "
+        "kesintileri, kaynağa dayalı olarak raporun havacılık bölümlerinde yer alır. "
+        "EASA CZIB etiketleri ise resmî ve yürürlükteki uyarılardır.</div>"
+    )
+
+
 def render_sitrep_html(country_name: str, country_iso: str,
                        window_start: str, window_end: str,
                        report_text: str, clusters: List[Dict[str, Any]],
-                       aviation_clusters: Optional[List[Dict[str, Any]]] = None) -> str:
+                       aviation_clusters: Optional[List[Dict[str, Any]]] = None,
+                       airspace: Optional[Dict[str, Any]] = None) -> str:
     """Self-contained mobile-first HTML for the SITREP."""
     counts = {LABEL_OFFICIAL: 0, LABEL_MULTI: 0, LABEL_SINGLE: 0}
     for c in clusters:
@@ -413,6 +523,8 @@ def render_sitrep_html(country_name: str, country_iso: str,
 {_highlights(clusters)}
 
 {_aviation_section(aviation_clusters or [])}
+
+{_airspace_section(airspace)}
 
 {"".join(body_parts)}
 
