@@ -18,6 +18,7 @@ from src.services.czib_client import fetch_active_czib_by_country
 from src.services.sitrep_generator import (
     WINDOW_HOURS,
     build_sitrep_clusters,
+    drop_safety_clusters,
     fetch_aviation_spillover_events,
     fetch_penalized_domains,
     fetch_sitrep_events,
@@ -73,7 +74,12 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     events = fetch_sitrep_events(db_conn, country_iso, window_start, window_end)
     penalized = fetch_penalized_domains(db_conn)
     clusters = build_sitrep_clusters(events, penalized)
-    field, strategic = split_strategic(clusters)
+    # The narrative covers SECURITY events; technical/safety occurrences (a
+    # diverted flight, a bird strike) are excluded by the prompt's own rule and
+    # the model still wrote them up as report bullets on 1 Aug. Enforce it here
+    # instead of asking again. They stay in `clusters`, so the appendix log and
+    # the stat cards remain a complete record of the day.
+    field, strategic = split_strategic(drop_safety_clusters(clusters))
     spillover_events = fetch_spillover_events(db_conn, country_iso, country_name,
                                               window_start, window_end)
     spillover = build_sitrep_clusters(spillover_events, penalized) if spillover_events else []

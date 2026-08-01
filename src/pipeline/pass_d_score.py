@@ -574,7 +574,8 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, country_iso,
                       llm_parsed_output, storyline_hint, occurred_at_est,
-                      source_title, source_url, ingested_at, source_domain
+                      source_title, source_url, ingested_at, source_domain,
+                      published_at
                FROM events WHERE id = %s AND status = 'classified'""",
             (event_id,),
         ).fetchone()
@@ -589,8 +590,13 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         elif llm_parsed is None:
             llm_parsed = {}
 
-        # Fallback occurred_at_est to ingested_at if LLM couldn't determine a date
-        occurred_at_est = row[6] if row[6] else row[9]
+        # When the classifier could not date the incident, fall back to the
+        # ARTICLE's own timestamp before the ingest time. Ingest time is when we
+        # happened to read the feed, which is a different thing entirely: a
+        # Stars & Stripes report published 30 Jul was picked up on 1 Aug and
+        # every downstream consumer — SITREP bullet dates, storyline windows,
+        # flash detection — treated the strike as having happened on 1 Aug.
+        occurred_at_est = row[6] or row[11] or row[9]
 
         event = {
             "id": str(row[0]),

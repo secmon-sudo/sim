@@ -219,7 +219,9 @@
     "iata": "LUX",
     "country": "LU",
     "czib": false,
-    "aliases": ["Findel"]
+    "aliases": [
+      "Findel"
+    ]
   },
   {
     "name": "Riga International Airport",
@@ -1449,8 +1451,8 @@
     "name": "Borg El Arab Int. Airport",
     "type": "Airport",
     "city": "ALEXANDRIA",
-    "lat": 44.8349534,
-    "lon": 8.7450304,
+    "lat": 30.9177,
+    "lon": 29.6964,
     "iata": "HBE",
     "country": "EG",
     "czib": false,
@@ -1809,8 +1811,8 @@
     "name": "Athens International Airport",
     "type": "Airport",
     "city": "ATHENS",
-    "lat": 33.9597677,
-    "lon": -83.376398,
+    "lat": 37.9364,
+    "lon": 23.9445,
     "iata": "ATH",
     "country": "GR",
     "czib": false,
@@ -2482,8 +2484,8 @@
     "name": "Birmingham Airport",
     "type": "Airport",
     "city": "BIRMINGHAM",
-    "lat": 33.5646818,
-    "lon": -86.7504578,
+    "lat": 52.4539,
+    "lon": -1.748,
     "iata": "BHX",
     "country": "GB",
     "czib": false,
@@ -3367,8 +3369,8 @@
     "name": "Brussels Airport",
     "type": "Airport",
     "city": "BRUSSELS",
-    "lat": 43.7490496,
-    "lon": -81.2372654,
+    "lat": 50.9014,
+    "lon": 4.4844,
     "iata": "BRU",
     "country": "BE",
     "czib": false,
@@ -3599,7 +3601,10 @@
     "iata": "BSL",
     "country": "CH",
     "czib": false,
-    "aliases": ["Mulhouse", "Freiburg"]
+    "aliases": [
+      "Mulhouse",
+      "Freiburg"
+    ]
   },
   {
     "name": "Basel Airport Hotel",
@@ -3973,8 +3978,8 @@
     "name": "SANTIAGO AIRPORT",
     "type": "Airport",
     "city": "SANTIAGO",
-    "lat": -29.2156385,
-    "lon": -54.8406006,
+    "lat": -33.393,
+    "lon": -70.7858,
     "iata": "SCL",
     "country": "CL",
     "czib": false,
@@ -4191,7 +4196,7 @@
     "name": "Hyatt Centric Buckhead Atlanta",
     "type": "Hotel",
     "city": "ATLANTA",
-    "lat": 33.838230,
+    "lat": 33.83823,
     "lon": -84.377289
   },
   {
@@ -4234,8 +4239,8 @@
     "name": "Tocumen International Airport",
     "type": "Airport",
     "city": "PANAMA CITY",
-    "lat": 30.1586518,
-    "lon": -85.6602936,
+    "lat": 9.0714,
+    "lon": -79.3835,
     "iata": "PTY",
     "country": "PA",
     "czib": false,

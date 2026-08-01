@@ -94,6 +94,16 @@ AIRSPACE_THREAT_EVENT_TYPES = {
     "air_traffic_controller_threat",
     "aviation_personnel_attack",
     "mass_casualty_event",
+    # Hostile acts against people in a city rather than against airspace. They
+    # earn a card for the other half of what this block answers: an airline's
+    # crew and passengers are on the ground there, and "SEA is 17 km away" is
+    # the operationally useful fact. Without them a US day produced one
+    # country-wide card and nothing locatable.
+    "mass_shooting",
+    "active_shooter",
+    "mass_stabbing",
+    "vehicle_ramming",
+    "bomb_threat",
 }
 # Deliberately NOT here: emergency_landing, bird_strike, engine_failure,
 # depressurization, fire_on_board, runway_incursion. Those are technical/safety

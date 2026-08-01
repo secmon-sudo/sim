@@ -15,28 +15,36 @@ from src.services.sitrep_digest import (
 )
 
 
-def country(iso, status="completed", severities=(50,), text="rapor metni"):
+def country(iso, status="completed", severities=(50,), text="rapor metni",
+            verification=None):
     return {
         "country_iso": iso,
         "country_name": f"Ülke-{iso}",
         "status": status,
         "report_text": text if status == "completed" else None,
-        "clusters": [{"severity": s} for s in severities],
+        "clusters": [{"severity": s, "verification": verification} for s in severities],
     }
 
 
 class TestComputeRiskLevel:
-    def test_critical_on_severity_alone(self):
-        assert compute_risk_level(90, 1) == RISK_CRITICAL
-        assert compute_risk_level(97, 1) == RISK_CRITICAL
+    """Run #22 (1 Aug 2026): all five countries came out Kritik, because country
+    selection picks BY severity and a single unverified 100 was enough. The tier
+    now turns on CORROBORATED severe volume, so the scale can vary again."""
 
-    def test_critical_on_high_severity_plus_volume(self):
-        assert compute_risk_level(82, 8) == RISK_CRITICAL
-        assert compute_risk_level(82, 7) == RISK_HIGH
+    def test_unverified_severity_alone_is_not_critical(self):
+        assert compute_risk_level(90, 1, confirmed_severe=0) == RISK_HIGH
+        assert compute_risk_level(100, 3, confirmed_severe=0) == RISK_HIGH
+
+    def test_corroborated_severe_volume_is_critical(self):
+        assert compute_risk_level(95, 5, confirmed_severe=3) == RISK_CRITICAL
+        assert compute_risk_level(95, 10, confirmed_severe=2) == RISK_CRITICAL
+        assert compute_risk_level(95, 9, confirmed_severe=2) == RISK_HIGH
+        assert compute_risk_level(95, 20, confirmed_severe=1) == RISK_HIGH
 
     def test_bands(self):
-        assert compute_risk_level(80, 1) == RISK_HIGH
-        assert compute_risk_level(60, 3) == RISK_ELEVATED
+        assert compute_risk_level(80, 1) == RISK_ELEVATED
+        assert compute_risk_level(65, 5) == RISK_ELEVATED
+        assert compute_risk_level(65, 4) == RISK_NORMAL
         assert compute_risk_level(59, 20) == RISK_NORMAL
         assert compute_risk_level(0, 0) == RISK_NORMAL
 
@@ -143,7 +151,7 @@ class TestBuildDigest:
         )
         d = build_digest(None, [country("IR", severities=(95,)), country("BH")], "s", "e")
         assert [c["iso"] for c in d["countries"]] == ["IR", "BH"]
-        assert d["countries"][0]["risk"] == RISK_CRITICAL
+        assert d["countries"][0]["risk"] == RISK_HIGH
         assert d["countries"][1]["text"]  # placeholder, not empty
 
     def test_risk_levels_come_from_severity_not_llm(self, monkeypatch):
@@ -153,7 +161,8 @@ class TestBuildDigest:
                                          "- IR | Sakin bir gün yaşandı.\n- BH | Kritik durum.\n",
                               "provider": "p", "model": "m"},
         )
-        d = build_digest(None, [country("IR", severities=(95,)),
+        d = build_digest(None, [country("IR", severities=(95, 95, 95),
+                                        verification="Onaylandı (Çoklu kaynak)"),
                                 country("BH", severities=(10,))], "s", "e")
         by_iso = {c["iso"]: c["risk"] for c in d["countries"]}
         assert by_iso == {"IR": RISK_CRITICAL, "BH": RISK_NORMAL}

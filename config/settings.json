@@ -226,6 +226,7 @@
     "airspace_enabled": true,
     "airspace_radius_km": 300,
     "airspace_max_clusters": 5,
-    "airspace_max_airports": 6
+    "airspace_max_airports": 6,
+    "exclude_safety_events": true
   }
 }

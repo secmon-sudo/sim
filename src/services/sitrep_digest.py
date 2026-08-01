@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from src.core.airspace import summarize_assessment
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
+from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ RISK_NORMAL = "Normal"
 
 RISK_ORDER = {RISK_CRITICAL: 3, RISK_HIGH: 2, RISK_ELEVATED: 1, RISK_NORMAL: 0}
 
+# Severity at which a cluster counts as "severe" for risk tiering.
+SEVERE_SEVERITY = 90
+
 # Digest section headers, in render order. The prompt emits exactly these lines.
 H_OVERVIEW = "GENEL DURUM DEĞERLENDİRMESİ"
 H_COUNTRIES = "ÜLKE DEĞERLENDİRMELERİ"
@@ -45,17 +49,26 @@ DIGEST_SECTIONS = [H_OVERVIEW, H_COUNTRIES, H_AVIATION, H_HIGHLIGHTS, H_WATCH]
 _EMPTY_MARKERS = {"yok", "veri yok", "bulunmuyor", "-"}
 
 
-def compute_risk_level(max_severity: int, cluster_count: int) -> str:
+def compute_risk_level(max_severity: int, cluster_count: int,
+                       confirmed_severe: int = 0) -> str:
     """
     Deterministic per-country risk level. Kept out of the LLM's hands: the same
     day's data must always produce the same level, and a narrative model asked to
     grade its own report drifts between runs.
+
+    `confirmed_severe` is how many of the country's clusters are BOTH severe
+    (>= SEVERE_SEVERITY) and corroborated (official or multi-source). A single
+    unverified 100-severity item used to be enough for "Kritik", and since the
+    country auto-selection picks countries BY severity, every country in every
+    digest came out Kritik — a scale that never varies carries no information.
+    Corroborated volume is what separates a country at war from a country with
+    one loud single-source headline.
     """
-    if max_severity >= 90 or (max_severity >= 80 and cluster_count >= 8):
+    if confirmed_severe >= 3 or (confirmed_severe >= 2 and cluster_count >= 10):
         return RISK_CRITICAL
-    if max_severity >= 80:
+    if confirmed_severe >= 1 or max_severity >= 90:
         return RISK_HIGH
-    if max_severity >= 60:
+    if max_severity >= 70 or (max_severity >= 60 and cluster_count >= 5):
         return RISK_ELEVATED
     return RISK_NORMAL
 
@@ -72,10 +85,15 @@ def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str,
             continue
         clusters = res.get("clusters") or []
         max_sev = max((c.get("severity") or 0 for c in clusters), default=0)
+        confirmed_severe = sum(
+            1 for c in clusters
+            if (c.get("severity") or 0) >= SEVERE_SEVERITY
+            and c.get("verification") in (LABEL_OFFICIAL, LABEL_MULTI)
+        )
         rows.append({
             "iso": res["country_iso"],
             "name": res.get("country_name") or res["country_iso"],
-            "risk": compute_risk_level(max_sev, len(clusters)),
+            "risk": compute_risk_level(max_sev, len(clusters), confirmed_severe),
             "max_severity": max_sev,
             "cluster_count": len(clusters),
             "report_text": res["report_text"][:MAX_REPORT_CHARS],
