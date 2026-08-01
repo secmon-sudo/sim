@@ -390,6 +390,12 @@ _SYSTEM_PROMPT = (
     "  • [tarih] Olayın anlatımı (snippet ve varsa web_context alanındaki teyitli detayları "
     "— vurulan tesis, resmi açıklama, can kaybı — akıcı bir paragrafa dönüştür) — "
     "Doğruluk Durumu: <verification alanı BİREBİR> — Kaynak: <name> (<url>)\n"
+    "- ATIF BİÇİMİ (kaynak künyesi buradan üretiliyor, birebir uy): her kaynak "
+    "'Yayın Adı (https://...)' kalıbında, URL parantez İÇİNDE ve parantez KAPATILMIŞ "
+    "olacak. Birden çok kaynağı virgülle ayır: 'Kaynak: Reuters (https://a), AP "
+    "(https://b)'. Markdown bağlantı sözdizimi ([metin](url), [url], [link]) KULLANMA. "
+    "Yayının adını yaz ('Kyiv Independent'), çıplak alan adını değil "
+    "('kyivindependent.com'); yayın adlarını Türkçeye ÇEVİRME.\n"
     "Rapor doyurucu olsun: önemli olayları tek cümleyle geçiştirme; bağlamı, resmi "
     "açıklamaları ve operasyonel etkiyi anlat. Ama dolgu cümle ve tekrar da yok.\n"
     "KAPSAM: Verilen olay kümelerinin TAMAMINI işle — bu günlük ülke künyesidir, seçki "
@@ -472,6 +478,8 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
 # "Onaylandı (Çoklu kaynak, ancak detaylar doğrulanmamış)".
 _LABEL_SPAN_RE = re.compile(r"\s*(?:Onaylandı|Doğrulanmamış)\s*\([^)]*\)")
 _SOURCE_SEP_RE = re.compile(r"\s+[—–-]{1,2}\s+")
+# Sentence punctuation that can ride along on a bare-URL match.
+_URL_TRAILING_PUNCT = ".,);]"
 
 
 def _canonical_label_for(tail: str) -> str:
@@ -526,8 +534,15 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
     allowed = {u.strip() for u in allowed_urls if u}
 
     def _replace_unknown(match: "re.Match[str]") -> str:
-        url = match.group(0).rstrip(".,);]")
-        return url if url in allowed else "[kaynak listede]"
+        raw = match.group(0)
+        url = raw.rstrip(_URL_TRAILING_PUNCT)
+        # The trailing punctuation is NOT part of the URL, but it is part of the
+        # sentence: the closing paren of "Kaynak: Reuters (https://…)" is what the
+        # HTML renderer keys on to build source chips. Stripping it for the
+        # allowlist check and then dropping it cost every report its per-bullet
+        # attribution — the chips silently never rendered.
+        trailing = raw[len(url):]
+        return (url if url in allowed else "[kaynak listede]") + trailing
     text = re.sub(r"https?://\S+", _replace_unknown, text)
 
     return "\n".join(

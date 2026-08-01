@@ -71,3 +71,40 @@ class TestVerificationLabelNormalization:
         out = validate_sitrep(_HDR + "Bkz http://evil.example/x", [])
         assert "evil.example" not in out
         assert "[kaynak listede]" in out
+
+
+class TestCitationPunctuation:
+    """The URL allowlist pass used to strip the punctuation that followed a URL,
+    which deleted the closing paren of every "Kaynak: Ad (url)" citation. The
+    HTML renderer keys on that paren, so it silently dropped the source chips
+    from every bullet of every SITREP for a week before anyone saw it."""
+
+    def test_closing_paren_survives_the_allowlist_pass(self):
+        line = (_HDR + "— Olay. Kaynak: Reuters (https://r.example/a),"
+                " AP (https://ap.example/b).")
+        out = validate_sitrep(line, ["https://r.example/a", "https://ap.example/b"])
+        assert "Reuters (https://r.example/a)" in out
+        assert "AP (https://ap.example/b)." in out
+
+    def test_masked_url_keeps_its_punctuation_too(self):
+        out = validate_sitrep(_HDR + "— Olay. Kaynak: X (https://nope.example/a).", [])
+        assert "X ([kaynak listede])." in out
+
+    def test_sources_reach_the_rendered_html(self):
+        from src.services.sitrep_html import _render_bullet, _strip_md
+        line = _HDR + (
+            "• **2026-08-01** Olay — Doğruluk Durumu: Onaylandı (Çoklu kaynak)"
+            " — Kaynak: Reuters (https://r.example/a), AP (https://ap.example/b)")
+        out = validate_sitrep(line, ["https://r.example/a", "https://ap.example/b"])
+        html = _render_bullet(_strip_md(out.splitlines()[-1]))
+        assert "https://r.example/a" in html and "https://ap.example/b" in html
+        assert "2026-08-01" in html
+
+    def test_markdown_link_scaffolding_still_yields_sources(self):
+        """Some models wrap the URL as "IRNA ([url](https://…))"; the renderer
+        unwraps it rather than losing the attribution."""
+        from src.services.sitrep_html import _render_bullet, _strip_md
+        line = "• Olay — Kaynak: IRNA English ([url](https://irna.example/z))"
+        html = _render_bullet(_strip_md(line))
+        assert "https://irna.example/z" in html
+        assert "IRNA English" in html

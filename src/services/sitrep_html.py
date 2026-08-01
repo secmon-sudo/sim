@@ -19,6 +19,7 @@ import html as _html
 import re
 from typing import Any, Dict, List, Optional
 
+from src.core.airspace import COUNTRY_FIR_LIST_LIMIT
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL, LABEL_SINGLE
 
 _BADGE_STYLES = {
@@ -74,9 +75,18 @@ _EVENT_TYPE_TR = {
     "unclassified": "Sınıflandırılmamış",
 }
 
-_SOURCE_RE = re.compile(r"([\w][\w .\-]{1,60}?)\s*\((https?://[^)\s]+)\)")
+# The closing paren is optional: a model that writes "Reuters (https://x" still
+# gets its source chip rather than losing attribution to a formatting slip.
+_SOURCE_RE = re.compile(r"([\w][\w .\-]{1,60}?)\s*\((https?://[^)\s]+)\)?")
 _URL_RE = re.compile(r"(https?://[^\s<]+)")
-_DATE_PREFIX_RE = re.compile(r"^\[?([^\]—]{4,60}?)\]\s*")
+# "[31 Temmuz]" (the prompt's template) or a bare leading date the model wrote
+# instead — "2026-07-31", "2026-07-31 / 2026-08-01", "31 Temmuz, saat belirsiz".
+_DATE_PREFIX_RE = re.compile(
+    r"^\[?([^\]—]{4,60}?)\]\s*"
+    r"|^(\d{4}-\d{2}-\d{2}(?:\s*/\s*\d{4}-\d{2}-\d{2})?)\s+"
+    r"|^(\d{1,2}\s+(?:Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|"
+    r"Ekim|Kasım|Aralık)(?:\s+\d{4})?(?:,\s*saat belirsiz)?)\s*[–—-]?\s*"
+)
 
 _EXEC_HEADER = "YÖNETİCİ ÖZETİ"
 
@@ -87,7 +97,12 @@ def _esc(text: str) -> str:
 
 def _strip_md(line: str) -> str:
     """Drop markdown bold/italic markers the model sometimes adds."""
-    return re.sub(r"\*{1,3}([^*]*)\*{1,3}", r"\1", line).strip()
+    line = re.sub(r"\*{1,3}([^*]*)\*{1,3}", r"\1", line)
+    # Markdown link scaffolding around a citation URL — "Reuters ([url](https://x))"
+    # — hides the plain "Name (url)" shape the source parser needs. Unwrap it to
+    # the bare URL instead of losing the source.
+    line = re.sub(r"\[[^\]]*\]\((https?://[^)\s]+)\)?", r"\1", line)
+    return line.strip()
 
 
 def _event_type_label(code: str) -> str:
@@ -159,10 +174,11 @@ def _render_bullet(line: str) -> str:
 
     date_chip = ""
     m = _DATE_PREFIX_RE.match(body)
-    if m and any(ch.isdigit() for ch in m.group(1)):
+    matched_date = next((g for g in (m.groups() if m else ()) if g), None)
+    if matched_date and any(ch.isdigit() for ch in matched_date):
         date_chip = (
             f'<span style="color:#8b9cb8;font-size:12px;font-weight:600">'
-            f'{_esc(m.group(1).strip())}</span> '
+            f'{_esc(matched_date.strip())}</span> '
         )
         body = body[m.end():].strip(" —-–")
 
@@ -357,10 +373,14 @@ def _airspace_card(item: Dict[str, Any]) -> str:
                     f'✈ Hava sahası: {_fir_chip(fir)}</div>')
     else:
         # Unplaced event in a multi-FIR country: naming one would be a guess.
+        # Restricted FIRs sort first upstream, so a truncated tail drops only
+        # unrestricted codes — the US alone would otherwise print 23 ARTCCs.
+        rest = len(firs) - COUNTRY_FIR_LIST_LIMIT
         fir_line = (
             '<div style="margin-top:6px;font-size:13px;color:#cbd5e1">'
             f'✈ Ülkenin hava sahaları ({len(firs)}): '
-            + " · ".join(_fir_chip(f) for f in firs)
+            + " · ".join(_fir_chip(f) for f in firs[:COUNTRY_FIR_LIST_LIMIT])
+            + (f" · +{rest} FIR" if rest > 0 else "")
             + '</div><div style="margin-top:3px;font-size:10px;color:#5b6b8a">'
             "Olay tam olarak konumlandırılamadığı için tek bir FIR belirtilmemiştir.</div>"
         )

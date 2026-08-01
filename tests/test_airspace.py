@@ -79,6 +79,22 @@ class TestDatasetIntegrity:
             assert -90 <= ap["lat"] <= 90 and -180 <= ap["lon"] <= 180, ap["iata"]
             assert ap["tier"] in {"hub", "major", "regional"}, ap["iata"]
 
+    # Airports whose coordinates are correct but whose FIR box belongs to a
+    # neighbour: the boxes are rectangles over irregular borders, and Luxembourg
+    # genuinely sits inside Brussels FIR. Everything else landing abroad is a
+    # bad coordinate (this caught Alexandria stored in Italy and Santiago in
+    # Brazil, both of which the "inside SOME fir" check happily accepted).
+    _FOREIGN_FIR_OK = {"OUA", "COO", "SXB", "LUX", "UET", "ASF", "OVB", "PRN"}
+
+    def test_airport_lands_in_a_fir_of_its_own_country(self):
+        for ap in AIRPORTS:
+            if ap["iata"] in self._FOREIGN_FIR_OK:
+                continue
+            fir = fir_for_point(ap["lat"], ap["lon"], ap["country"])
+            assert ap["country"] in fir["countries"], (
+                f"{ap['iata']} ({ap['country']}) resolved to {fir['icao']} "
+                f"{fir['countries']} — check its coordinates")
+
 
 class TestFirResolution:
     @pytest.mark.parametrize("lat,lon,iso,expected", [
@@ -90,6 +106,11 @@ class TestFirResolution:
         (39.9334, 32.8597, "TR", "LTAA"),   # Ankara
         (33.8938, 35.5018, "LB", "OLBB"),   # Beirut
         (55.7558, 37.6173, "RU", "UUWV"),   # Moscow
+        (47.6038, -122.3301, "US", "KZSE"),  # Seattle — US FIRs are the ARTCCs
+        (40.6413, -73.7781, "US", "KZNY"),   # JFK
+        (33.6407, -84.4277, "US", "KZTL"),   # Atlanta
+        (29.9902, -95.3368, "US", "KZHU"),   # Houston
+        (44.8074, -68.8281, "US", "KZBW"),   # Bangor
     ])
     def test_known_cities_resolve(self, lat, lon, iso, expected):
         assert fir_for_point(lat, lon, iso)["icao"] == expected
@@ -103,7 +124,8 @@ class TestFirResolution:
         assert fir_for_point(lat, lon, "UA")["icao"] == "UKLV"
 
     def test_point_outside_reference_footprint_returns_none(self):
-        assert fir_for_point(41.88, -87.63, "US") is None  # Chicago, no US FIRs
+        # Mid-South-Pacific: the reference covers no oceanic FIR there.
+        assert fir_for_point(-40.0, -140.0, "PF") is None
 
     def test_firs_for_country_handles_multi_state_firs(self):
         """Dakar FIR covers Mali; a FIR is not a country."""
@@ -236,7 +258,9 @@ class TestAssessment:
         assert [f["icao"] for f in out["firs"]] == ["VIDF"]  # Kashmir → Delhi FIR
 
     def test_unknown_country_yields_nothing(self):
-        cluster = {"location": "Somewhere", "country_iso": "US",
+        # Canada carries no FIR record, so an unplaceable Canadian event has no
+        # airspace to fall back to.
+        cluster = {"location": "Somewhere", "country_iso": "CA",
                    "event_type": "military_action"}
         assert assess_cluster(cluster, CZIB) is None
 

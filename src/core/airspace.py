@@ -65,6 +65,8 @@ AIRSPACE_ENABLED = bool(_SITREP_CFG.get("airspace_enabled", True))
 AIRSPACE_RADIUS_KM = float(_SITREP_CFG.get("airspace_radius_km", 300))
 AIRSPACE_MAX_CLUSTERS = int(_SITREP_CFG.get("airspace_max_clusters", 5))
 AIRSPACE_MAX_AIRPORTS = int(_SITREP_CFG.get("airspace_max_airports", 6))
+# How many of a country's FIRs to name when an event could not be placed.
+COUNTRY_FIR_LIST_LIMIT = int(_SITREP_CFG.get("airspace_country_fir_limit", 8))
 
 # Event types whose geography plausibly bears on airspace: anything that puts
 # ordnance, drones or debris in the air, plus the aviation-specific codes. A
@@ -77,16 +79,26 @@ AIRSPACE_THREAT_EVENT_TYPES = {
     "drone_energy_attack",
     "drone_military_base_attack",
     "drone_port_attack",
+    "drone_incursion",
     "missile_strike",
     "military_action",
     "war_escalation",
     "ceasefire_violation",
     "geopolitical_conflict",
     "insurgency_attack",
+    "terrorism",
+    "jihadist_attack",
+    "extremist_violence",
+    "suicide_bombing",
+    "hijacking",
     "air_traffic_controller_threat",
     "aviation_personnel_attack",
     "mass_casualty_event",
 }
+# Deliberately NOT here: emergency_landing, bird_strike, engine_failure,
+# depressurization, fire_on_board, runway_incursion. Those are technical/safety
+# occurrences, which the SITREP prompt already excludes from the narrative — an
+# airspace card on a diverted flight would contradict the report around it.
 
 
 def _bbox_area(fir: Dict[str, Any]) -> float:
@@ -417,7 +429,12 @@ def summarize_assessment(assessment: Optional[Dict[str, Any]]) -> str:
     fir = first["fir"]
     firs = first.get("firs") or [fir]
     if first.get("scope") == "country" and len(firs) > 1:
-        parts = ["ülkenin hava sahaları: " + ", ".join(f["icao"] for f in firs)]
+        # Restricted FIRs sort first, so the truncated tail is the uninformative
+        # part — a US event would otherwise dump 23 ARTCC codes into one line.
+        shown = ", ".join(f["icao"] for f in firs[:COUNTRY_FIR_LIST_LIMIT])
+        rest = len(firs) - COUNTRY_FIR_LIST_LIMIT
+        tail = f" ve {rest} diğer FIR" if rest > 0 else ""
+        parts = ["ülkenin hava sahaları: " + shown + tail]
     else:
         parts = [f"{fir['name']} ({fir['icao']})"]
 

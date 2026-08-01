@@ -1,5 +1,5 @@
 {
- "version": "2026-07-31",
+ "version": "2026-08-01",
  "note": "FIR bbox extents are approximate (~0.1 deg) and airport tiers are editorial. Used for proximity analysis only, never for navigation.",
  "firs": [
   {
@@ -950,6 +950,404 @@
     "HJJJ",
     "HKNA",
     "HTDC"
+   ]
+  },
+  {
+   "icao": "KZAB",
+   "name": "Albuquerque ARTCC",
+   "name_tr": "Albuquerque FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    30.0,
+    -114.5,
+    37.5,
+    -101.0
+   ],
+   "neighbors": [
+    "KZDV",
+    "KZFW",
+    "KZKC",
+    "KZLA",
+    "KZLC"
+   ]
+  },
+  {
+   "icao": "KZAU",
+   "name": "Chicago ARTCC",
+   "name_tr": "Chicago FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    39.5,
+    -92.0,
+    45.0,
+    -84.5
+   ],
+   "neighbors": [
+    "KZID",
+    "KZKC",
+    "KZMP",
+    "KZOB"
+   ]
+  },
+  {
+   "icao": "KZBW",
+   "name": "Boston ARTCC",
+   "name_tr": "Boston FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    40.5,
+    -73.5,
+    47.5,
+    -66.5
+   ],
+   "neighbors": [
+    "KZNY"
+   ]
+  },
+  {
+   "icao": "KZDC",
+   "name": "Washington ARTCC",
+   "name_tr": "Washington FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    35.5,
+    -83.0,
+    40.5,
+    -74.5
+   ],
+   "neighbors": [
+    "KZID",
+    "KZNY",
+    "KZOB",
+    "KZTL"
+   ]
+  },
+  {
+   "icao": "KZDV",
+   "name": "Denver ARTCC",
+   "name_tr": "Denver FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    36.0,
+    -110.5,
+    45.5,
+    -101.5
+   ],
+   "neighbors": [
+    "KZAB",
+    "KZFW",
+    "KZKC",
+    "KZLC",
+    "KZMP",
+    "KZSE"
+   ]
+  },
+  {
+   "icao": "KZFW",
+   "name": "Fort Worth ARTCC",
+   "name_tr": "Fort Worth FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    31.0,
+    -102.5,
+    36.5,
+    -94.0
+   ],
+   "neighbors": [
+    "KZAB",
+    "KZDV",
+    "KZHU",
+    "KZKC",
+    "KZME"
+   ]
+  },
+  {
+   "icao": "KZHU",
+   "name": "Houston ARTCC",
+   "name_tr": "Houston FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    25.5,
+    -98.5,
+    32.0,
+    -88.5
+   ],
+   "neighbors": [
+    "KZFW",
+    "KZME",
+    "KZTL"
+   ]
+  },
+  {
+   "icao": "KZID",
+   "name": "Indianapolis ARTCC",
+   "name_tr": "Indianapolis FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    36.5,
+    -89.0,
+    41.5,
+    -83.0
+   ],
+   "neighbors": [
+    "KZAU",
+    "KZDC",
+    "KZKC",
+    "KZME",
+    "KZMP",
+    "KZOB",
+    "KZTL"
+   ]
+  },
+  {
+   "icao": "KZJX",
+   "name": "Jacksonville ARTCC",
+   "name_tr": "Jacksonville FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    27.8,
+    -84.2,
+    34.0,
+    -78.0
+   ],
+   "neighbors": [
+    "KZMA",
+    "KZTL"
+   ]
+  },
+  {
+   "icao": "KZKC",
+   "name": "Kansas City ARTCC",
+   "name_tr": "Kansas City FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    36.0,
+    -101.5,
+    43.5,
+    -89.5
+   ],
+   "neighbors": [
+    "KZAB",
+    "KZAU",
+    "KZDV",
+    "KZFW",
+    "KZID",
+    "KZME",
+    "KZMP"
+   ]
+  },
+  {
+   "icao": "KZLA",
+   "name": "Los Angeles ARTCC",
+   "name_tr": "Los Angeles FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    32.0,
+    -122.0,
+    37.5,
+    -113.5
+   ],
+   "neighbors": [
+    "KZAB",
+    "KZLC",
+    "KZOA"
+   ]
+  },
+  {
+   "icao": "KZLC",
+   "name": "Salt Lake ARTCC",
+   "name_tr": "Salt Lake City FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    37.0,
+    -117.5,
+    46.0,
+    -108.5
+   ],
+   "neighbors": [
+    "KZAB",
+    "KZDV",
+    "KZLA",
+    "KZOA",
+    "KZSE"
+   ]
+  },
+  {
+   "icao": "KZMA",
+   "name": "Miami ARTCC",
+   "name_tr": "Miami FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    23.0,
+    -84.0,
+    27.8,
+    -76.0
+   ],
+   "neighbors": [
+    "KZJX"
+   ]
+  },
+  {
+   "icao": "KZME",
+   "name": "Memphis ARTCC",
+   "name_tr": "Memphis FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    32.0,
+    -94.5,
+    37.5,
+    -86.3
+   ],
+   "neighbors": [
+    "KZFW",
+    "KZHU",
+    "KZID",
+    "KZKC",
+    "KZTL"
+   ]
+  },
+  {
+   "icao": "KZMP",
+   "name": "Minneapolis ARTCC",
+   "name_tr": "Minneapolis FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    42.0,
+    -104.0,
+    49.5,
+    -87.5
+   ],
+   "neighbors": [
+    "KZAU",
+    "KZDV",
+    "KZID",
+    "KZKC"
+   ]
+  },
+  {
+   "icao": "KZNY",
+   "name": "New York ARTCC",
+   "name_tr": "New York FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    39.0,
+    -76.0,
+    42.5,
+    -71.5
+   ],
+   "neighbors": [
+    "KZBW",
+    "KZDC"
+   ]
+  },
+  {
+   "icao": "KZOA",
+   "name": "Oakland ARTCC",
+   "name_tr": "Oakland FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    35.0,
+    -126.0,
+    42.5,
+    -117.0
+   ],
+   "neighbors": [
+    "KZLA",
+    "KZLC",
+    "KZSE"
+   ]
+  },
+  {
+   "icao": "KZOB",
+   "name": "Cleveland ARTCC",
+   "name_tr": "Cleveland FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    38.5,
+    -85.0,
+    44.0,
+    -77.5
+   ],
+   "neighbors": [
+    "KZAU",
+    "KZDC",
+    "KZID"
+   ]
+  },
+  {
+   "icao": "KZSE",
+   "name": "Seattle ARTCC",
+   "name_tr": "Seattle FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    41.5,
+    -125.5,
+    49.5,
+    -110.5
+   ],
+   "neighbors": [
+    "KZDV",
+    "KZLC",
+    "KZOA"
+   ]
+  },
+  {
+   "icao": "KZTL",
+   "name": "Atlanta ARTCC",
+   "name_tr": "Atlanta FIR (ARTCC)",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    30.5,
+    -88.5,
+    36.5,
+    -80.0
+   ],
+   "neighbors": [
+    "KZDC",
+    "KZHU",
+    "KZID",
+    "KZJX",
+    "KZME"
    ]
   },
   {
@@ -2042,6 +2440,36 @@
    ]
   },
   {
+   "icao": "PAZA",
+   "name": "Anchorage FIR",
+   "name_tr": "Anchorage FIR",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    51.0,
+    -180.0,
+    72.0,
+    -129.0
+   ],
+   "neighbors": []
+  },
+  {
+   "icao": "PHZH",
+   "name": "Honolulu FIR",
+   "name_tr": "Honolulu FIR",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    15.0,
+    -165.0,
+    26.0,
+    -150.0
+   ],
+   "neighbors": []
+  },
+  {
    "icao": "RCAA",
    "name": "Taipei FIR",
    "name_tr": "Taipei FIR",
@@ -2254,6 +2682,21 @@
    "neighbors": [
     "SKED"
    ]
+  },
+  {
+   "icao": "TJZS",
+   "name": "San Juan FIR",
+   "name_tr": "San Juan FIR",
+   "countries": [
+    "US"
+   ],
+   "bbox": [
+    16.0,
+    -68.5,
+    21.0,
+    -63.0
+   ],
+   "neighbors": []
   },
   {
    "icao": "UAAX",
@@ -3684,8 +4127,8 @@
    "name_tr": "SANTIAGO AIRPORT",
    "city": "Santiago",
    "country": "CL",
-   "lat": -29.2156,
-   "lon": -54.8406,
+   "lat": -33.393,
+   "lon": -70.7858,
    "tier": "regional"
   },
   {
@@ -4201,8 +4644,8 @@
    "name_tr": "Borg El Arab Int. Airport",
    "city": "Alexandria",
    "country": "EG",
-   "lat": 44.835,
-   "lon": 8.745,
+   "lat": 30.9177,
+   "lon": 29.6964,
    "tier": "regional"
   },
   {
@@ -7121,25 +7564,388 @@
    "tier": "regional"
   },
   {
+   "iata": "ANC",
+   "icao": null,
+   "name": "Anchorage Ted Stevens",
+   "name_tr": "Anchorage",
+   "city": "Anchorage",
+   "country": "US",
+   "lat": 61.1744,
+   "lon": -149.9961,
+   "tier": "regional"
+  },
+  {
+   "iata": "ATL",
+   "icao": null,
+   "name": "Atlanta Hartsfield-Jackson",
+   "name_tr": "Atlanta Hartsfield-Jackson",
+   "city": "Atlanta",
+   "country": "US",
+   "lat": 33.6407,
+   "lon": -84.4277,
+   "tier": "hub"
+  },
+  {
+   "iata": "AUS",
+   "icao": null,
+   "name": "Austin-Bergstrom",
+   "name_tr": "Austin-Bergstrom",
+   "city": "Austin",
+   "country": "US",
+   "lat": 30.1975,
+   "lon": -97.6664,
+   "tier": "regional"
+  },
+  {
+   "iata": "BGR",
+   "icao": null,
+   "name": "Bangor International",
+   "name_tr": "Bangor",
+   "city": "Bangor",
+   "country": "US",
+   "lat": 44.8074,
+   "lon": -68.8281,
+   "tier": "regional"
+  },
+  {
+   "iata": "BNA",
+   "icao": null,
+   "name": "Nashville International",
+   "name_tr": "Nashville",
+   "city": "Nashville",
+   "country": "US",
+   "lat": 36.1245,
+   "lon": -86.6782,
+   "tier": "regional"
+  },
+  {
+   "iata": "BOS",
+   "icao": null,
+   "name": "Boston Logan",
+   "name_tr": "Boston Logan",
+   "city": "Boston",
+   "country": "US",
+   "lat": 42.3656,
+   "lon": -71.0096,
+   "tier": "hub"
+  },
+  {
+   "iata": "BWI",
+   "icao": null,
+   "name": "Baltimore/Washington",
+   "name_tr": "Baltimore",
+   "city": "Baltimore",
+   "country": "US",
+   "lat": 39.1774,
+   "lon": -76.6684,
+   "tier": "regional"
+  },
+  {
+   "iata": "CLT",
+   "icao": null,
+   "name": "Charlotte Douglas",
+   "name_tr": "Charlotte Douglas",
+   "city": "Charlotte",
+   "country": "US",
+   "lat": 35.2144,
+   "lon": -80.9473,
+   "tier": "hub"
+  },
+  {
+   "iata": "DCA",
+   "icao": null,
+   "name": "Washington Reagan National",
+   "name_tr": "Washington Reagan",
+   "city": "Washington",
+   "country": "US",
+   "lat": 38.8512,
+   "lon": -77.0402,
+   "tier": "regional"
+  },
+  {
+   "iata": "DEN",
+   "icao": null,
+   "name": "Denver International",
+   "name_tr": "Denver",
+   "city": "Denver",
+   "country": "US",
+   "lat": 39.8561,
+   "lon": -104.6737,
+   "tier": "hub"
+  },
+  {
    "iata": "DFW",
    "icao": null,
    "name": "Dallas Fort Worth",
    "name_tr": "Dallas Fort Worth",
    "city": "Dallas",
    "country": "US",
-   "lat": 32.7695,
-   "lon": -96.8303,
+   "lat": 32.8998,
+   "lon": -97.0403,
+   "tier": "hub"
+  },
+  {
+   "iata": "DTW",
+   "icao": null,
+   "name": "Detroit Metropolitan",
+   "name_tr": "Detroit",
+   "city": "Detroit",
+   "country": "US",
+   "lat": 42.2124,
+   "lon": -83.3534,
+   "tier": "hub"
+  },
+  {
+   "iata": "EWR",
+   "icao": null,
+   "name": "Newark Liberty",
+   "name_tr": "Newark Liberty",
+   "city": "Newark",
+   "country": "US",
+   "lat": 40.6895,
+   "lon": -74.1745,
+   "tier": "hub"
+  },
+  {
+   "iata": "HNL",
+   "icao": null,
+   "name": "Honolulu Daniel K. Inouye",
+   "name_tr": "Honolulu",
+   "city": "Honolulu",
+   "country": "US",
+   "lat": 21.3187,
+   "lon": -157.9224,
+   "tier": "regional"
+  },
+  {
+   "iata": "IAD",
+   "icao": null,
+   "name": "Washington Dulles",
+   "name_tr": "Washington Dulles",
+   "city": "Washington",
+   "country": "US",
+   "lat": 38.9531,
+   "lon": -77.4565,
    "tier": "regional"
   },
   {
    "iata": "IAH",
    "icao": null,
-   "name": "George Bush Intercontinental Airport",
-   "name_tr": "George Bush Intercontinental Airport",
+   "name": "George Bush Intercontinental",
+   "name_tr": "Houston George Bush",
    "city": "Houston",
    "country": "US",
-   "lat": 29.9841,
-   "lon": -95.333,
+   "lat": 29.9902,
+   "lon": -95.3368,
+   "tier": "hub"
+  },
+  {
+   "iata": "JFK",
+   "icao": null,
+   "name": "New York John F. Kennedy",
+   "name_tr": "New York JFK",
+   "city": "New York",
+   "country": "US",
+   "lat": 40.6413,
+   "lon": -73.7781,
+   "tier": "hub"
+  },
+  {
+   "iata": "LAS",
+   "icao": null,
+   "name": "Las Vegas Harry Reid",
+   "name_tr": "Las Vegas Harry Reid",
+   "city": "Las Vegas",
+   "country": "US",
+   "lat": 36.084,
+   "lon": -115.1537,
+   "tier": "hub"
+  },
+  {
+   "iata": "LAX",
+   "icao": null,
+   "name": "Los Angeles International",
+   "name_tr": "Los Angeles",
+   "city": "Los Angeles",
+   "country": "US",
+   "lat": 33.9416,
+   "lon": -118.4085,
+   "tier": "hub"
+  },
+  {
+   "iata": "LGA",
+   "icao": null,
+   "name": "New York LaGuardia",
+   "name_tr": "New York LaGuardia",
+   "city": "New York",
+   "country": "US",
+   "lat": 40.7769,
+   "lon": -73.874,
+   "tier": "regional"
+  },
+  {
+   "iata": "MCO",
+   "icao": null,
+   "name": "Orlando International",
+   "name_tr": "Orlando",
+   "city": "Orlando",
+   "country": "US",
+   "lat": 28.4312,
+   "lon": -81.3081,
+   "tier": "hub"
+  },
+  {
+   "iata": "MIA",
+   "icao": null,
+   "name": "Miami International",
+   "name_tr": "Miami",
+   "city": "Miami",
+   "country": "US",
+   "lat": 25.7959,
+   "lon": -80.287,
+   "tier": "hub"
+  },
+  {
+   "iata": "MSP",
+   "icao": null,
+   "name": "Minneapolis-St Paul",
+   "name_tr": "Minneapolis-St Paul",
+   "city": "Minneapolis",
+   "country": "US",
+   "lat": 44.8848,
+   "lon": -93.2223,
+   "tier": "hub"
+  },
+  {
+   "iata": "MSY",
+   "icao": null,
+   "name": "New Orleans Louis Armstrong",
+   "name_tr": "New Orleans",
+   "city": "New Orleans",
+   "country": "US",
+   "lat": 29.9934,
+   "lon": -90.2581,
+   "tier": "regional"
+  },
+  {
+   "iata": "ORD",
+   "icao": null,
+   "name": "Chicago O'Hare",
+   "name_tr": "Chicago O'Hare",
+   "city": "Chicago",
+   "country": "US",
+   "lat": 41.9742,
+   "lon": -87.9073,
+   "tier": "hub"
+  },
+  {
+   "iata": "PDX",
+   "icao": null,
+   "name": "Portland International",
+   "name_tr": "Portland",
+   "city": "Portland",
+   "country": "US",
+   "lat": 45.5898,
+   "lon": -122.5951,
+   "tier": "regional"
+  },
+  {
+   "iata": "PHL",
+   "icao": null,
+   "name": "Philadelphia International",
+   "name_tr": "Philadelphia",
+   "city": "Philadelphia",
+   "country": "US",
+   "lat": 39.8744,
+   "lon": -75.2424,
+   "tier": "hub"
+  },
+  {
+   "iata": "PHX",
+   "icao": null,
+   "name": "Phoenix Sky Harbor",
+   "name_tr": "Phoenix Sky Harbor",
+   "city": "Phoenix",
+   "country": "US",
+   "lat": 33.4342,
+   "lon": -112.0116,
+   "tier": "hub"
+  },
+  {
+   "iata": "SAN",
+   "icao": null,
+   "name": "San Diego International",
+   "name_tr": "San Diego",
+   "city": "San Diego",
+   "country": "US",
+   "lat": 32.7338,
+   "lon": -117.1933,
+   "tier": "regional"
+  },
+  {
+   "iata": "SEA",
+   "icao": null,
+   "name": "Seattle-Tacoma International",
+   "name_tr": "Seattle-Tacoma",
+   "city": "Seattle",
+   "country": "US",
+   "lat": 47.4502,
+   "lon": -122.3088,
+   "tier": "hub"
+  },
+  {
+   "iata": "SFO",
+   "icao": null,
+   "name": "San Francisco International",
+   "name_tr": "San Francisco",
+   "city": "San Francisco",
+   "country": "US",
+   "lat": 37.6213,
+   "lon": -122.379,
+   "tier": "hub"
+  },
+  {
+   "iata": "SJU",
+   "icao": null,
+   "name": "San Juan Luis Munoz Marin",
+   "name_tr": "San Juan",
+   "city": "San Juan",
+   "country": "US",
+   "lat": 18.4394,
+   "lon": -66.0018,
+   "tier": "regional"
+  },
+  {
+   "iata": "SLC",
+   "icao": null,
+   "name": "Salt Lake City International",
+   "name_tr": "Salt Lake City",
+   "city": "Salt Lake City",
+   "country": "US",
+   "lat": 40.7899,
+   "lon": -111.9791,
+   "tier": "regional"
+  },
+  {
+   "iata": "STL",
+   "icao": null,
+   "name": "St. Louis Lambert",
+   "name_tr": "St. Louis Lambert",
+   "city": "St. Louis",
+   "country": "US",
+   "lat": 38.7487,
+   "lon": -90.37,
+   "tier": "regional"
+  },
+  {
+   "iata": "TPA",
+   "icao": null,
+   "name": "Tampa International",
+   "name_tr": "Tampa",
+   "city": "Tampa",
+   "country": "US",
+   "lat": 27.9755,
+   "lon": -82.5332,
    "tier": "regional"
   },
   {
