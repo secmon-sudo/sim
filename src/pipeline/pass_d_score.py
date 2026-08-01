@@ -135,6 +135,8 @@ STORYLINE_ANCHOR_ASSIST_MAX_HOURS = _STORYLINE.get("anchor_assist_max_hours", 72
 STORYLINE_LLM_ADJUDICATION = _STORYLINE.get("llm_adjudication_enabled", True)
 STORYLINE_ADJUDICATION_WINDOW_HOURS = _STORYLINE.get("adjudication_window_hours", 48)
 STORYLINE_ADJUDICATION_MAX_CANDIDATES = _STORYLINE.get("adjudication_max_candidates", 6)
+STORYLINE_ADJUDICATION_LEXICAL_FLOOR = _STORYLINE.get(
+    "adjudication_lexical_floor", 0.15)
 
 
 def _safe_float(value, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -818,6 +820,7 @@ def run_pass_d(db_conn) -> dict:
                         event, recent, _router,
                         window_hours=STORYLINE_ADJUDICATION_WINDOW_HOURS,
                         max_candidates=STORYLINE_ADJUDICATION_MAX_CANDIDATES,
+                        lexical_floor=STORYLINE_ADJUDICATION_LEXICAL_FLOOR,
                     )
             except Exception:
                 logger.exception("Failed to init storyline adjudicator; deterministic only")

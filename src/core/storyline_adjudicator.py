@@ -27,7 +27,7 @@ import re
 
 from src.core.geo import geo_key
 from src.core.llm_client import call_llm
-from src.core.storyline import jaccard_similarity
+from src.core.storyline import lexical_kinship
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ def find_geo_candidates(
     recent_events: list[dict],
     window_hours: float = 48.0,
     max_candidates: int = 6,
+    lexical_floor: float = 0.15,
 ) -> list[dict]:
     """Candidate storylines that plausibly describe the same incident.
 
@@ -74,12 +75,13 @@ def find_geo_candidates(
     - **Geo net** (event has a resolvable location): same country + same coarse location.
       Intentionally the SAME set the deterministic geo-assist saw but could not confirm
       lexically — the ambiguous residue the LLM should judge.
-    - **Country fallback** (event has NO usable location — e.g. missile tests, nuclear
-      announcements and other national-level news that never resolves to a place): same
-      country, ranked by lexical kinship so the most plausible duplicates fill the bounded
-      candidate slots. Without this, location-less events bypass every dedup layer and each
-      source pages separately. A minimal lexical-overlap floor stands in for the missing
-      geo constraint so wholly unrelated same-country events are not offered to the LLM.
+    - **Country net** (everything else, including located events whose location matched
+      nothing): same country plus a minimal lexical-overlap floor, ranked by that overlap
+      so the most plausible duplicates fill the bounded candidate slots. It carries the
+      location-less national news (missile tests, nuclear announcements) that would
+      otherwise bypass every dedup layer, and the cases where one report names a region
+      and another the town inside it ("Jammu Kashmir" vs "Kulgam") — coarse keys are not
+      a containment test, so a geo-only net never offered those to the model at all.
     """
     dt = event.get("occurred_at_est")
     if dt is None:
@@ -108,20 +110,27 @@ def find_geo_candidates(
             continue
         r_iso = r.get("country_iso")
         r_hint = r.get("storyline_hint") or ""
-        if ev_geo:
+        if ev_geo and _event_geo(r) == ev_geo:
             # Geo net: same country (when both known) + same coarse location.
             if iso and r_iso and iso != r_iso:
                 continue
-            if _event_geo(r) != ev_geo:
-                continue
             overlap = 1.0
         else:
-            # Country fallback: same country required (both sides known), and some lexical
+            # Country net: same country required (both sides known), and some lexical
             # kinship — a wholly unrelated same-country incident is not a candidate.
+            #
+            # This also runs for events that DO have a location, because a coarse
+            # key is not a containment test: "Kashmir" and "Kulgam" are the same
+            # incident reported at region and at town level, and a geo-only net
+            # meant the town's storyline was never even offered to the model.
+            # Geo-net hits still outrank these (1.0 vs < 1.0).
             if not r_iso or r_iso != iso:
                 continue
-            overlap = jaccard_similarity(ev_hint, r_hint)
-            if overlap <= 0.0:
+            # The floor also bounds LLM volume: every candidate list that is not
+            # empty costs a bulk-model call, and this net now sees located events
+            # too. One incidental shared word is not worth a call.
+            overlap = lexical_kinship(ev_hint, r_hint)
+            if overlap < lexical_floor:
                 continue
         seen_storylines.add(sid)
         scored.append((overlap, sid, r_hint))
@@ -190,12 +199,14 @@ def adjudicate_storyline(
     call_llm_fn=call_llm,
     window_hours: float = 48.0,
     max_candidates: int = 6,
+    lexical_floor: float = 0.15,
 ) -> str | None:
     """Return an existing storyline_id if the LLM confirms the SAME incident, else None.
 
     Fails safe: any error or ambiguity yields None so the caller starts a new storyline.
     """
-    candidates = find_geo_candidates(event, recent_events, window_hours, max_candidates)
+    candidates = find_geo_candidates(event, recent_events, window_hours,
+                                     max_candidates, lexical_floor)
     if not candidates:
         return None
     prompt = _build_prompt(event, candidates)

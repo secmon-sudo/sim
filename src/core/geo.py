@@ -71,6 +71,39 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "KHARTOUM":  ["khartoum"],
     "BAMAKO":    ["bamako"],
     "MOGADISHU": ["mogadishu"],
+    # United States: a daily SITREP country whose reporting names venues and
+    # metro areas rather than plain city names ("Bite of Seattle", "downtown
+    # Chicago"). Without an alias the per-token lookup cannot recover the city,
+    # so the venue string became its own location key and the festival shooting
+    # split into two storylines that no layer could rejoin.
+    "SEATTLE":      ["seattle"],
+    "NEW YORK":     ["new york", "nyc", "manhattan", "brooklyn", "queens"],
+    # "la" is deliberately not an alias for Los Angeles: as a bare token it
+    # matches half the Spanish- and French-named places in the feed.
+    "LOS ANGELES":  ["los angeles"],
+    "CHICAGO":      ["chicago"],
+    "HOUSTON":      ["houston"],
+    "PHOENIX":      ["phoenix"],
+    "PHILADELPHIA": ["philadelphia", "philly"],
+    "SAN ANTONIO":  ["san antonio"],
+    "SAN DIEGO":    ["san diego"],
+    "DALLAS":       ["dallas"],
+    "AUSTIN":       ["austin"],
+    "SAN FRANCISCO": ["san francisco"],
+    "DENVER":       ["denver"],
+    "BOSTON":       ["boston"],
+    "ATLANTA":      ["atlanta"],
+    "MIAMI":        ["miami"],
+    "DETROIT":      ["detroit"],
+    "MINNEAPOLIS":  ["minneapolis"],
+    "PORTLAND":     ["portland"],
+    "LAS VEGAS":    ["las vegas", "vegas"],
+    "NEW ORLEANS":  ["new orleans"],
+    "WASHINGTON":   ["washington dc", "washington d c", "district of columbia"],
+    "NASHVILLE":    ["nashville"],
+    "CHARLOTTE":    ["charlotte"],
+    "ST LOUIS":     ["st louis", "saint louis"],
+    "BALTIMORE":    ["baltimore"],
 }
 
 # Reverse index: alias -> canonical, built once at import.
@@ -219,6 +252,35 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
     # Turkey
     "ISTANBUL": (41.0082, 28.9784, "TR"),
     "ANKARA": (39.9334, 32.8597, "TR"),
+    # United States — the SITREP auto-selection reaches for it most days, and a
+    # US event with no coordinate gets a country-wide airspace card instead of
+    # "the nearest commercial airport is N km away".
+    "SEATTLE": (47.6062, -122.3321, "US"),
+    "NEW YORK": (40.7128, -74.0060, "US"),
+    "LOS ANGELES": (34.0522, -118.2437, "US"),
+    "CHICAGO": (41.8781, -87.6298, "US"),
+    "HOUSTON": (29.7604, -95.3698, "US"),
+    "PHOENIX": (33.4484, -112.0740, "US"),
+    "PHILADELPHIA": (39.9526, -75.1652, "US"),
+    "SAN ANTONIO": (29.4241, -98.4936, "US"),
+    "SAN DIEGO": (32.7157, -117.1611, "US"),
+    "DALLAS": (32.7767, -96.7970, "US"),
+    "AUSTIN": (30.2672, -97.7431, "US"),
+    "SAN FRANCISCO": (37.7749, -122.4194, "US"),
+    "DENVER": (39.7392, -104.9903, "US"),
+    "BOSTON": (42.3601, -71.0589, "US"),
+    "ATLANTA": (33.7490, -84.3880, "US"),
+    "MIAMI": (25.7617, -80.1918, "US"),
+    "DETROIT": (42.3314, -83.0458, "US"),
+    "MINNEAPOLIS": (44.9778, -93.2650, "US"),
+    "PORTLAND": (45.5152, -122.6784, "US"),
+    "LAS VEGAS": (36.1699, -115.1398, "US"),
+    "NEW ORLEANS": (29.9511, -90.0715, "US"),
+    "WASHINGTON": (38.9072, -77.0369, "US"),
+    "NASHVILLE": (36.1627, -86.7816, "US"),
+    "CHARLOTTE": (35.2271, -80.8431, "US"),
+    "ST LOUIS": (38.6270, -90.1994, "US"),
+    "BALTIMORE": (39.2904, -76.6122, "US"),
 }
 
 

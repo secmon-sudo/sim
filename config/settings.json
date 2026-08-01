@@ -54,7 +54,8 @@
     "anchor_assist_max_hours": 72,
     "llm_adjudication_enabled": true,
     "adjudication_window_hours": 48,
-    "adjudication_max_candidates": 6
+    "adjudication_max_candidates": 6,
+    "adjudication_lexical_floor": 0.15
   },
   "narrative": {
     "enabled": true,

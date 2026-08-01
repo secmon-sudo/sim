@@ -109,6 +109,76 @@ class TestHybridAnchorAssist:
         assert should_link_storyline(a, b) is False
 
 
+class TestGenericIncidentOverlap:
+    """Run #22 (1 Aug 2026): a Seattle festival shooting and an unrelated Arkansas
+    killing were merged into one storyline on a 0.43 Jaccard built entirely out of
+    {mass, shooting}. The SITREP then presented the Arkansas article as Seattle's
+    second source and stamped the bullet "Onaylandı (Çoklu kaynak)"."""
+
+    def test_generic_only_overlap_does_not_link(self):
+        a = _geo_ev("seattle mass shooting", raw="Bite of Seattle", iso="US")
+        b = _geo_ev("breckenridge mass shooting", raw="Breckenridge", iso="US",
+                    when=_T0 + timedelta(hours=7))
+        assert jaccard_similarity(a["storyline_hint"], b["storyline_hint"]) > 0.4
+        assert should_link_storyline(a, b) is False
+
+    def test_shared_place_still_links(self):
+        # Same overlap size, but the shared token names a place — that is evidence.
+        a = _geo_ev("philippines high school shooting", raw=None, iso="PH")
+        b = _geo_ev("philippines school shooting", raw=None, iso="PH")
+        assert should_link_storyline(a, b) is True
+
+    def test_venue_name_resolves_to_its_city(self):
+        """"Bite of Seattle" is a festival, not a place name — until it resolved to
+        SEATTLE the same shooting lived in two storylines that no layer rejoined."""
+        from src.core.geo import geo_key
+        assert geo_key("Bite of Seattle", "US") == geo_key("Seattle", "US")
+        a = _geo_ev("seattle mass shooting", raw="Bite of Seattle", iso="US")
+        b = _geo_ev("seattle festival shooting", raw="Seattle", iso="US",
+                    when=_T0 - timedelta(hours=8))
+        assert should_link_storyline(a, b) is True
+
+
+class TestAdjudicatorCandidateNet:
+    def test_region_and_town_reports_reach_the_model(self):
+        """A coarse geo key is not a containment test: "Kashmir" and "Kulgam" are
+        the same incident, and a geo-only net never offered one to the other."""
+        from src.core.storyline_adjudicator import find_geo_candidates
+
+        recent = [
+            {"storyline_id": "kulgam", "storyline_hint": "kulgam terror attack",
+             "anchor_name_raw": "Kulgam", "country_iso": "IN", "occurred_at_est": _T0},
+            {"storyline_id": "other", "storyline_hint": "mumbai port fire",
+             "anchor_name_raw": "Mumbai", "country_iso": "IN", "occurred_at_est": _T0},
+        ]
+        event = {"storyline_hint": "kashmir terrorist attack", "anchor_name_raw": "Kashmir",
+                 "country_iso": "IN", "occurred_at_est": _T0 + timedelta(hours=15)}
+        assert [c["storyline_id"] for c in find_geo_candidates(event, recent)] == ["kulgam"]
+
+    def test_same_geo_still_outranks_lexical_candidates(self):
+        from src.core.storyline_adjudicator import find_geo_candidates
+
+        recent = [
+            {"storyline_id": "lexical", "storyline_hint": "kashmir terror attack",
+             "anchor_name_raw": "Jammu", "country_iso": "IN", "occurred_at_est": _T0},
+            {"storyline_id": "same-place", "storyline_hint": "unrelated wording",
+             "anchor_name_raw": "Kulgam", "country_iso": "IN", "occurred_at_est": _T0},
+        ]
+        event = {"storyline_hint": "kulgam terror attack", "anchor_name_raw": "Kulgam",
+                 "country_iso": "IN", "occurred_at_est": _T0 + timedelta(hours=2)}
+        assert find_geo_candidates(event, recent)[0]["storyline_id"] == "same-place"
+
+    def test_unrelated_same_country_event_is_not_a_candidate(self):
+        from src.core.storyline_adjudicator import find_geo_candidates
+
+        recent = [{"storyline_id": "x", "storyline_hint": "mumbai port fire",
+                   "anchor_name_raw": "Mumbai", "country_iso": "IN",
+                   "occurred_at_est": _T0}]
+        event = {"storyline_hint": "kulgam terror attack", "anchor_name_raw": "Kulgam",
+                 "country_iso": "IN", "occurred_at_est": _T0 + timedelta(hours=1)}
+        assert find_geo_candidates(event, recent) == []
+
+
 class TestNarrative:
     def test_build_timeline_orders_and_sequences(self):
         evs = [

@@ -26,6 +26,25 @@ AVIATION_STOPWORDS = {
     "according", "confirmed", "reported", "sources",
 }
 
+# Incident-type vocabulary: words that say WHAT KIND of event this is, never
+# WHICH event it is. They are NOT removed from the similarity signal — doing that
+# shrinks hints so far that "Philippines high school shooting" and "Philippines
+# school shooting" stop matching. They are used as a gate instead: a lexical link
+# whose entire overlap is drawn from this list is not evidence of the same
+# incident. On 1 Aug 2026 "seattle mass shooting" and "breckenridge mass
+# shooting" scored 0.43 on nothing but {mass, shooting} and were merged, which
+# then credited an unrelated Arkansas report as Seattle's corroborating source.
+GENERIC_INCIDENT_TOKENS = {
+    "shooting", "shootings", "shot", "gunman", "gunfire", "stabbing",
+    "mass", "casualties", "wounded", "victim", "victims", "fatal", "dead",
+    "missile", "missiles", "rocket", "rockets", "shelling", "airstrike",
+    "airstrikes", "blast", "explosion", "bombing", "raid", "raids",
+    "terror", "terrorist", "terrorists", "terrorism", "militant", "militants",
+    "protest", "protests", "clash", "clashes", "unrest", "riot",
+    "police", "arrested", "suspect", "suspects", "man", "woman", "people",
+    "video", "footage", "war", "conflict", "operation", "school", "festival",
+}
+
 
 # Date-hint tokens (e.g. "jun8", "may15", bare years/days) are REQUIRED in the LLM
 # storyline_hint format but distort Jaccard: the same event reported across two days
@@ -77,6 +96,45 @@ def jaccard_similarity(hint_a: str, hint_b: str) -> float:
     if not set_a or not set_b:
         return 0.0
     return len(set_a & set_b) / len(set_a | set_b)
+
+
+def lexical_kinship(hint_a: str, hint_b: str) -> float:
+    """Jaccard over the full vocabulary — incident words and all.
+
+    Not a linking signal: `jaccard_similarity` drops the words that dilute the
+    decision, which is right for deciding and wrong for RANKING adjudication
+    candidates. "kashmir terrorist attack" and "kulgam terror attack" (the same
+    incident, one named by region and one by town) share nothing a linking-grade
+    score can see, so the true duplicate was dropped from the candidate list
+    before the model ever saw it. Ranking is not deciding — the LLM still has to
+    call it the same incident.
+    """
+    def _tokens(text: str) -> Set[str]:
+        return {t for t in re.sub(r"[^\w\s]", "", text.lower()).split()
+                if t not in _FUNCTION_WORDS and not _DATE_TOKEN.match(t)}
+
+    set_a, set_b = _tokens(hint_a), _tokens(hint_b)
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
+
+
+_FUNCTION_WORDS = {"the", "a", "an", "at", "in", "on", "of", "to", "and", "or"}
+
+
+def has_discriminating_overlap(hint_a: str, hint_b: str) -> bool:
+    """Whether two hints share anything that identifies WHICH incident this is.
+
+    A token (or bigram) counts only if it is not drawn entirely from
+    GENERIC_INCIDENT_TOKENS: places, actors, named entities and numbers identify
+    an incident; "mass shooting" describes a category that thousands of distinct
+    incidents belong to.
+    """
+    shared = tokenize_storyline_hint(hint_a) & tokenize_storyline_hint(hint_b)
+    return any(
+        any(word not in GENERIC_INCIDENT_TOKENS for word in token.split())
+        for token in shared
+    )
 
 
 def should_link_storyline(
@@ -135,7 +193,13 @@ def should_link_storyline(
         event_a.get("storyline_hint") or "",
         event_b.get("storyline_hint") or "",
     )
-    if similarity > threshold:
+    # A high score built purely out of incident-type words ("mass shooting",
+    # "missile strike") says the two reports are the same KIND of event, not the
+    # same event. Those pairs are handed to the LLM adjudicator instead of being
+    # merged for free.
+    if similarity > threshold and has_discriminating_overlap(
+        event_a.get("storyline_hint") or "", event_b.get("storyline_hint") or ""
+    ):
         return True
 
     # ── Hybrid anchor-assist (zero-LLM) ──
