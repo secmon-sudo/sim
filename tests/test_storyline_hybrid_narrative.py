@@ -78,10 +78,15 @@ class TestCoarseGeoAssist:
         assert should_link_storyline(a, b) is False
 
     def test_missing_raw_location_is_safe(self):
+        # No raw text -> no geo key -> the geo path is skipped without crashing.
         a = _geo_ev("kyiv power grid outage", raw=None)
         b = _geo_ev("kyiv power station outage", raw=None)
-        # No raw text -> no geo key -> falls through without crashing (main threshold only).
-        assert should_link_storyline(a, b) is False
+        # These two still link, now via containment (three of four words shared):
+        # a grid outage and a power-station outage in Kyiv hours apart are one
+        # story — the same conclusion the geo path reaches when raw text exists.
+        assert should_link_storyline(a, b) is True
+        # A same-country pair with nothing meaningful in common still falls through.
+        assert should_link_storyline(a, _geo_ev("lviv rail depot fire", raw=None)) is False
 
 
 class TestHybridAnchorAssist:
@@ -137,6 +142,87 @@ class TestGenericIncidentOverlap:
         b = _geo_ev("seattle festival shooting", raw="Seattle", iso="US",
                     when=_T0 - timedelta(hours=8))
         assert should_link_storyline(a, b) is True
+
+
+class TestSpecificityContainment:
+    """Run #24 (2-3 Aug 2026): the Twin Falls In-N-Out shooting ran as TWO
+    storylines for two days — one keyed on the town, one on the state — because
+    Jaccard penalizes a hint for carrying the extra word. Each half had its own
+    sources, its own verification label and its own airspace card in the US
+    SITREP."""
+
+    def test_town_and_state_naming_link(self):
+        a = _geo_ev("twin falls in-n-out shooting", raw=None, iso="US")
+        b = _geo_ev("idaho in-n-out shooting", raw=None, iso="US",
+                    when=_T0 + timedelta(hours=6))
+        assert jaccard_similarity(a["storyline_hint"], b["storyline_hint"]) < 0.4
+        assert should_link_storyline(a, b) is True
+
+    def test_extra_word_does_not_break_the_match(self):
+        # "burger" rewrites every bigram it touches, which is why containment is
+        # measured on single words.
+        a = _geo_ev("twin falls in-n-out shooting", raw=None, iso="US")
+        b = _geo_ev("idaho in-n-out burger shooting", raw=None, iso="US",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b) is True
+
+    def test_one_shared_word_is_not_enough(self):
+        a = _geo_ev("gaza airstrike children", raw=None, iso="PS")
+        b = _geo_ev("gaza protest crackdown", raw=None, iso="PS",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b) is False
+
+    def test_generic_overlap_is_still_gated(self):
+        a = _geo_ev("seattle mass shooting", raw=None, iso="US")
+        b = _geo_ev("breckenridge mass shooting", raw=None, iso="US",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b) is False
+
+    def test_placeholder_location_hint_does_not_link(self):
+        # The classifier emits "location ..." when it cannot name the place.
+        a = _geo_ev("twin falls in-n-out shooting", raw=None, iso="US")
+        b = _geo_ev("location mass shooting", raw=None, iso="US",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b) is False
+
+    def test_country_words_are_not_evidence(self):
+        # Linking already requires a shared country, so "russian" is constant
+        # across every candidate pair — these are two different cities.
+        a = _geo_ev("kyiv russian airstrike", raw=None, iso="UA")
+        b = _geo_ev("kherson region russian airstrike", raw=None, iso="UA",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b) is False
+
+    def test_words_the_week_is_about_are_not_evidence(self):
+        """On 2-3 Aug 2026 "idf" named a dozen separate Gaza storylines; sharing
+        it means "same conflict", not "same incident"."""
+        from src.core.storyline import overexposed_tokens
+
+        corpus = [("s1", "gaza idf missile strike"), ("s2", "gaza idf raid"),
+                  ("s3", "gaza idf tank fire"), ("s4", "khan yunis clashes")]
+        common = overexposed_tokens(corpus, min_storylines=3)
+        assert "idf" in common and "yunis" not in common
+
+        a = _geo_ev("gaza idf missile strike", raw=None, iso="PS")
+        b = _geo_ev("gaza city idf terrorist killing", raw=None, iso="PS",
+                    when=_T0 + timedelta(hours=6))
+        assert should_link_storyline(a, b, common_tokens=common) is False
+        # Without the corpus signal the same pair would have merged.
+        assert should_link_storyline(a, b) is True
+
+    def test_one_busy_storyline_cannot_make_its_own_words_generic(self):
+        from src.core.storyline import overexposed_tokens
+
+        corpus = [("s1", f"twin falls in-n-out shooting {i}") for i in range(20)]
+        assert overexposed_tokens(corpus, min_storylines=3) == set()
+
+    def test_containment_is_time_boxed(self):
+        # Same shape, five days apart: two distinct incidents at one place read
+        # exactly like one incident named twice.
+        a = _geo_ev("twin falls in-n-out shooting", raw=None, iso="US")
+        b = _geo_ev("idaho in-n-out shooting", raw=None, iso="US",
+                    when=_T0 + timedelta(days=5))
+        assert should_link_storyline(a, b) is False
 
 
 class TestAdjudicatorCandidateNet:

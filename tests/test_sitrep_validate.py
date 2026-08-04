@@ -108,3 +108,22 @@ class TestCitationPunctuation:
         html = _render_bullet(_strip_md(line))
         assert "https://irna.example/z" in html
         assert "IRNA English" in html
+
+    def test_italicised_attribution_keeps_its_url(self):
+        """Run #23 (UA, PL): the narrator italicised the whole attribution, so the
+        closing "*" stayed glued to the URL, the allowlist check failed on a URL
+        that was in the list, and the citation was blanked — closing paren and
+        all ("The Moscow Times ([kaynak listede]")."""
+        line = _HDR + "— Olay. *Kaynak: Moscow Times (https://mt.example/a)*"
+        out = validate_sitrep(line, ["https://mt.example/a"])
+        assert "Moscow Times (https://mt.example/a)*" in out
+
+    def test_cosmetic_url_variants_are_repaired_not_blanked(self):
+        out = validate_sitrep(_HDR + "— Olay. Kaynak: X (https://ex.example/a/).",
+                              ["https://www.ex.example/a"])
+        assert "X (https://www.ex.example/a)." in out
+
+    def test_invented_url_is_still_blanked(self):
+        out = validate_sitrep(_HDR + "— Olay. Kaynak: X (https://other.example/a).",
+                              ["https://ex.example/a"])
+        assert "[kaynak listede]" in out

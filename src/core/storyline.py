@@ -43,6 +43,10 @@ GENERIC_INCIDENT_TOKENS = {
     "protest", "protests", "clash", "clashes", "unrest", "riot",
     "police", "arrested", "suspect", "suspects", "man", "woman", "people",
     "video", "footage", "war", "conflict", "operation", "school", "festival",
+    "shooter", "shooters",
+    # Classifier placeholders that leak into hints when it cannot name the place
+    # ("location mass shooting", run #24) — the opposite of discriminating.
+    "location", "unknown",
 }
 
 
@@ -122,6 +126,110 @@ def lexical_kinship(hint_a: str, hint_b: str) -> float:
 _FUNCTION_WORDS = {"the", "a", "an", "at", "in", "on", "of", "to", "and", "or"}
 
 
+def _unigrams(text: str) -> Set[str]:
+    """Single tokens only — the bigrams `tokenize_storyline_hint` adds are an
+    amplifier for Jaccard and noise for containment: inserting one word ("idaho
+    in-n-out BURGER shooting") rewrites every bigram that touches it."""
+    return {t for t in tokenize_storyline_hint(text) if " " not in t}
+
+
+def containment_similarity(hint_a: str, hint_b: str) -> float:
+    """Shared words as a fraction of the SHORTER hint.
+
+    Jaccard penalizes a hint for being more specific, which is the wrong reflex
+    when two sources name the same incident at different zoom levels: "twin
+    falls in-n-out shooting" and "idaho in-n-out shooting" are one event (town vs
+    state) and score 0.33 — below any threshold that also keeps distinct
+    incidents apart. Containment asks the question that actually applies: is the
+    shorter hint essentially *inside* the longer one (0.67 for that pair).
+    """
+    set_a, set_b = _unigrams(hint_a), _unigrams(hint_b)
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / min(len(set_a), len(set_b))
+
+
+# Country and nationality words. Inside this comparison they are worth nothing:
+# linking already REQUIRES the two events to share a country, so every candidate
+# pair agrees on them by construction. Measured against two days of production
+# hints, treating them as evidence merged "kyiv russian airstrike" with "kherson
+# region russian airstrike" (different cities) and "us iran talks" with "us
+# middle east travel advisory iran". Only the containment path consults this —
+# the Jaccard path needs the words to stay in its denominator.
+_COUNTRY_LEVEL_TOKENS = {
+    "afghan", "afghanistan", "american", "chinese", "china", "colombia",
+    "colombian", "egypt", "egyptian", "gaza", "india", "indian", "iran",
+    "iranian", "iraq", "iraqi", "israel", "israeli", "lebanese", "lebanon",
+    "libya", "libyan", "mexican", "mexico", "myanmar", "nigeria", "nigerian",
+    "pakistan", "pakistani", "palestinian", "poland", "polish", "russia",
+    "russian", "saudi", "somali", "somalia", "sudan", "sudanese", "syria",
+    "syrian", "turkey", "turkish", "ukraine", "ukrainian", "us", "usa",
+    "yemen", "yemeni",
+}
+
+# Words that name a scale rather than a place or an actor.
+_SCALE_TOKENS = {"region", "regions", "city", "country", "national", "forces",
+                 "area", "areas", "province", "district", "state", "town"}
+
+# Incident and diplomacy vocabulary the singular security list misses — plurals,
+# and the nouns that name a KIND of story ("deal", "talks", "brush fire").
+_CATEGORY_TOKENS = {
+    "strikes", "attacks", "bombings", "explosions", "drones", "killings",
+    "blasts", "fires", "fire", "brush", "wildfire", "crackdown", "deal",
+    "talks", "ceasefire", "advisory", "sanctions",
+}
+
+_UNINFORMATIVE_FOR_CONTAINMENT = (
+    GENERIC_INCIDENT_TOKENS | _COUNTRY_LEVEL_TOKENS | _SCALE_TOKENS
+    | _CATEGORY_TOKENS
+)
+
+
+def overexposed_tokens(hints, min_storylines: int = 3) -> Set[str]:
+    """Words that recur across many separate storylines in the recent corpus.
+
+    The curated lists above cannot keep up with what a given week is about: on
+    2-3 Aug 2026 "idf", "kyiv" and "swat" each named a dozen storylines, so
+    sharing one of them says only "same conflict", not "same incident". Counted
+    per STORYLINE, not per event, so one heavily-covered incident cannot make its
+    own distinctive words look generic.
+
+    `hints` is an iterable of (storyline_id, hint) pairs.
+    """
+    seen: dict[str, set] = {}
+    for sid, hint in hints:
+        if not sid or not hint:
+            continue
+        for token in _unigrams(hint):
+            seen.setdefault(token, set()).add(sid)
+    return {t for t, sids in seen.items() if len(sids) >= min_storylines}
+
+
+# One shared word is a coincidence — "gaza airstrike" and "gaza protest" share
+# "gaza" and are two different events. Containment only speaks when the hints
+# agree on at least this many words.
+CONTAINMENT_MIN_SHARED_WORDS = 2
+
+
+def is_specificity_variant(hint_a: str, hint_b: str, threshold: float = 0.5,
+                           common_tokens: Set[str] = frozenset()) -> bool:
+    """Whether two hints look like the same incident described at different
+    levels of detail, rather than two incidents of the same kind.
+
+    Requires the overlap to carry something that identifies WHICH incident this
+    is — a town, a venue, a named actor. Country words do not qualify (the
+    country is already a precondition for linking), and neither do words the
+    current corpus has made ambient (`common_tokens`, see overexposed_tokens).
+    """
+    shared = _unigrams(hint_a) & _unigrams(hint_b)
+    if len(shared) < CONTAINMENT_MIN_SHARED_WORDS:
+        return False
+    if not any(word not in _UNINFORMATIVE_FOR_CONTAINMENT and word not in common_tokens
+               for word in shared):
+        return False
+    return containment_similarity(hint_a, hint_b) >= threshold
+
+
 def has_discriminating_overlap(hint_a: str, hint_b: str) -> bool:
     """Whether two hints share anything that identifies WHICH incident this is.
 
@@ -145,6 +253,9 @@ def should_link_storyline(
     country_match_required: bool = True,
     anchor_assist_threshold: float = 0.2,
     anchor_assist_max_hours: float = 72.0,
+    containment_threshold: float = 0.5,
+    containment_max_hours: float = 72.0,
+    common_tokens: Set[str] = frozenset(),
 ) -> bool:
     """Decide whether two events belong to the same storyline.
 
@@ -166,6 +277,15 @@ def should_link_storyline(
       of wording (same place + same time ≈ same developing story). Beyond it, the
       anchor path additionally requires anchor_assist_threshold lexical overlap so
       two DISTINCT incidents at the same location aren't merged.
+    containment_threshold / containment_max_hours:
+      Rescue path for hints that name the same incident at different zoom levels
+      (town vs state, venue vs city). Deliberately time-boxed: two distinct
+      incidents at one place can have exactly this shape when they are months
+      apart.
+    common_tokens:
+      Words the recent corpus has made ambient (see overexposed_tokens); the
+      containment path refuses to treat them as identifying. Empty by default,
+      which only makes the path more permissive, never less.
     """
     # ── Time gate (hard) — guard against None datetimes ──
     dt_a = event_a.get("occurred_at_est")
@@ -199,6 +319,26 @@ def should_link_storyline(
     # merged for free.
     if similarity > threshold and has_discriminating_overlap(
         event_a.get("storyline_hint") or "", event_b.get("storyline_hint") or ""
+    ):
+        return True
+
+    # ── Specificity-tolerant containment (zero-LLM) ──
+    # Run #24 (2 Aug 2026) carried the Twin Falls In-N-Out shooting as TWO
+    # storylines — "twin falls in-n-out shooting" and "idaho in-n-out shooting" —
+    # each with its own sources, its own verification label and its own airspace
+    # card. Jaccard saw 0.33 because one hint names the town and the other the
+    # state; containment sees 0.6. The discriminating-overlap gate still applies,
+    # so a pair whose whole overlap is "mass shooting" does not qualify here
+    # either, and the tight window keeps two distinct incidents at the same place
+    # weeks apart from collapsing.
+    if (
+        abs((dt_a - dt_b).total_seconds()) / 3600.0 <= containment_max_hours
+        and is_specificity_variant(
+            event_a.get("storyline_hint") or "",
+            event_b.get("storyline_hint") or "",
+            containment_threshold,
+            common_tokens,
+        )
     ):
         return True
 

@@ -22,7 +22,11 @@ from src.core.alerts import (
 )
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.geo import geo_coords
-from src.core.storyline import jaccard_similarity, should_link_storyline
+from src.core.storyline import (
+    jaccard_similarity,
+    overexposed_tokens,
+    should_link_storyline,
+)
 from src.core.storyline_alert_state import get_peak_tier, is_escalation, register_alert
 from src.services.telegram_notifier import send_telegram_alert
 
@@ -129,6 +133,14 @@ STORYLINE_TIME_WINDOW_DAYS = _STORYLINE.get("time_window_days", 14)
 STORYLINE_COUNTRY_MATCH_REQUIRED = _STORYLINE.get("country_match_required", True)
 STORYLINE_ANCHOR_ASSIST_THRESHOLD = _STORYLINE.get("anchor_assist_threshold", 0.2)
 STORYLINE_ANCHOR_ASSIST_MAX_HOURS = _STORYLINE.get("anchor_assist_max_hours", 72)
+# Same incident named at two zoom levels (town vs state) — Jaccard scores those
+# below threshold, containment does not. See should_link_storyline.
+STORYLINE_CONTAINMENT_THRESHOLD = _STORYLINE.get("containment_threshold", 0.5)
+STORYLINE_CONTAINMENT_MAX_HOURS = _STORYLINE.get("containment_max_hours", 72)
+# A word carried by this many separate storylines in the recent window is what the
+# week is about, not which incident this is.
+STORYLINE_CONTAINMENT_COMMON_MIN = _STORYLINE.get(
+    "containment_common_token_storylines", 3)
 # Layer 2 — LLM adjudication of same-place/near-time candidates the deterministic
 # linker left unlinked (paraphrases with near-zero lexical overlap). Bounded to the
 # ambiguous residue and run on the bulk router so it never touches classification quota.
@@ -406,6 +418,13 @@ def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
         return None
 
     event_hint = event.get("storyline_hint") or ""
+    # What the current news cycle is *about* — recomputed per event because the
+    # containment path must not read "idf" or "kyiv" as naming an incident during
+    # a week when a dozen separate storylines carry them.
+    common_tokens = overexposed_tokens(
+        ((r.get("storyline_id"), r.get("storyline_hint")) for r in recent_events),
+        STORYLINE_CONTAINMENT_COMMON_MIN,
+    )
     best_id: str | None = None
     best_sim = -1.0
 
@@ -418,6 +437,9 @@ def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
             country_match_required=STORYLINE_COUNTRY_MATCH_REQUIRED,
             anchor_assist_threshold=STORYLINE_ANCHOR_ASSIST_THRESHOLD,
             anchor_assist_max_hours=STORYLINE_ANCHOR_ASSIST_MAX_HOURS,
+            containment_threshold=STORYLINE_CONTAINMENT_THRESHOLD,
+            containment_max_hours=STORYLINE_CONTAINMENT_MAX_HOURS,
+            common_tokens=common_tokens,
         ):
             continue
         sim = jaccard_similarity(event_hint, existing.get("storyline_hint") or "")

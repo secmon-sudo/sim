@@ -158,6 +158,9 @@ def _build_prompt(event: dict, candidates: list[dict]) -> str:
         "storylines? Same location and same day do NOT automatically mean the same "
         "incident — match ONLY if it is genuinely the same event (same strike, same "
         "attack, same operation, same target). If it is a separate incident, answer NEW.",
+        "Note: two reports that name the same place at different levels of detail are "
+        "still the SAME incident — a state and a town inside it, or a city and a venue "
+        "inside it, are not two different places.",
         'Reply with strict JSON only: {"match": <number of the matching storyline, or "NEW">}.',
     ]
     return "\n".join(lines)

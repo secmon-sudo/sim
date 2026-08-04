@@ -339,8 +339,8 @@ class TestPromptCompaction:
         assert {n["icao"] for n in item["kisitlamali_komsu_firlar"]} == {"UKLV", "UMMV"}
         assert item["kisitlamali_komsu_firlar"][0]["easa_czib_aktif"] is True
         assert "EYVL" in item["diger_komsu_firlar"]
-        assert item["havalimanlari"][0]["iata"] == "LUZ"
-        assert item["havalimanlari"][0]["distance_km"] == 10
+        assert item["en_yakin_havalimanlari"][0]["iata"] == "LUZ"
+        assert item["en_yakin_havalimanlari"][0]["distance_km"] == 10
 
     def test_unrestricted_neighbours_collapse_to_codes(self):
         item = airspace.compact_for_prompt(self._assessment())["assessments"][0]
@@ -358,6 +358,24 @@ class TestPromptCompaction:
             [{"location": "Ülke Geneli", "country_iso": "PL", "severity": 60,
               "event_type": "military_action", "snippet": ""}], "PL", CZIB))
         assert "yaricap_km" not in out["assessments"][0]
+
+    def test_country_scope_offers_no_single_fir_and_no_distance(self):
+        """Run #24: a Twin Falls, Idaho shooting was narrated as taking place in
+        "Albuquerque FIR" with Atlanta and Boston as its nearest airports. The
+        payload had handed the model one `fir` (whichever sorted first) and an
+        airport list that looked like a proximity ranking. Neither claim is
+        constructible from what the country scope now sends."""
+        out = airspace.compact_for_prompt(build_airspace_assessment(
+            [{"location": "Twin Falls In-N-Out", "country_iso": "US", "severity": 95,
+              "event_type": "mass_shooting", "snippet": ""}], "US", CZIB))
+        item = out["assessments"][0]
+        assert item["kapsam"] == "country"
+        assert "fir" not in item
+        assert len(item["ulkenin_firlari"]) == airspace.COUNTRY_FIR_LIST_LIMIT
+        assert item["listelenmeyen_fir_sayisi"] > 0
+        assert "uyari" in item
+        # Airports are bare codes: nothing to read a distance out of.
+        assert all(isinstance(a, str) for a in item["ulkenin_baslica_havalimanlari"])
 
     def test_empty_input_stays_empty(self):
         assert airspace.compact_for_prompt(None) is None

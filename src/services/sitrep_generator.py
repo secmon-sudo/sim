@@ -405,8 +405,14 @@ _SYSTEM_PROMPT = (
     "- 'czib_active' true olan FIR'lar için EASA'nın AKTİF kısıtlama bülteni "
     "bulunduğunu kesin bilgi olarak yazabilirsin; bunu yakınlık tespitinden ayrı "
     "cümlede ver.\n"
-    "- 'scope' değeri 'country' ise olayın tam koordinatı yoktur: mesafe iddiasında "
-    "BULUNMA, yalnızca ülkenin hava sahasını ve başlıca havalimanlarını an.\n"
+    "- 'kapsam' değeri 'country' ise olayın koordinatı YOKTUR. O kayıtta tek bir "
+    "FIR alanı da yoktur; 'ulkenin_firlari' listesi ülkenin TAMAMINI kapsar. "
+    "Böyle bir olay için 'X FIR sınırları içinde gerçekleşti' YAZMA — hangi FIR "
+    "olduğu bilinmiyor. Doğru anlatım: 'olay tam olarak konumlandırılamadı; "
+    "ülkenin hava sahası şu FIR'lardan oluşuyor: ...'. "
+    "'ulkenin_baslica_havalimanlari' listesi YAKINLIK sıralaması DEĞİLDİR: bu "
+    "havalimanları için 'en yakın' deme, mesafe (km) verme, 'şu kadar km'den "
+    "yakın' gibi bir çıkarım YAPMA.\n"
     "Biçim kuralları (HTML dönüştürücü bunlara göre çalışır):\n"
     "- Bölüm başlıkları TAMAMI BÜYÜK HARF, tek satır, kısa (ör. 'SAHA OLAYLARI', "
     "'HAVA SAHASI VE ULAŞIM', 'BÖLGESEL YANSIMALAR').\n"
@@ -420,7 +426,9 @@ _SYSTEM_PROMPT = (
     "olacak. Birden çok kaynağı virgülle ayır: 'Kaynak: Reuters (https://a), AP "
     "(https://b)'. Markdown bağlantı sözdizimi ([metin](url), [url], [link]) KULLANMA. "
     "Yayının adını yaz ('Kyiv Independent'), çıplak alan adını değil "
-    "('kyivindependent.com'); yayın adlarını Türkçeye ÇEVİRME.\n"
+    "('kyivindependent.com'); yayın adlarını Türkçeye ÇEVİRME. Her maddede URL'yi "
+    "veriden BİREBİR kopyala; 'Kaynak: Yukarıda belirtilen kaynaklar' gibi URL'siz "
+    "atıf YASAK — o madde kaynaksız sayılır.\n"
     "Rapor doyurucu olsun: önemli olayları tek cümleyle geçiştirme; bağlamı, resmi "
     "açıklamaları ve operasyonel etkiyi anlat. Ama dolgu cümle ve tekrar da yok.\n"
     "KAPSAM: Verilen olay kümelerinin TAMAMINI işle — bu günlük ülke künyesidir, seçki "
@@ -506,8 +514,21 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
 # "Onaylandı (Çoklu kaynak, ancak detaylar doğrulanmamış)".
 _LABEL_SPAN_RE = re.compile(r"\s*(?:Onaylandı|Doğrulanmamış)\s*\([^)]*\)")
 _SOURCE_SEP_RE = re.compile(r"\s+[—–-]{1,2}\s+")
-# Sentence punctuation that can ride along on a bare-URL match.
-_URL_TRAILING_PUNCT = ".,);]"
+# Sentence punctuation — and markdown emphasis — that can ride along on a bare-URL
+# match. The emphasis characters matter: the narrator often italicises the whole
+# attribution ("*Kaynak: X (https://…)*"), which left the trailing "*" glued to the
+# URL, failed the allowlist check on a URL that WAS in the list, and blanked a
+# genuine citation (run #23, UA/PL).
+_URL_TRAILING_PUNCT = ".,);]}*_\"'»…"
+
+
+def _normalize_url(url: str) -> str:
+    """Comparison form for allowlisting: scheme, host case, a leading "www." and a
+    trailing slash are not what makes two links the same article."""
+    u = url.strip().lower()
+    u = re.sub(r"^https?://", "", u)
+    u = re.sub(r"^www\.", "", u)
+    return u.rstrip("/")
 
 
 def _canonical_label_for(tail: str) -> str:
@@ -560,6 +581,13 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
         raise ValueError("SITREP output missing required 'YÖNETİCİ ÖZETİ' header")
 
     allowed = {u.strip() for u in allowed_urls if u}
+    # Same article, cosmetically different string: the model drops a trailing
+    # slash or re-adds "www.". Blanking those was throwing away a citation whose
+    # source WAS in the payload, so a near-miss is repaired to the allowlisted
+    # form rather than deleted. Anything that does not normalize to a listed URL
+    # is still replaced — the guarantee is "no URL the pipeline did not fetch".
+    by_normal = {_normalize_url(u): u for u in allowed}
+    dropped: List[str] = []
 
     def _replace_unknown(match: "re.Match[str]") -> str:
         raw = match.group(0)
@@ -570,8 +598,19 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
         # allowlist check and then dropping it cost every report its per-bullet
         # attribution — the chips silently never rendered.
         trailing = raw[len(url):]
-        return (url if url in allowed else "[kaynak listede]") + trailing
+        if url in allowed:
+            return url + trailing
+        repaired = by_normal.get(_normalize_url(url))
+        if repaired:
+            return repaired + trailing
+        dropped.append(url)
+        return "[kaynak listede]" + trailing
     text = re.sub(r"https?://\S+", _replace_unknown, text)
+    if dropped:
+        # Silent until now: a report could lose a third of its citations and look
+        # perfectly well-formed. Logged so the rate is measurable per run.
+        logger.warning("SITREP: %d citation URL(s) not in the source list, blanked: %s",
+                       len(dropped), ", ".join(dropped[:5]))
 
     return "\n".join(
         _normalize_label_line(line) if "Doğruluk Durumu:" in line else line

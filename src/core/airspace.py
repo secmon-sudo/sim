@@ -416,17 +416,35 @@ def compact_for_prompt(assessment: Optional[Dict[str, Any]]) -> Optional[Dict[st
         entry = {
             "yer": item.get("location"),
             "kapsam": item["scope"],
-            "fir": _fir(item["fir"]),
             # Restricted neighbours keep their bulletin; the rest are just codes.
             "kisitlamali_komsu_firlar": [_fir(n) for n in neighbors if n.get("czib_active")],
             "diger_komsu_firlar": [n["icao"] for n in neighbors if not n.get("czib_active")],
-            "havalimanlari": [
+        }
+        firs = item.get("firs") or [item["fir"]]
+        if item["scope"] == "point":
+            entry["fir"] = _fir(item["fir"])
+            entry["en_yakin_havalimanlari"] = [
                 {k: v for k, v in a.items() if k in ("iata", "name", "distance_km")}
                 for a in (item.get("airports") or [])
-            ],
-        }
-        if item.get("radius_km"):
-            entry["yaricap_km"] = item["radius_km"]
+            ]
+            if item.get("radius_km"):
+                entry["yaricap_km"] = item["radius_km"]
+        else:
+            # The HTML card and the digest already say "we could not place this
+            # event, here is the whole country's airspace". The prompt used to get
+            # `fir` = whichever view sorted first, and the narrator faithfully
+            # wrote it up as fact: run #24 placed a Twin Falls, Idaho shooting in
+            # "Albuquerque FIR" and called Atlanta and Boston its nearest
+            # airports, next to a correct card saying the opposite. Nothing here
+            # is singular or distance-bearing, so neither claim is constructible.
+            entry["uyari"] = ("olayın koordinatı YOK; aşağıdakiler ülkenin geneli "
+                              "içindir, olayın hangi FIR'da olduğu bilinmiyor")
+            entry["ulkenin_firlari"] = [_fir(f) for f in firs[:COUNTRY_FIR_LIST_LIMIT]]
+            if len(firs) > COUNTRY_FIR_LIST_LIMIT:
+                entry["listelenmeyen_fir_sayisi"] = len(firs) - COUNTRY_FIR_LIST_LIMIT
+            entry["ulkenin_baslica_havalimanlari"] = [
+                a["iata"] for a in (item.get("airports") or [])
+            ]
         compact.append(entry)
     return {"country_iso": assessment.get("country_iso"), "assessments": compact}
 
