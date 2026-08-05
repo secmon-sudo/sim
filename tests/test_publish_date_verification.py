@@ -154,3 +154,30 @@ class TestDayPrecisionIsConservative:
         now = datetime(2026, 8, 5, 2, 0, tzinfo=timezone.utc)
         dt = extract_date_from_url("https://www.france24.com/en/20260803-story")
         assert (now - dt).total_seconds() / 86400 <= 2
+
+
+class TestNoHeuristicGuessing:
+    """Run #1349 regression: a page with no declared date must yield UNKNOWN.
+
+    htmldate inferred dates from copyright lines ("2026-01-01") on metadata-less
+    pages, which discarded three same-day reports of the 2026-08-05 Kyiv strike
+    as reprints. Unknown must never justify a drop.
+    """
+
+    def test_page_without_metadata_yields_none(self):
+        html = ("<html><head><title>At least 15 killed in and around Kyiv</title></head>"
+                "<body><p>Story text.</p><footer>© 2026 bluewin.ch</footer></body></html>")
+        assert extract_published_date(html) is None
+
+    def test_copyright_year_is_not_a_date(self):
+        assert extract_published_date("<footer>Copyright 2026 Example News</footer>") is None
+
+    def test_visible_dateline_text_is_not_parsed(self):
+        # Prose datelines are exactly what the heuristic layer used to mine.
+        html = "<article><p>KYIV, August 5, 2026 — Russian missiles struck.</p></article>"
+        assert extract_published_date(html) is None
+
+    def test_declared_date_still_wins(self):
+        html = ('<meta property="article:published_time" content="2026-08-05T06:31:58+00:00"/>'
+                "<footer>© 2026</footer>")
+        assert extract_published_date(html).date().isoformat() == "2026-08-05"

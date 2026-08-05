@@ -564,14 +564,14 @@ def extract_published_date(html: str) -> datetime | None:
         if dt:
             return dt
 
-    # Last resort: htmldate's heuristics (URL patterns, visible datelines).
-    try:
-        import htmldate
-        found = htmldate.find_date(html, original_date=True, outputformat="%Y-%m-%d")
-        if found:
-            return _parse_iso_like(found)
-    except Exception:
-        pass
+    # Deliberately NO heuristic guess here. htmldate used to backstop this chain
+    # and it was the sole cause of every false drop in the first production run
+    # (#1349, 2026-08-05): on pages carrying no date metadata it inferred one
+    # from the copyright line, so three same-day reports of the Kyiv strike were
+    # discarded as reprints — two dated "2026-01-01" (year-only guess) and one
+    # "2026-01-23". Every genuine reprint that run caught had a publisher-declared
+    # date, so the guess bought nothing and cost today's top story. An article
+    # that declares no date is UNKNOWN, and unknown must never justify a drop.
     return None
 
 
