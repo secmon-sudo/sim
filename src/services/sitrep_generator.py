@@ -252,26 +252,211 @@ def _event_date_label(event: Dict[str, Any]) -> str:
     return f"{day}{qualifier}"
 
 
+# Administrative suffixes that make one place look like several. "Kyiv",
+# "Kyiv Oblast" and "Kyiv region" are the same strike; splitting them would
+# fragment a story that belongs in one cluster.
+_LOCATION_SUFFIX_RE = re.compile(
+    r"\s+(oblast|region|province|governorate|prefecture|district|suburb|city|area|"
+    r"ili|ilçe|bölgesi)$",
+    re.IGNORECASE,
+)
+
+# Casualty figures in BOTH orders wire copy uses: "15 killed" and "kills 15".
+# ingest_filters._CASUALTY_COUNT_PATTERN only covers the first, which misses
+# most headlines of a developing story ("Kyiv strike kills 15", "Attack Kills 17").
+_SUBJECT = r"(?:people\s+|civilians\s+|soldiers\s+|others\s+)?"
+_DEATH_RE = re.compile(
+    rf"\b(\d{{1,4}})\s+{_SUBJECT}(?:killed|dead|deaths|fatalities|ölü)\b"
+    r"|\b(?:kills?|killed|leaves?|claims?)\s+(?:at\s+least\s+)?(\d{1,4})\b",
+    re.IGNORECASE,
+)
+_ANY_CASUALTY_RE = re.compile(
+    rf"\b(\d{{1,4}})\s+{_SUBJECT}"
+    r"(?:killed|dead|deaths|injured|wounded|casualties|fatalities|missing|ölü|yaralı)\b"
+    r"|\b(?:kills?|killed|leaves?|injures?|wounds?|claims?)\s+(?:at\s+least\s+)?(\d{1,4})\b",
+    re.IGNORECASE,
+)
+
+
+def _largest(pattern: re.Pattern, text: str) -> int:
+    best = 0
+    for match in pattern.finditer(text):
+        value = match.group(1) or match.group(2)
+        try:
+            best = max(best, int(value))
+        except (TypeError, ValueError):
+            continue
+    return best
+
+
+# Country names and demonyms ONLY — no capitals, no organisations. A capital in
+# here would let a real city be folded into a country-level bucket, which is the
+# opposite of what the folding below is for. Kept separate from
+# _COUNTRY_ALIASES (which deliberately mixes in capitals and groups for the
+# spillover search); test_sitrep_cluster_representative asserts the two stay in
+# step so a country added to one is not forgotten in the other.
+_COUNTRY_SELF_TERMS: Dict[str, frozenset] = {
+    "US": frozenset({"united states", "u.s.", "usa", "america", "american"}),
+    "IR": frozenset({"iran", "iranian"}),
+    "IL": frozenset({"israel", "israeli"}),
+    "RU": frozenset({"russia", "russian", "russian federation"}),
+    "UA": frozenset({"ukraine", "ukrainian"}),
+    "IQ": frozenset({"iraq", "iraqi"}),
+    "SY": frozenset({"syria", "syrian"}),
+    "LB": frozenset({"lebanon", "lebanese"}),
+    "YE": frozenset({"yemen", "yemeni"}),
+    "SA": frozenset({"saudi arabia", "saudi"}),
+    "KW": frozenset({"kuwait", "kuwaiti"}),
+    "QA": frozenset({"qatar", "qatari"}),
+    "AE": frozenset({"united arab emirates", "uae", "emirati"}),
+    "BH": frozenset({"bahrain", "bahraini"}),
+    "OM": frozenset({"oman", "omani"}),
+    "JO": frozenset({"jordan", "jordanian"}),
+    "EG": frozenset({"egypt", "egyptian"}),
+    "TR": frozenset({"turkey", "türkiye", "turkiye", "turkish"}),
+    "PK": frozenset({"pakistan", "pakistani"}),
+    "AF": frozenset({"afghanistan", "afghan"}),
+    "SD": frozenset({"sudan", "sudanese"}),
+    "CN": frozenset({"china", "chinese"}),
+    "TW": frozenset({"taiwan", "taiwanese"}),
+}
+
+
+def _location_key(event: Dict[str, Any]) -> str:
+    """Normalized place for sub-grouping. Empty string when unlocated."""
+    raw = (event.get("anchor_name_norm") or event.get("anchor_name_raw") or "").strip().lower()
+    previous = None
+    while previous != raw:
+        previous = raw
+        raw = _LOCATION_SUFFIX_RE.sub("", raw).strip()
+    return raw
+
+
+def _is_country_level(event: Dict[str, Any]) -> bool:
+    """True when the event names no place narrower than its own country."""
+    key = _location_key(event)
+    if not key:
+        return True
+    iso = (event.get("country_iso") or "").upper()
+    return key in _COUNTRY_SELF_TERMS.get(iso, frozenset())
+
+
+def _mentions_place(event: Dict[str, Any], place: str) -> bool:
+    if not place:
+        return False
+    text = f"{event.get('source_title') or ''} {event.get('canonical_text') or ''}"
+    return re.search(rf"\b{re.escape(place)}\b", text, re.IGNORECASE) is not None
+
+
+def _absorb_country_level(subgroups: Dict[str, List[Dict[str, Any]]]
+                          ) -> List[List[Dict[str, Any]]]:
+    """Fold this storyline's country-level members into its dominant city group.
+
+    Outlets disagree on how to place the same incident: the strike that killed
+    17 in Kyiv was filed by WSJ as "Russian Attack Kills 17 in Ukraine". Anchored
+    at country level, it became a second cluster for one event, splitting the
+    day's lead story in two.
+
+    Folding is gated on the member actually naming the dominant place, which is
+    what keeps genuinely nationwide items out — "Over 8,300 glide bombs dropped
+    by Russia on Ukraine in July" never says Kyiv, so it stays its own cluster
+    instead of being absorbed as evidence for a single night's strike.
+    """
+    located, country_level = [], []
+    for group in subgroups.values():
+        (country_level if _is_country_level(group[0]) else located).append(group)
+    if not located or not country_level:
+        return located + country_level
+
+    dominant = max(
+        located,
+        key=lambda group: (len(group),
+                           max(_casualty_magnitude(e) for e in group)),
+    )
+    place = _location_key(dominant[0])
+    result = list(located)
+    for group in country_level:
+        # Country-level groups keep their own identity when they are not about
+        # the dominant place: a storyline can carry several distinct nationwide
+        # threads (a UNICEF appeal, a monthly glide-bomb figure) and collapsing
+        # them into one bucket would trade one merge bug for another.
+        unabsorbed = []
+        for event in group:
+            if _mentions_place(event, place):
+                dominant.append(event)
+            else:
+                unabsorbed.append(event)
+        if unabsorbed:
+            result.append(unabsorbed)
+    return result
+
+
+def _casualty_magnitude(event: Dict[str, Any]) -> Tuple[int, int]:
+    """(deaths, any casualties) stated in the headline — (0, 0) if none.
+
+    Ranks how INFORMED a report is, not how severe the incident is: a breaking
+    story is re-filed all night and the member quoting the fullest toll is the
+    one the reader needs, not whichever member happened to be filed first.
+
+    Deaths lead the tuple deliberately. Ranking on a single largest number let
+    "one killed and 26 injured" outrank "kills 17", which is the wrong headline
+    for an analyst — the death toll is the figure a SITREP is read for.
+    """
+    title = event.get("source_title") or ""
+    return _largest(_DEATH_RE, title), _largest(_ANY_CASUALTY_RE, title)
+
+
+def _recency(event: Dict[str, Any]) -> float:
+    for field in ("occurred_at_est", "published_at"):
+        value = event.get(field)
+        if isinstance(value, datetime):
+            return value.timestamp()
+    return 0.0
+
+
+def _corroboration_weight(event: Dict[str, Any]) -> int:
+    return 1 + len(event.get("corroborating_sources") or [])
+
+
 def build_sitrep_clusters(events: List[Dict[str, Any]],
                           penalized_domains: List[str]) -> List[Dict[str, Any]]:
     """
     Group events into corroboration clusters (storyline_id preferred, location+
     type+day fallback), apply verification labels, and shape for the prompt.
-    """
-    groups: Dict[Any, List[Dict[str, Any]]] = {}
-    for ev in events:
-        key = ("storyline", str(ev["storyline_id"])) if ev.get("storyline_id") \
-            else ("fallback", fallback_cluster_key(ev))
-        groups.setdefault(key, []).append(ev)
 
-    clusters: List[Dict[str, Any]] = []
-    for members in groups.values():
-        # official/multi-source first inside the cluster so the snippet comes
-        # from the strongest source
+    Storylines are deliberately broad — they track a running campaign, so one
+    storyline legitimately spans cities. Clusters are not: every source in a
+    cluster is presented to the reader as corroborating the same incident, and
+    label_cluster() turns a second domain into "Onaylandı (Çoklu kaynak)". So the
+    storyline is sub-grouped by location before it becomes a cluster. Without
+    that split, run #26 (2026-08-05) rendered a 32-event Kyiv storyline as one
+    cluster citing Bohodukhiv, Odesa, a Kyiv high-rise fire and a Reuters Kyiv
+    report as evidence for each other.
+    """
+    by_story: Dict[Any, Dict[str, List[Dict[str, Any]]]] = {}
+    for ev in events:
+        story_key = ("storyline", str(ev["storyline_id"])) if ev.get("storyline_id") \
+            else ("fallback", fallback_cluster_key(ev))
+        by_story.setdefault(story_key, {}).setdefault(_location_key(ev), []).append(ev)
+
+    groups: List[List[Dict[str, Any]]] = []
+    for subgroups in by_story.values():
+        groups.extend(_absorb_country_level(subgroups))
+
+    ranked: List[Tuple[tuple, Dict[str, Any]]] = []
+    for members in groups:
+        # Pick the member that best informs the reader. Severity alone cannot do
+        # this — Pass D saturates at 100, so every member of a mass-casualty
+        # cluster ties and the ordering collapses onto the next key. When that
+        # next key was "official domain first", Ukrinform's 3-injured Bohodukhiv
+        # filing became the headline for the strike that killed 15 in Kyiv.
+        # Official status stays as the last tiebreaker, where it belongs.
         members.sort(
             key=lambda e: (
+                tuple(-figure for figure in _casualty_magnitude(e)),
+                -_corroboration_weight(e),
+                -_recency(e),
                 not is_official_domain(e.get("source_domain") or ""),
-                -(e.get("severity_score") or 0),
             )
         )
         rep = members[0]
@@ -314,8 +499,15 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
              if e.get("latitude") is not None and e.get("longitude") is not None),
             None,
         )
-        clusters.append({
-            "location": (rep.get("anchor_name_raw") or "Ülke Geneli").strip() or "Ülke Geneli",
+        # The place comes from a located member, never from the representative.
+        # After country-level folding the best-informed filing is often the one
+        # anchored at country level (WSJ's "Kills 17 in Ukraine" for the Kyiv
+        # strike), and letting it name the cluster would relabel a city incident
+        # as nationwide. Located members all share one place by construction.
+        located_member = next((e for e in members if not _is_country_level(e)), rep)
+        cluster = {
+            "location": (located_member.get("anchor_name_raw") or "Ülke Geneli").strip()
+                        or "Ülke Geneli",
             "event_type": rep.get("event_type") or "security_incident",
             "date": _event_date_label(rep),
             "verification": label_cluster(label_members, penalized_domains),
@@ -325,10 +517,16 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
             "country_iso": rep.get("country_iso"),
             "latitude": located.get("latitude") if located else None,
             "longitude": located.get("longitude") if located else None,
-        })
+        }
+        # Severity ties at 100 across every mass-casualty cluster, so it cannot
+        # decide which one leads the report either. Break the tie on the same
+        # evidence the representative was chosen with.
+        deaths, casualties = _casualty_magnitude(rep)
+        ranked.append(((-cluster["severity"], -deaths, -casualties,
+                        -len(members), -len(sources)), cluster))
 
-    clusters.sort(key=lambda c: -c["severity"])
-    return clusters[:MAX_CLUSTERS_IN_PROMPT]
+    ranked.sort(key=lambda pair: pair[0])
+    return [cluster for _, cluster in ranked[:MAX_CLUSTERS_IN_PROMPT]]
 
 
 def relabel_cluster(cluster: Dict[str, Any], penalized_domains: List[str]) -> None:
