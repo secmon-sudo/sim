@@ -307,6 +307,15 @@ def run_pipeline():
 _PIPELINE_STAGES = ["pass_a", "pass_b", "pass_c", "pass_d", "pass_e", "run_snapshot", "pass_f"]
 
 
+# Publication-date verification depends on scraping the article page, which is a
+# standing bet against Google's link format and publishers' bot blocking. When
+# that bet stops paying, Pass A silently reverts to trusting the feed's date —
+# exactly the state that let three 2016-2021 reprints fire ALERT cards on
+# 2026-08-05. Below this many verified dates in a run with a real fetch sample,
+# treat the whole layer as down and page rather than degrade quietly.
+_MIN_VERIFY_SAMPLE = 10
+
+
 def _collect_degradations(results: dict) -> list[str]:
     """Human-readable problems found in a run's per-pass stats (empty if all clean)."""
     problems: list[str] = []
@@ -318,6 +327,17 @@ def _collect_degradations(results: dict) -> list[str]:
         failed = stats.get("events_failed")
         if isinstance(failed, int) and failed > 0:
             problems.append(f"{stage}: {failed} event(s) failed")
+
+    pass_a = results.get("pass_a")
+    if isinstance(pass_a, dict):
+        attempted = pass_a.get("full_text_attempted") or 0
+        verified = pass_a.get("publish_dates_verified") or 0
+        if attempted >= _MIN_VERIFY_SAMPLE and verified == 0:
+            problems.append(
+                f"pass_a: publication-date verification is DOWN — "
+                f"0 of {attempted} fetched articles yielded a page date; "
+                f"feed dates are being trusted unchecked (reprint risk)"
+            )
     return problems
 
 

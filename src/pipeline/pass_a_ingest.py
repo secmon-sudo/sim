@@ -16,7 +16,7 @@ re-exports below preserve the historical import surface of pass_a_ingest.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Re-exported: historical import surface of this module (consumers: orchestrator,
@@ -45,6 +45,7 @@ from src.pipeline.ingest_queries import (  # noqa: F401
 )
 from src.pipeline.ingest_sources import (  # noqa: F401
     GOOGLE_NEWS_RSS,
+    fetch_article,
     fetch_full_text,
     fetch_rss_feed,
     fetch_travel_advisories,
@@ -70,7 +71,18 @@ _FETCH_FULL_TEXT = _INGESTION.get("fetch_full_text", True)
 # carry a one-line RSS description that scores 1-2 on the priority triage.
 # Gate on that score and cap the total: the depth goes where it changes a report.
 _FULL_TEXT_MIN_PRIORITY = _INGESTION.get("full_text_min_priority", 3)
-_FULL_TEXT_MAX_PER_RUN = _INGESTION.get("full_text_max_per_run", 80)
+# Trust the article page's own publication date over the feed's. Google News
+# stamps re-crawled archive pages with the crawl date — measured 2026-08-05, a
+# Yeni Safak story published 2016-10-25 was served as "Tue, 04 Aug 2026 18:50"
+# and cleared the max_article_age_days gate, which reads that same field. Three
+# 2016-2021 reprints reached ALERT tier that way. The page's own
+# schema.org/OpenGraph date is the one field the aggregator cannot rewrite.
+_VERIFY_PUBLISH_DATE = _INGESTION.get("verify_publish_date", True)
+# Ceiling on article fetches per run. Unlike the full-text gate this is NOT
+# priority-scoped: the Aden reprint scored 1 on the ingest triage and would have
+# slipped straight past a priority-gated check.
+_ARTICLE_FETCH_MAX_PER_RUN = _INGESTION.get("article_fetch_max_per_run", 120)
+_MAX_EVENT_FUTURE_DAYS = _INGESTION.get("max_event_future_days", 1)
 _MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
 # Per-domain overrides of the cap above (eTLD+1 → cap). For high-volume,
 # single-source rapid-relay feeds (e.g. OSINT aggregator accounts) that would
@@ -255,7 +267,12 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "events_inserted": 0,
         "full_text_attempted": 0,
         "full_text_fetched": 0,
+        "urls_resolved": 0,
+        "publish_dates_verified": 0,
+        "republished_filtered": 0,
+        "unverified_aggregator_inserts": 0,
     }
+    now_utc = datetime.now(timezone.utc)
 
     queries = build_search_queries(db_conn)
     all_items = []
@@ -393,20 +410,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             dropped_priority_max = max(dropped_priority_max, item.get("_priority", 0))
             continue
 
-        # Optional: fetch full text. canonical_text is what Pass C actually
-        # shows the classifier (truncated to BATCH_TEXT_CHARS), so the body
-        # lands in front of the LLM — an RSS description alone stops at the
-        # headline and never says which route or until when.
-        full_text = ""
-        if (_FETCH_FULL_TEXT
-                and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY
-                and stats["full_text_attempted"] < _FULL_TEXT_MAX_PER_RUN):
-            stats["full_text_attempted"] += 1
-            full_text = fetch_full_text(url)
-            if full_text:
-                stats["full_text_fetched"] += 1
-                canonical = canonicalize_text(f"{canonical} {full_text}")
-
         # Content dedup: a similar article already exists → don't re-insert, but
         # credit its source to the surviving event as corroboration (the dropped
         # duplicate IS the multi-source verification evidence).
@@ -421,6 +424,65 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
         # Get published_at date
         pub_dt = item.get("pub_dt")
+
+        # Fetch the article itself: resolves the Google News handle to the
+        # publisher's URL, and returns the page's own date and body in ONE round
+        # trip. Deliberately placed here, after every cheap filter has run, so
+        # the per-run network cost is bounded by how many events we can actually
+        # insert rather than by how many items the feeds returned.
+        if (_VERIFY_PUBLISH_DATE or _FETCH_FULL_TEXT) and \
+                stats["full_text_attempted"] < _ARTICLE_FETCH_MAX_PER_RUN:
+            stats["full_text_attempted"] += 1
+            # Only aggregator links carry the restamping risk: a publisher's own
+            # feed reports its own CMS date, while Google News reports when IT
+            # last crawled the page.
+            from_aggregator = "news.google.com" in url
+            article = fetch_article(url)
+
+            # Prefer the publisher's URL: it is what a reader should be handed in
+            # a report, and it makes source_url_hash stable — the same story
+            # reached through two Google News queries carries two different
+            # opaque handles and used to survive as two events.
+            if article["url"] and article["url"] != url:
+                stats["urls_resolved"] += 1
+                url = article["url"]
+                url_hash = compute_url_hash(url)
+
+            page_dt = article["published_at"] if _VERIFY_PUBLISH_DATE else None
+            # A page dated in the future is a broken CMS, not evidence — ignore
+            # it rather than letting it override a sane feed date.
+            if page_dt and page_dt <= now_utc + timedelta(days=_MAX_EVENT_FUTURE_DAYS):
+                age_days = (now_utc - page_dt).total_seconds() / 86400
+                if age_days > _MAX_ARTICLE_AGE_DAYS:
+                    stats["republished_filtered"] += 1
+                    logger.info(
+                        "Reprint dropped: page says %s, feed claimed %s — %s | %s",
+                        page_dt.date(), pub_dt.date() if pub_dt else "?",
+                        domain, item.get("title", "")[:70],
+                    )
+                    continue
+                stats["publish_dates_verified"] += 1
+                pub_dt = page_dt
+            elif from_aggregator:
+                # Publisher blocked the fetch and left no date in the path, so
+                # this row keeps Google's crawl stamp. Counted, not dropped:
+                # dropping every unverifiable aggregator item would cost far more
+                # real coverage than the reprints it would catch. This number is
+                # the size of the remaining exposure — watch it.
+                stats["unverified_aggregator_inserts"] += 1
+
+            full_text = article["text"]
+            if full_text:
+                stats["full_text_fetched"] += 1
+                # canonical_text is what Pass C shows the classifier (truncated to
+                # BATCH_TEXT_CHARS), so the body lands in front of the LLM — an RSS
+                # description alone stops at the headline and never says which route
+                # or until when. Still priority-gated: every insert now fetches an
+                # article, and attaching every body would inflate Pass C's token
+                # bill well past what the LLM quotas allow.
+                if (_FETCH_FULL_TEXT
+                        and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY):
+                    canonical = canonicalize_text(f"{canonical} {full_text}")
 
         # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
         try:

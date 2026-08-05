@@ -13,7 +13,8 @@
     "max_event_age_days": 30,
     "max_event_future_days": 1,
     "full_text_min_priority": 3,
-    "full_text_max_per_run": 80
+    "verify_publish_date": true,
+    "article_fetch_max_per_run": 120
   },
   "classification": {
     "deterministic_prescreen_enabled": true,
@@ -135,6 +136,7 @@
       "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10",
       "https://www.dropsitenews.com/feed",
       "https://www.france24.com/en/rss",
+      "https://www.france24.com/en/middle-east/rss",
       "https://www.ukrinform.net/rss/block-lastnews",
       "https://kyivindependent.com/news-archive/rss/",
       "https://tass.com/rss/v2.xml",

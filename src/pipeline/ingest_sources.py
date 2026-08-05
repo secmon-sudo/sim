@@ -469,27 +469,194 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
 
 
 # ---------------------------------------------------------------------------
+# Publication date extracted from the article itself
+# ---------------------------------------------------------------------------
+
+# Browser-shaped headers. trafilatura's own downloader announces itself and is
+# served a 403 by a good share of publishers, so the article body — and with it
+# the page's own publication date — never arrived.
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# Publisher-declared dates, most trustworthy first. schema.org datePublished is
+# what CMSes emit and is the field that caught the 2016 reprints; the OpenGraph
+# meta tag is the common second source; <time datetime> is last because it is
+# also used for "related article" teasers.
+_JSONLD_PUBLISHED_RE = re.compile(r'"datePublished"\s*:\s*"([^"]{8,40})"')
+_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_META_KEY_RE = re.compile(r'(?:property|name|itemprop)\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+_META_CONTENT_RE = re.compile(r'content\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+_TIME_TAG_RE = re.compile(r'<time\b[^>]*\bdatetime\s*=\s*["\']([^"\']{8,40})["\']', re.IGNORECASE)
+
+_PUBLISHED_META_KEYS = {
+    "article:published_time", "article:published", "og:published_time",
+    "datepublished", "publishdate", "pubdate", "date", "dc.date.issued",
+    "parsely-pub-date", "sailthru.date",
+}
+
+
+def _parse_iso_like(value: str) -> datetime | None:
+    """Parse the date formats publishers actually emit, as aware UTC."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = email.utils.parsedate_to_datetime(value)
+        except Exception:
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d"):
+                try:
+                    dt = datetime.strptime(value[:len(fmt) + 2].strip(), fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return None
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    # Date-only values carry no time of day. Reading them as midnight ages the
+    # article by up to 24h and pushes genuinely fresh stories over the freshness
+    # window — measured 2026-08-05, two same-day France24 reports were dropped as
+    # reprints on exactly this. End-of-day keeps the estimate conservative.
+    if ":" not in value:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt.astimezone(timezone.utc)
+
+
+def extract_published_date(html: str) -> datetime | None:
+    """Best-effort publication date declared by the article page itself.
+
+    This is the only date in the pipeline the publisher can't get wrong by
+    accident: the feed's pubDate is whatever the aggregator believes, and Google
+    News stamps re-crawled archive pages with the crawl date (measured
+    2026-08-05: a 2016-10-25 Yeni Safak story served as 2026-08-04).
+    """
+    if not html:
+        return None
+
+    match = _JSONLD_PUBLISHED_RE.search(html)
+    if match:
+        dt = _parse_iso_like(match.group(1))
+        if dt:
+            return dt
+
+    for tag in _META_TAG_RE.findall(html):
+        key = _META_KEY_RE.search(tag)
+        if not key or key.group(1).strip().lower() not in _PUBLISHED_META_KEYS:
+            continue
+        content = _META_CONTENT_RE.search(tag)
+        if content:
+            dt = _parse_iso_like(content.group(1))
+            if dt:
+                return dt
+
+    match = _TIME_TAG_RE.search(html)
+    if match:
+        dt = _parse_iso_like(match.group(1))
+        if dt:
+            return dt
+
+    # Last resort: htmldate's heuristics (URL patterns, visible datelines).
+    try:
+        import htmldate
+        found = htmldate.find_date(html, original_date=True, outputformat="%Y-%m-%d")
+        if found:
+            return _parse_iso_like(found)
+    except Exception:
+        pass
+    return None
+
+
+# Dates publishers put in the path: /2016/10/25/, /20260805-slug, /2026-08-05/.
+# Free, and it is the only date signal left when the page itself 403s — France24
+# blocks our fetch outright but stamps every article path with YYYYMMDD.
+_URL_DATE_RES = (
+    re.compile(r"/(20\d{2})[/-](\d{1,2})[/-](\d{1,2})(?:[/-]|$)"),
+    re.compile(r"/(20\d{2})(\d{2})(\d{2})[-_/]"),
+)
+
+
+def extract_date_from_url(url: str) -> datetime | None:
+    """Publication date encoded in the article path, or None.
+
+    Day-precision only, so it resolves to END of day: the age check must never
+    make a story look older than it is, and this date only ever decides whether
+    something is inside the freshness window, not when an incident happened.
+    """
+    for pattern in _URL_DATE_RES:
+        match = pattern.search(url or "")
+        if not match:
+            continue
+        year, month, day = (int(g) for g in match.groups())
+        try:
+            return datetime(year, month, day, 23, 59, 59, tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Full-text fetch
 # ---------------------------------------------------------------------------
 
-def fetch_full_text(url: str) -> str:
+def fetch_article(url: str, timeout: float = 20.0) -> dict:
+    """Fetch one article: resolve aggregator redirects, extract text and date.
+
+    Returns {"url", "text", "published_at"} — `url` is the publisher's URL when
+    the Google News handle could be resolved (otherwise the input unchanged),
+    `published_at` is the page's own declared date or None.
+
+    One HTTP round trip serves both consumers: Pass A needs the body for the
+    classifier and the date to reject reprints, and fetching twice would double
+    the per-run network budget for no gain.
     """
-    Attempt to fetch full article text from URL using trafilatura.
-    Uses a strict timeout to prevent pipeline hangs on slow sources.
-    """
+    result = {"url": url, "text": "", "published_at": None}
+    if not url:
+        return result
+
+    # Same resolver the SITREP citations use — one implementation, so a break in
+    # Google's handle format surfaces in both places at once instead of leaving
+    # ingest quietly running on a stale copy.
+    from src.services.google_news_resolver import resolve_url
+    result["url"] = resolve_url(url, timeout=min(timeout, 8.0)) or url
+
+    # Path-encoded date first: it costs nothing and it is the ONLY date we get
+    # from publishers that 403 our fetch (France24 among them).
+    result["published_at"] = extract_date_from_url(result["url"])
+
+    try:
+        resp = httpx.get(result["url"], headers=_BROWSER_HEADERS, timeout=timeout,
+                         follow_redirects=True)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as exc:
+        logger.debug("Article fetch failed for %s: %s", result["url"][:80], str(exc))
+        return result
+
+    # The page's own declaration beats the path: it carries a time of day, and a
+    # path date can be the slug's creation day rather than publication.
+    result["published_at"] = extract_published_date(html) or result["published_at"]
     try:
         import trafilatura
-        # We use a strict timeout for both connection and read
-        # trafilatura.fetch_url uses a complex internal download mechanism; 
-        # using it directly but being aware of its potential to hang.
-        downloaded = trafilatura.fetch_url(url) 
-        
-        if downloaded:
-            text = trafilatura.extract(downloaded, include_comments=False, include_tables=False, no_fallback=False)
-            return text or ""
-    except Exception as e:
-        logger.debug("Full-text fetch failed for %s: %s", url[:80], str(e))
-    return ""
+        result["text"] = trafilatura.extract(
+            html, include_comments=False, include_tables=False, no_fallback=False
+        ) or ""
+    except Exception:
+        logger.debug("Text extraction failed for %s", result["url"][:80])
+    return result
+
+
+def fetch_full_text(url: str) -> str:
+    """Article body text only. Thin wrapper over fetch_article."""
+    return fetch_article(url)["text"]
 
 
 def google_translate(text: str, target: str = "en") -> str:
