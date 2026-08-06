@@ -10,7 +10,7 @@ corroboration clusters, applies rule-based verification labels
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -73,13 +73,31 @@ _EVENT_COLUMNS = [
     "latitude", "longitude",
 ]
 
+# When an event has no estimated incident time, the window falls back to
+# published_at — which for a day-precision date is Pass A's END-OF-DAY sentinel
+# (23:59:59, ingest_sources.extract_date_from_url). That is a freshness
+# comparison value, not a clock time, and untouched it puts a same-day event
+# hours in the FUTURE: it then fails "< window_end" and silently slips out of
+# today's SITREP into tomorrow's. Pass D clamps the same chain in Python
+# (resolve_occurred_at_fallback), but this query re-derives it in SQL and would
+# otherwise bypass that fix. The fallback is live, not theoretical: every
+# 'archived' row the window admits has occurred_at_est NULL (782 rows in the 3
+# days to 2026-08-06).
+#
+# NOW() AT TIME ZONE 'UTC' — these columns are `timestamp without time zone`
+# holding UTC, so bare NOW() (timestamptz) would be compared through the session
+# timezone and shift the clamp by the offset.
+_EVENT_TIME_SQL = (
+    "LEAST(COALESCE(occurred_at_est, published_at, ingested_at), NOW() AT TIME ZONE 'UTC')"
+)
+
 _EVENTS_SELECT = f"""
     SELECT {", ".join(_EVENT_COLUMNS)}
     FROM events
     WHERE severity_score IS NOT NULL
       AND status IN ('scored', 'reconciled', 'archived')
-      AND COALESCE(occurred_at_est, published_at, ingested_at) >= %s
-      AND COALESCE(occurred_at_est, published_at, ingested_at) < %s
+      AND {_EVENT_TIME_SQL} >= %s
+      AND {_EVENT_TIME_SQL} < %s
 """
 
 
@@ -493,11 +511,23 @@ def _casualty_magnitude(event: Dict[str, Any]) -> Tuple[int, int]:
     return _largest(_DEATH_RE, title), _largest(_ANY_CASUALTY_RE, title)
 
 
-def _recency(event: Dict[str, Any]) -> float:
+def _recency(event: Dict[str, Any], now: datetime | None = None) -> float:
+    """How recent this filing is — a tiebreaker for which member headlines a cluster.
+
+    Clamped to the present for the same reason the SQL window is (see
+    _EVENT_TIME_SQL): the published_at fallback can be Pass A's end-of-day
+    sentinel. Unclamped, a member dated 23:59:59 outranks every genuinely newer
+    filing and takes the headline — which is how a thin wire item can end up
+    representing a mass-casualty cluster once casualty figures and corroboration
+    weight tie, as they routinely do at severity 100.
+    """
+    now = now or datetime.now(timezone.utc)
     for field in ("occurred_at_est", "published_at"):
         value = event.get(field)
         if isinstance(value, datetime):
-            return value.timestamp()
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return min(value, now).timestamp()
     return 0.0
 
 
@@ -538,10 +568,17 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
         # next key was "official domain first", Ukrinform's 3-injured Bohodukhiv
         # filing became the headline for the strike that killed 15 in Kyiv.
         # Official status stays as the last tiebreaker, where it belongs.
+        # Members carrying a real incident time rank above those we could only date
+        # by publication. Clamping _recency was NOT enough on its own: the clamp
+        # target is the present, so a member falling back to Pass A's end-of-day
+        # sentinel lands AT "now" and still outranks every genuinely-dated filing.
+        # Preferring a known occurred_at_est is what actually keeps a thin
+        # aggregator item from headlining a mass-casualty cluster.
         members.sort(
             key=lambda e: (
                 tuple(-figure for figure in _casualty_magnitude(e)),
                 -_corroboration_weight(e),
+                e.get("occurred_at_est") is None,
                 -_recency(e),
                 not is_official_domain(e.get("source_domain") or ""),
             )
@@ -925,8 +962,8 @@ def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetim
         FROM events
         WHERE severity_score IS NOT NULL
           AND status IN ('scored', 'reconciled', 'archived')
-          AND COALESCE(occurred_at_est, published_at, ingested_at) >= %s
-          AND COALESCE(occurred_at_est, published_at, ingested_at) < %s
+          AND {_EVENT_TIME_SQL} >= %s
+          AND {_EVENT_TIME_SQL} < %s
           AND country_iso IS NOT NULL
         GROUP BY country_iso
         HAVING COUNT(*) >= %s

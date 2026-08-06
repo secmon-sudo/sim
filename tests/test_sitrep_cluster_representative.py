@@ -320,6 +320,65 @@ class TestPlaceIdentity:
         assert sorted(locations) == ["Kyiv", "Ukraine"]
 
 
+class TestFreshnessSentinelNeverWinsTheHeadline:
+    """Pass A dates day-precision articles to 23:59:59 as a freshness sentinel.
+
+    It is a comparison value, not a clock time. Left unclamped it makes such a
+    member look like the newest filing in its cluster, and once casualty figures
+    and corroboration weight tie — routine at severity 100 — recency decides the
+    headline. Counterpart of the SQL clamp in _EVENT_TIME_SQL.
+    """
+
+    def test_end_of_day_sentinel_does_not_outrank_a_real_later_filing(self):
+        from src.services.sitrep_generator import _recency
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        sentinel = {"published_at": datetime(2026, 8, 6, 23, 59, 59, tzinfo=timezone.utc)}
+        real = {"occurred_at_est": datetime(2026, 8, 6, 10, 0, tzinfo=timezone.utc)}
+        assert _recency(sentinel, now=now) == _recency({"occurred_at_est": now}, now=now)
+        assert _recency(sentinel, now=now) > _recency(real, now=now)
+
+    def test_past_timestamps_are_untouched(self):
+        from src.services.sitrep_generator import _recency
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        earlier = datetime(2026, 8, 5, 6, 31, tzinfo=timezone.utc)
+        assert _recency({"occurred_at_est": earlier}, now=now) == earlier.timestamp()
+
+    def test_naive_timestamp_is_read_as_utc(self):
+        from src.services.sitrep_generator import _recency
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        naive_future = {"published_at": datetime(2026, 8, 6, 23, 59, 59)}
+        assert _recency(naive_future, now=now) == now.timestamp()
+
+    def test_undated_member_does_not_steal_the_headline(self):
+        # The clamp alone does NOT achieve this: it caps the sentinel at "now",
+        # which still beats every genuinely-dated filing. Ranking members with a
+        # real occurred_at_est first is what settles it.
+        now = datetime.now(timezone.utc)
+        events = [
+            _event("Russian missile barrage on Kyiv kills 17, rescue ongoing",
+                   "reuters.com", "Kyiv", 10),
+            _event("Kyiv attack kills 17, report says", "aggregator.example", "Kyiv", 23),
+        ]
+        events[0]["occurred_at_est"] = now.replace(hour=10, minute=0)
+        events[1]["occurred_at_est"] = None
+        events[1]["published_at"] = now.replace(hour=23, minute=59, second=59)
+        [cluster] = build_sitrep_clusters(events, [])
+        assert cluster["sources"][0]["name"] == "reuters.com"
+
+    def test_recency_still_decides_between_two_dated_members(self):
+        # The new key must only break the dated/undated tie — among members that
+        # both carry an incident time, the newer filing still wins.
+        now = datetime.now(timezone.utc)
+        events = [
+            _event("Kyiv attack kills 17, early wire copy", "apnews.com", "Kyiv", 6),
+            _event("Kyiv attack kills 17, updated toll", "reuters.com", "Kyiv", 9),
+        ]
+        events[0]["occurred_at_est"] = now.replace(hour=6, minute=0)
+        events[1]["occurred_at_est"] = now.replace(hour=9, minute=0)
+        [cluster] = build_sitrep_clusters(events, [])
+        assert cluster["sources"][0]["name"] == "reuters.com"
+
+
 class TestCountryTermTables:
     def test_every_aliased_country_has_self_terms(self):
         # _COUNTRY_ALIASES mixes in capitals and groups; _COUNTRY_SELF_TERMS must
