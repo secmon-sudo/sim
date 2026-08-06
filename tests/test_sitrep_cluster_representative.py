@@ -225,6 +225,101 @@ class TestCountryLevelAnchors:
         assert clusters[0]["location"] == "Ülke Geneli"
 
 
+class TestPlaceIdentity:
+    """Run #27 (2026-08-06): one night's strike on Kyiv became six clusters.
+
+    "Kyiv" and "Kiev" keyed apart, and "Kyiv train station" keyed apart from both,
+    so the narrator was handed the same incident three times and wrote up 21 dead,
+    then 17, then 8 — in a report whose own summary put the country-wide toll at 21.
+    Every cluster boundary below is an identity question: same place, different
+    spelling. Semantic merging ("is this nationwide item ABOUT Kyiv?") is a
+    separate gate and deliberately not covered here.
+    """
+
+    def _kyiv_night(self):
+        # Verbatim anchor spellings and headlines from the run #27 UA window.
+        return [
+            _event("Russian ballistic missile attack kills 15, injures 51 in Kyiv",
+                   "kyivindependent.com", "Kyiv", 6),
+            _event("Russian missile barrage on Kyiv kills 17 as Zelensky speaks",
+                   "reuters.com", "Kyiv", 8),
+            _event("At least 17 killed in Russian missile strike as Kiev left defenceless",
+                   "yahoo.com", "Kiev", 7),
+            _event("Kyiv city workers remove bodies of eight killed following attack "
+                   "on train station", "apnews.com", "Kyiv train station", 9),
+            _event("Massive Russian Strike Leaves At Least 15 Dead in Kyiv Oblast",
+                   "novinite.com", "Kyiv Oblast", 6),
+        ]
+
+    def test_exonym_does_not_split_the_cluster(self):
+        clusters = build_sitrep_clusters(self._kyiv_night(), [])
+        assert len(clusters) == 1, [c["location"] for c in clusters]
+
+    def test_venue_inside_a_city_does_not_split_the_cluster(self):
+        from src.services.sitrep_generator import _location_key
+        assert _location_key({"anchor_name_raw": "Kyiv train station"}) == "kyiv"
+        assert _location_key({"anchor_name_raw": "Odesa region enterprise"}) == "odesa"
+
+    def test_all_spellings_collapse_onto_one_key(self):
+        from src.services.sitrep_generator import _location_key
+        keys = {_location_key({"anchor_name_raw": name})
+                for name in ("Kyiv", "Kiev", "Kyiv Oblast", "Kiev region",
+                             "Kyiv Region", "Kyiv train station")}
+        assert keys == {"kyiv"}
+
+    def test_distinct_places_stay_distinct(self):
+        # The village station in Kyiv oblast is NOT the capital: over-merging is
+        # the mirror-image bug and would attribute its dead to the city.
+        from src.services.sitrep_generator import _location_key
+        assert _location_key({"anchor_name_raw": "Kvitneve railway station"}) == "kvitneve"
+        assert _location_key({"anchor_name_raw": "Kharkiv"}) != "kyiv"
+
+    def test_strategic_sites_are_not_folded_into_their_namesake_city(self):
+        # Zaporizhzhia NPP sits in Enerhodar and is its own story; folding it into
+        # the city would merge two genuinely different events.
+        from src.services.sitrep_generator import _location_key
+        assert _location_key({"anchor_name_raw": "Zaporozhye Nuclear Power Plant"}) \
+            != _location_key({"anchor_name_raw": "Zaporizhzhia"})
+
+    def test_bare_venue_word_does_not_become_country_level(self):
+        # Stripping "Airport" to "" would silently reclassify the event as
+        # nationwide and hand it to the country-level folding path.
+        from src.services.sitrep_generator import _location_key
+        assert _location_key({"anchor_name_raw": "Airport"}) == "airport"
+
+    def test_alias_table_is_canonical_and_acyclic(self):
+        # A canonical name appearing as a variant would make normalization depend
+        # on lookup order — "a -> b" plus "b -> c" leaves "a" stuck at "b".
+        from src.services.sitrep_generator import _PLACE_ALIASES
+        assert not set(_PLACE_ALIASES) & set(_PLACE_ALIASES.values())
+
+    def test_country_level_item_absorbs_via_alias_spelling(self):
+        # A wire item datelined "Ukraine" whose text says "Kiev" is about the Kyiv
+        # group; matching only the canonical spelling would leave it a lone cluster.
+        events = self._kyiv_night() + [
+            _event("Massive Russian missile attack, 14 killed and 22 injured",
+                   "cna.asia", "Ukraine", 10,
+                   text="The barrage struck Kiev overnight, officials said."),
+        ]
+        clusters = build_sitrep_clusters(events, [])
+        # Surviving as its own cluster would show up as a second, "Ülke Geneli"
+        # entry re-reporting the same night's dead.
+        assert len(clusters) == 1, [c["location"] for c in clusters]
+        assert clusters[0]["location"] != "Ülke Geneli"
+
+    def test_nationwide_item_naming_no_city_still_stands_alone(self):
+        # The mirror-image risk: absorbing on the storyline alone would fold a
+        # genuinely country-wide item into a single night's strike and let it
+        # corroborate a death toll it never reported.
+        events = self._kyiv_night() + [
+            _event("Over 8,300 glide bombs dropped by Russia on Ukraine in July",
+                   "pravda.com.ua", "Ukraine", 11,
+                   text="Air Force figures for the month showed a record total."),
+        ]
+        locations = [c["location"] for c in build_sitrep_clusters(events, [])]
+        assert sorted(locations) == ["Kyiv", "Ukraine"]
+
+
 class TestCountryTermTables:
     def test_every_aliased_country_has_self_terms(self):
         # _COUNTRY_ALIASES mixes in capitals and groups; _COUNTRY_SELF_TERMS must

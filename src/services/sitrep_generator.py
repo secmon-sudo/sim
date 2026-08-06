@@ -261,6 +261,59 @@ _LOCATION_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Venues INSIDE a city, which outlets use as the dateline for a strike that the
+# rest of the wire files under the city itself. "Kyiv train station" is the same
+# incident as "Kyiv" and must not become its own cluster.
+#
+# Deliberately excludes industrial and strategic sites — a nuclear plant, dam or
+# refinery is a newsworthy anchor in its own right and often sits in a different
+# town than the city it is named after (Zaporizhzhia NPP is in Enerhodar), so
+# folding those into the nearest city name would merge genuinely distinct events.
+_VENUE_SUFFIX_RE = re.compile(
+    r"\s+(?:(?:train|railway|metro|subway|bus|central)\s+)?"
+    r"(station|airport|terminal|market|mall|hospital|university|stadium|"
+    r"enterprise|warehouse|depot|mosque|church|school)$",
+    re.IGNORECASE,
+)
+
+# Exonyms and transliteration variants: the SAME city filed under different
+# spellings clustered apart, which split one incident into several and let the
+# narrator write each partial toll as a distinct event. Run #27 (2026-08-06) put
+# "Kyiv" and "Kiev" in separate clusters, so a single night's strike was reported
+# as 21 dead in one entry, 17 in another and 8 in a third — 34+ deaths in a
+# report whose own summary said 21.
+#
+# Variant -> canonical. Canonical spellings are the ones anchor_master and the
+# airspace tables use, so a folded key still resolves to real coordinates.
+_PLACE_ALIASES: Dict[str, str] = {
+    # Ukraine — Russian-transliteration variants are still common in wire copy.
+    "kiev": "kyiv",
+    "odessa": "odesa",
+    "kharkov": "kharkiv",
+    "lvov": "lviv",
+    "nikolaev": "mykolaiv",
+    "chernigov": "chernihiv",
+    "dnepropetrovsk": "dnipro",
+    "dnipropetrovsk": "dnipro",
+    "zaporozhye": "zaporizhzhia",
+    "zaporozhia": "zaporizhzhia",
+    "zaporizhia": "zaporizhzhia",
+    "lugansk": "luhansk",
+    "vinnitsa": "vinnytsia",
+    "zhitomir": "zhytomyr",
+    "ternopol": "ternopil",
+    "rovno": "rivne",
+    "energodar": "enerhodar",
+    # Other SITREP countries — only pairs seen in real headlines.
+    "moskva": "moscow",
+    "teheran": "tehran",
+    "makkah": "mecca",
+    "jiddah": "jeddah",
+    "bagdad": "baghdad",
+    "halab": "aleppo",
+    "peking": "beijing",
+}
+
 # Casualty figures in BOTH orders wire copy uses: "15 killed" and "kills 15".
 # ingest_filters._CASUALTY_COUNT_PATTERN only covers the first, which misses
 # most headlines of a developing story ("Kyiv strike kills 15", "Attack Kills 17").
@@ -322,14 +375,39 @@ _COUNTRY_SELF_TERMS: Dict[str, frozenset] = {
 }
 
 
-def _location_key(event: Dict[str, Any]) -> str:
-    """Normalized place for sub-grouping. Empty string when unlocated."""
-    raw = (event.get("anchor_name_norm") or event.get("anchor_name_raw") or "").strip().lower()
+def _strip_suffixes(raw: str) -> str:
+    """Peel administrative and venue suffixes until the name stops shrinking.
+
+    A suffix is only dropped when something is left: a bare "Airport" or
+    "Station" as the whole anchor carries no place at all, and reducing it to ""
+    would silently reclassify the event as country-level.
+    """
     previous = None
     while previous != raw:
         previous = raw
-        raw = _LOCATION_SUFFIX_RE.sub("", raw).strip()
+        for pattern in (_LOCATION_SUFFIX_RE, _VENUE_SUFFIX_RE):
+            stripped = pattern.sub("", raw).strip()
+            if stripped:
+                raw = stripped
     return raw
+
+
+def _location_key(event: Dict[str, Any]) -> str:
+    """Normalized place for sub-grouping. Empty string when unlocated.
+
+    Two names denoting one place MUST produce one key — every downstream
+    guarantee (one cluster = one incident, corroboration labels, casualty
+    reporting) rests on that.
+    """
+    raw = (event.get("anchor_name_norm") or event.get("anchor_name_raw") or "").strip().lower()
+    raw = _strip_suffixes(raw)
+    # Alias last: variants can carry their own suffixes ("Kiev region").
+    return _PLACE_ALIASES.get(raw, raw)
+
+
+def _place_variants(place: str) -> List[str]:
+    """A canonical place plus every spelling that normalizes onto it."""
+    return [place] + sorted(v for v, canon in _PLACE_ALIASES.items() if canon == place)
 
 
 def _is_country_level(event: Dict[str, Any]) -> bool:
@@ -342,10 +420,19 @@ def _is_country_level(event: Dict[str, Any]) -> bool:
 
 
 def _mentions_place(event: Dict[str, Any], place: str) -> bool:
+    """Does this event name the given place, under ANY of its spellings?
+
+    Matching only the canonical form would leave the absorption gate blind to
+    exactly the copy that needs it: a wire item datelined "Ukraine" whose text
+    says "Kiev" would not be recognized as being about the "kyiv" group.
+    """
     if not place:
         return False
     text = f"{event.get('source_title') or ''} {event.get('canonical_text') or ''}"
-    return re.search(rf"\b{re.escape(place)}\b", text, re.IGNORECASE) is not None
+    return any(
+        re.search(rf"\b{re.escape(variant)}\b", text, re.IGNORECASE)
+        for variant in _place_variants(place)
+    )
 
 
 def _absorb_country_level(subgroups: Dict[str, List[Dict[str, Any]]]
