@@ -181,3 +181,42 @@ class TestNoHeuristicGuessing:
         html = ('<meta property="article:published_time" content="2026-08-05T06:31:58+00:00"/>'
                 "<footer>© 2026</footer>")
         assert extract_published_date(html).date().isoformat() == "2026-08-05"
+
+
+class TestOccurredAtFallbackNeverLandsInTheFuture:
+    """The end-of-day sentinel is a freshness comparison, not an incident time.
+
+    Regression cover for the 2026-08-06 dashboard reading: same-day articles whose
+    date came only from the URL path carried occurred_at_est = 23:59:59, showed a
+    time that had not happened yet, and pinned their storyline to the top of the
+    board until midnight.
+    """
+
+    def test_same_day_end_of_day_sentinel_is_clamped_to_now(self):
+        from src.pipeline.pass_d_score import resolve_occurred_at_fallback
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        sentinel = datetime(2026, 8, 6, 23, 59, 59, tzinfo=timezone.utc)
+        assert resolve_occurred_at_fallback(sentinel, None, now=now) == now
+
+    def test_past_publication_time_is_left_alone(self):
+        from src.pipeline.pass_d_score import resolve_occurred_at_fallback
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        published = datetime(2026, 8, 5, 6, 31, 58, tzinfo=timezone.utc)
+        assert resolve_occurred_at_fallback(published, None, now=now) == published
+
+    def test_yesterdays_sentinel_survives_because_it_is_already_past(self):
+        from src.pipeline.pass_d_score import resolve_occurred_at_fallback
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        sentinel = datetime(2026, 8, 5, 23, 59, 59, tzinfo=timezone.utc)
+        assert resolve_occurred_at_fallback(sentinel, None, now=now) == sentinel
+
+    def test_naive_published_at_is_read_as_utc(self):
+        from src.pipeline.pass_d_score import resolve_occurred_at_fallback
+        now = datetime(2026, 8, 6, 10, 46, tzinfo=timezone.utc)
+        naive = datetime(2026, 8, 6, 23, 59, 59)
+        assert resolve_occurred_at_fallback(naive, None, now=now) == now
+
+    def test_missing_publication_date_falls_through_to_ingest_time(self):
+        from src.pipeline.pass_d_score import resolve_occurred_at_fallback
+        ingested = datetime(2026, 8, 6, 9, 0, tzinfo=timezone.utc)
+        assert resolve_occurred_at_fallback(None, ingested) is ingested

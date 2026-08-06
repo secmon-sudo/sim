@@ -406,6 +406,36 @@ def resolve_anchor_for_event(db_conn, event: dict) -> dict:
     }
 
 
+def resolve_occurred_at_fallback(
+    published_at: datetime | None,
+    ingested_at: datetime | None,
+    now: datetime | None = None,
+) -> datetime | None:
+    """Pick an incident time when the classifier could not date the event.
+
+    `published_at` is not a clock time. Pass A deliberately resolves day-precision
+    publication dates to 23:59:59 (ingest_sources.extract_date_from_url) so the
+    freshness window never ages an article past its real age — a comparison-only
+    sentinel. Handing that value straight to consumers made same-day articles
+    carry a timestamp hours in the FUTURE: measured 2026-08-06 at 10:46Z, a
+    PressTV report of the Yemen strikes sat at 23:59:59 while its TASS sibling
+    held the true 00:39:55, and the dashboard's `ORDER BY updated_at DESC` pinned
+    the storyline to the top of the board for the rest of the day.
+
+    Clamping to `now` keeps the sentinel doing its one job in Pass A and stops it
+    claiming a time that has not happened yet. An estimate may be vague; it must
+    never be in the future.
+    """
+    now = now or datetime.now(timezone.utc)
+    if published_at is None:
+        return ingested_at
+    # Naive rows come from columns written before tz-aware inserts; read them as
+    # UTC rather than crashing the comparison.
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return min(published_at, now)
+
+
 def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
     """Link this event to the BEST-matching existing storyline.
 
@@ -618,7 +648,9 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         # Stars & Stripes report published 30 Jul was picked up on 1 Aug and
         # every downstream consumer — SITREP bullet dates, storyline windows,
         # flash detection — treated the strike as having happened on 1 Aug.
-        occurred_at_est = row[6] or row[11] or row[9]
+        # The fallback is clamped: published_at can be Pass A's end-of-day
+        # freshness sentinel, which is not a real clock time.
+        occurred_at_est = row[6] or resolve_occurred_at_fallback(row[11], row[9])
 
         event = {
             "id": str(row[0]),
