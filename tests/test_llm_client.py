@@ -8,6 +8,7 @@ and rotate to the next cascade slot, not return them as success.
 """
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from src.core import llm_client
@@ -153,3 +154,84 @@ def test_send_request_payload_uses_model_profile():
         )
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["reasoning_effort"] == "low"
+
+
+# ── json-mode self-heal ────────────────────────────────────────────────────
+# A profile only CLAIMS response_format support; providers have revoked it before
+# (OpenRouter free, 2026-07-08). Without the probe below a revocation would 4xx every
+# call and drop the slot — which for Nemotron means losing 73% of Pass C capacity.
+
+def _post_stub(*statuses):
+    """Sequence of fake httpx responses, capturing each payload sent."""
+    sent = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent.append(json)
+        resp = MagicMock()
+        status = statuses[len(sent) - 1]
+        resp.status_code = status
+        resp.is_success = 200 <= status < 300
+        if status >= 400:
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                f"HTTP {status}", request=MagicMock(), response=resp)
+        else:
+            resp.raise_for_status.return_value = None
+        return resp
+
+    return fake_post, sent
+
+
+@pytest.fixture(autouse=True)
+def _clean_json_mode_state():
+    llm_client.reset_json_mode_sidelines()
+    yield
+    llm_client.reset_json_mode_sidelines()
+
+
+def test_json_mode_400_retries_bare_and_sidelines_model():
+    acct = _acct("nvidia/nemotron-3-super-120b-a12b:free")
+    fake_post, sent = _post_stub(400, 200)
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        llm_client._send_request(acct, [{"role": "user", "content": "hi"}])
+    assert "response_format" in sent[0]
+    assert "response_format" not in sent[1]   # the probe proves the culprit
+    assert "reasoning" in sent[1]             # other profile extras survive the retry
+    assert llm_client._json_mode_sidelined(acct)
+
+
+def test_sidelined_model_skips_json_mode_on_later_calls():
+    acct = _acct("nvidia/nemotron-3-super-120b-a12b:free")
+    fake_post, sent = _post_stub(400, 200, 200)
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        llm_client._send_request(acct, [{"role": "user", "content": "hi"}])
+        # Same model on the OTHER key: the capability belongs to the model, so one
+        # slot's discovery must spare its twin an extra 400.
+        llm_client._send_request(
+            _acct("nvidia/nemotron-3-super-120b-a12b:free", account_id="B"),
+            [{"role": "user", "content": "hi"}],
+        )
+    assert len(sent) == 3
+    assert "response_format" not in sent[2]
+
+
+def test_non_json_mode_400_propagates_without_sidelining():
+    # A 400 that persists without response_format is about something else (bad model
+    # id, bad param) — json mode must not take the blame, and the slot's normal
+    # hard-error path must still fire.
+    acct = _acct("nvidia/nemotron-3-super-120b-a12b:free")
+    fake_post, _ = _post_stub(400, 400)
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        with pytest.raises(httpx.HTTPStatusError):
+            llm_client._send_request(acct, [{"role": "user", "content": "hi"}])
+    assert not llm_client._json_mode_sidelined(acct)
+
+
+def test_json_mode_probe_not_triggered_for_prose_callers():
+    # json_mode=False callers never sent response_format, so a 400 is never its fault.
+    acct = _acct("nvidia/nemotron-3-super-120b-a12b:free")
+    fake_post, sent = _post_stub(400)
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        with pytest.raises(httpx.HTTPStatusError):
+            llm_client._send_request(acct, [{"role": "user", "content": "hi"}], json_mode=False)
+    assert len(sent) == 1
+    assert not llm_client._json_mode_sidelined(acct)

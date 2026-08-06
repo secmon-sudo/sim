@@ -8,6 +8,7 @@ Handles retries, failover, and telemetry logging.
 
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -48,6 +49,31 @@ class LLMRequestTooLarge(RuntimeError):
     (LLMAllThrottled) or aborting the whole stage (generic RuntimeError) are both
     wrong responses. Subclasses RuntimeError so unaware catchers stay safe.
     """
+
+
+# (provider, model) pairs whose profile claims response_format support but whose
+# endpoint proved otherwise at runtime. Keyed by model, not API key: the capability
+# belongs to the model/provider pair, so one slot's discovery spares its twin on the
+# other key. Process-wide and never cleared — a provider that 400s on response_format
+# will keep doing so for the rest of the run.
+_JSON_MODE_SIDELINED: set[tuple[str, str]] = set()
+_JSON_MODE_LOCK = threading.Lock()
+
+
+def _json_mode_sidelined(acct: LLMAccount) -> bool:
+    with _JSON_MODE_LOCK:
+        return (acct.provider, acct.model) in _JSON_MODE_SIDELINED
+
+
+def _sideline_json_mode(acct: LLMAccount) -> None:
+    with _JSON_MODE_LOCK:
+        _JSON_MODE_SIDELINED.add((acct.provider, acct.model))
+
+
+def reset_json_mode_sidelines() -> None:
+    """Clear the runtime json-mode denylist (test isolation only)."""
+    with _JSON_MODE_LOCK:
+        _JSON_MODE_SIDELINED.clear()
 
 
 def _parse_retry_after(response: httpx.Response) -> float | None:
@@ -125,16 +151,43 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # already instructs "Respond ONLY with valid JSON", satisfying the OpenAI-compat
     # requirement that the word "json" appear in the conversation.)
     profile = get_profile(acct.provider, acct.model)
-    if profile.supports_json_mode and json_mode:
+    sending_json_mode = profile.supports_json_mode and json_mode and not _json_mode_sidelined(acct)
+    if sending_json_mode:
         payload["response_format"] = {"type": "json_object"}
     payload.update(profile.payload_extras)
 
-    response = httpx.post(
-        PROVIDER_ENDPOINTS[acct.provider],
-        headers=headers,
-        json=payload,
-        timeout=profile.request_timeout,
-    )
+    def _post(body: dict) -> httpx.Response:
+        return httpx.post(
+            PROVIDER_ENDPOINTS[acct.provider],
+            headers=headers,
+            json=body,
+            timeout=profile.request_timeout,
+        )
+
+    response = _post(payload)
+
+    # A profile can only CLAIM response_format support; the endpoint is the authority
+    # and providers have revoked it before (OpenRouter free, 2026-07-08). Without this
+    # probe a revocation turns every call into a hard 4xx and takes the whole slot out
+    # of the cascade. Re-sending without response_format is the experiment: if the bare
+    # request succeeds, response_format was the culprit and json mode is disabled for
+    # this model process-wide; if it 400s too, the fault lies elsewhere and the error
+    # propagates untouched. Costs one extra request on a rare path — and only once per
+    # model, since the sideline is sticky. (The retry isn't charged to the account's
+    # token bucket, which is spent per call_llm attempt, not per HTTP request.)
+    if sending_json_mode and response.status_code == 400:
+        bare = {k: v for k, v in payload.items() if k != "response_format"}
+        retry = _post(bare)
+        if retry.is_success:
+            _sideline_json_mode(acct)
+            logger.warning(
+                "LLM %s rejected response_format (HTTP 400) but succeeded without it — "
+                "json mode disabled for this model for the rest of the process; "
+                "drop it from OPENROUTER_JSON_MODE_MODELS if this persists",
+                acct.display_name,
+            )
+        response = retry
+
     response.raise_for_status()
     return response
 

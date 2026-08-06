@@ -752,16 +752,83 @@ def _batch_prompt(llm_events: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+# Each batch item is instructed to lead with its "report" number (BATCH_SYSTEM_SUFFIX),
+# and every corrupt sample observed in prod honors that. Anchoring salvage on this
+# pattern rather than on brace depth is deliberate — see _salvage_batch_items.
+_REPORT_OBJECT_START = re.compile(r'\{\s*"report"\s*:')
+
+
+def _first_parseable_prefix(chunk: str) -> dict | None:
+    """Longest-valid-object-from-the-left: the first `}` whose prefix json.loads.
+
+    Walking closing braces left to right handles nested objects for free — a prefix
+    ending at an INNER `}` is unbalanced and fails to parse, so the scan simply
+    continues to the brace that actually closes the item.
+    """
+    for i, ch in enumerate(chunk):
+        if ch != "}":
+            continue
+        try:
+            obj = json.loads(chunk[:i + 1], strict=False)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
+def _salvage_batch_items(content: str) -> list[dict]:
+    """Recover the individually-valid report objects from a corrupt batch reply.
+
+    A free-tier model can drop a garbage token mid-object (Nemotron emitted
+    `"anchor_name": "Kyiv",",` with finish_reason=stop, 2026-08-05) — that breaks the
+    OUTER json.loads and used to strand all six events in the chunk even though five
+    objects were perfectly well-formed. Recovering them turns a 6-event loss into a
+    1-event loss.
+
+    Brace-depth scanning does NOT work here, which is why this splits on the
+    `{"report":` marker instead: that stray `",` leaves an odd number of quotes, so
+    every following `"` has inverted meaning and the item's real `}` reads as being
+    inside a string. Parity corruption defeats any depth counter, but it cannot move
+    the literal `{"report":` markers, so the chunk boundaries survive it. The cost is
+    an assumption — if a model stops leading with "report", salvage finds nothing and
+    the caller falls back to the old whole-batch failure. No regression, just no rescue.
+
+    Only objects carrying an explicit integer "report" survive: a partial list can't
+    be mapped by position without silently pinning classifications to the wrong events.
+    """
+    starts = [m.start() for m in _REPORT_OBJECT_START.finditer(content)]
+    items: list[dict] = []
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(content)
+        obj = _first_parseable_prefix(content[start:end])
+        # bool is an int subclass — a JSON `true` must not pass as report number 1.
+        if obj is not None and isinstance(obj.get("report"), int) \
+                and not isinstance(obj.get("report"), bool):
+            items.append(obj)
+    return items
+
+
 def _parse_batch_response(content: str, expected: int) -> dict[int, dict]:
     """Parse a batch response into {report_number: parsed_item}.
 
-    Outer-JSON failures raise LLMParseError (whole batch stays queued);
-    per-item defects just drop that item — its event stays queued.
+    Outer-JSON failures fall back to per-object salvage; only a reply with nothing
+    recoverable raises LLMParseError (whole batch stays queued). Per-item defects
+    just drop that item — its event stays queued.
     """
-    parsed = validate_and_parse(content)  # reuses markdown/trailing-comma repair
-    results = parsed.get("results")
-    if not isinstance(results, list):
-        raise LLMParseError("Batch response missing 'results' array")
+    try:
+        parsed = validate_and_parse(content)  # reuses markdown/trailing-comma repair
+        results = parsed.get("results")
+        if not isinstance(results, list):
+            raise LLMParseError("Batch response missing 'results' array")
+    except LLMParseError:
+        results = _salvage_batch_items(content)
+        if not results:
+            raise
+        logger.warning(
+            "Batch outer JSON unparseable — salvaged %d/%d report objects individually",
+            len(results), expected,
+        )
     items: dict[int, dict] = {}
     for pos, item in enumerate(results, 1):
         if not isinstance(item, dict):
@@ -835,8 +902,14 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
         _release_pending(requeue=True)
         raise
     except LLMParseError as e:
-        # Whole-batch parse failure: leave the events queued for the pacing retry /
-        # next run rather than mislabeling all of them.
+        # TOTAL parse failure — nothing survived even per-object salvage. A reply that
+        # was merely dented (one corrupt object among six) never reaches here: it is
+        # salvaged, and the surviving events are applied. That asymmetry is deliberate.
+        # The slot penalty below sidelines the model for the rest of the run, which
+        # costs far more than one requeued event — worth it when the slot returns pure
+        # garbage, not worth it for a single bad token.
+        # Leave the events queued for the pacing retry / next run rather than
+        # mislabeling all of them.
         # result is always bound here: LLMParseError is only raised by
         # _parse_batch_response, after call_llm has returned.
         logger.warning(

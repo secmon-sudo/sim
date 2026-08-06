@@ -7,7 +7,10 @@ not waiting for the next incident. One incident per rule below:
 
 Checklist for adding a NEW model slot:
   1. json_mode — does the provider accept response_format={"type":"json_object"}?
-     OpenRouter free models return HTTP 400 on it (2026-07-08).
+     Answer per MODEL on OpenRouter, not per provider: free models 400'd on it
+     across the board in 2026-07-08, but some now advertise it (see
+     OPENROUTER_JSON_MODE_MODELS). Check the model's supported_parameters in
+     https://openrouter.ai/api/v1/models before adding a slot to that list.
   2. reasoning — does the model reason by default, and which knob turns it off?
      max_tokens covers reasoning + answer COMBINED everywhere, so hidden thinking
      starves the actual reply. qwen accepts reasoning_effort="none"; gpt-oss only
@@ -29,6 +32,20 @@ GROQ_MAX_REQUEST_TOKENS = 8000
 # Cerebras free tier caps tokens at 30K/minute — a single request above that can
 # never fit its window, so treat it as the per-request ceiling too.
 CEREBRAS_MAX_REQUEST_TOKENS = 30000
+
+# OpenRouter free slots that DO accept response_format. The blanket "OpenRouter free
+# 400s on response_format" rule (2026-07-08) was true then but is no longer: both slots
+# below advertise response_format + structured_outputs in the models API (re-checked
+# 2026-08-06). It matters because unconstrained batch replies drift into malformed JSON
+# mid-object — Nemotron corrupted ~7% of Pass C batches that way (2026-08-05/06), each
+# one stranding a whole 6-event chunk. Anything NOT listed here keeps the old behavior.
+# This list is a claim about the provider, so llm_client verifies it at runtime: a 400
+# that disappears when response_format is dropped disables json mode for that slot
+# instead of letting the slot die.
+OPENROUTER_JSON_MODE_MODELS = frozenset({
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-20b:free",
+})
 
 
 @dataclass(frozen=True)
@@ -69,8 +86,15 @@ def get_profile(provider: str, model: str) -> ModelProfile:
     # response_format json_object. Cerebras serves gpt-oss with the same
     # reasoning_effort knob as Groq and supports json_object (verify on first
     # prod run per the checklist — a 400 would sideline the slot, not break it).
+    # OpenRouter is per-model rather than per-provider: only the slots on the
+    # verified list above take response_format.
+    if provider == "openrouter":
+        supports_json = model in OPENROUTER_JSON_MODE_MODELS
+    else:
+        supports_json = provider in ("groq", "gemini", "mistral", "cerebras")
+
     return ModelProfile(
-        supports_json_mode=provider in ("groq", "gemini", "mistral", "cerebras"),
+        supports_json_mode=supports_json,
         payload_extras=extras,
         max_request_tokens=max_request,
         request_timeout=120.0 if provider == "mistral" else 30.0,

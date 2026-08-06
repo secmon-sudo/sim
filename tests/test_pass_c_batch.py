@@ -56,6 +56,54 @@ def test_parse_batch_rejects_missing_results():
         pc._parse_batch_response(json.dumps({"answers": []}), expected=2)
 
 
+# ── per-object salvage ─────────────────────────────────────────────────────
+# Free-tier models drop garbage tokens mid-object with finish_reason=stop; the outer
+# json.loads then fails even though most report objects are intact. Losing the whole
+# chunk over one bad token cost ~7% of Pass C batches (2026-08-05/06).
+
+# Verbatim shape of the Nemotron corruption: a stray `",` after anchor_name.
+_CORRUPT = '''{"results": [
+  {"report": 1, "event_type": "missile_strike", "anchor_name": "Kyiv",",
+   "occurred_at": "2026-08-05"},
+  {"report": 2, "event_type": "drone_attack_critical_infra", "anchor_name": "Odesa"},
+  {"report": 3, "event_type": "terrorism", "anchor_name": "Beirut"}
+]}'''
+
+
+def test_salvage_recovers_intact_objects_around_a_corrupt_one():
+    items = pc._parse_batch_response(_CORRUPT, expected=3)
+    assert set(items) == {2, 3}          # report 1 is the casualty, not the chunk
+    assert items[2]["event_type"] == "drone_attack_critical_infra"
+    assert items[3]["anchor_name"] == "Beirut"
+
+
+def test_salvage_ignores_objects_without_an_explicit_report_number():
+    # Position fallback is unsafe on a partial list: without "report" there is no way
+    # to know which event an object describes, and a wrong guess mislabels an event.
+    content = '{"results": [{"event_type": "riot"},,, {"report": 2, "event_type": "flood"}]}'
+    items = pc._parse_batch_response(content, expected=2)
+    assert set(items) == {2}
+
+
+def test_salvage_is_not_fooled_by_braces_inside_strings():
+    content = ('{"results": [{"report": 1, "summary": "shell hit {block 5} at dawn"},,'
+               ' {"report": 2, "summary": "quiet"}]}')
+    items = pc._parse_batch_response(content, expected=2)
+    assert items[1]["summary"] == "shell hit {block 5} at dawn"
+    assert set(items) == {1, 2}
+
+
+def test_total_garbage_still_raises_so_the_slot_gets_penalized():
+    with pytest.raises(LLMParseError):
+        pc._parse_batch_response("I cannot classify these reports.", expected=3)
+
+
+def test_out_of_bounds_report_numbers_dropped_during_salvage():
+    content = '{"results": [{"report": 9, "event_type": "x"},,, {"report": 1, "event_type": "y"}]}'
+    items = pc._parse_batch_response(content, expected=2)
+    assert set(items) == {1}
+
+
 # ── classify_event_batch ───────────────────────────────────────────────────
 
 def _patch_batch(**overrides):

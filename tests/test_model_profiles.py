@@ -20,10 +20,18 @@ class TestJsonMode:
         assert get_profile("mistral", "mistral-large-2512").supports_json_mode
         assert get_profile("cerebras", "gpt-oss-120b").supports_json_mode
 
-    def test_openrouter_free_models_do_not(self):
-        # OpenRouter free models 400 on response_format (2026-07-08).
-        assert not get_profile("openrouter", "openai/gpt-oss-20b:free").supports_json_mode
-        assert not get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free").supports_json_mode
+    def test_openrouter_verified_free_models_do(self):
+        # Re-verified against the models API 2026-08-06: these two advertise
+        # response_format + structured_outputs, and json mode is what stops batch
+        # replies from drifting into malformed JSON mid-object.
+        assert get_profile("openrouter", "openai/gpt-oss-20b:free").supports_json_mode
+        assert get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free").supports_json_mode
+
+    def test_openrouter_is_per_model_not_per_provider(self):
+        # The 2026-07-08 blanket 400 still applies to anything unverified — an
+        # unlisted OpenRouter slot must not inherit json mode from its neighbors.
+        assert not get_profile("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free").supports_json_mode
+        assert not get_profile("openrouter", "google/gemma-4-31b-it:free").supports_json_mode
 
 
 class TestReasoningGate:
