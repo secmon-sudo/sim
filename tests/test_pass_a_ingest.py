@@ -2,7 +2,9 @@
 Tests for Pass A ingestion logic.
 """
 
+from unittest.mock import MagicMock, patch
 
+from src.pipeline.ingest_sources import _http_get_with_retry, _is_bot_challenge
 from src.pipeline.pass_a_ingest import (
     build_search_queries,
     canonicalize_text,
@@ -10,6 +12,51 @@ from src.pipeline.pass_a_ingest import (
     is_noise,
     title_similarity,
 )
+
+
+def _resp(status, body="", content_type="application/rss+xml"):
+    r = MagicMock()
+    r.status_code = status
+    r.text = body
+    r.headers = {"content-type": content_type}
+    r.raise_for_status.return_value = None
+    return r
+
+
+class TestBotChallengeDetection:
+    """A challenge answers with a retryable-looking status but can never be retried
+    through — backoff would burn wall clock on every run, forever."""
+
+    def test_vercel_checkpoint_detected(self):
+        body = '<!DOCTYPE html><html><head><title>Vercel Security Checkpoint</title>'
+        assert _is_bot_challenge(_resp(429, body, "text/html; charset=utf-8"))
+
+    def test_cloudflare_challenge_detected(self):
+        assert _is_bot_challenge(_resp(403, "<html><title>Just a moment...</title>", "text/html"))
+
+    def test_real_feed_is_never_a_challenge(self):
+        # The content-type guard means an article legitimately titled "Just a moment"
+        # in a real XML feed can't trip the marker scan.
+        body = '<?xml version="1.0"?><rss><item><title>Just a moment in Kyiv</title></item></rss>'
+        assert not _is_bot_challenge(_resp(200, body, "application/rss+xml"))
+
+    def test_challenge_gives_up_immediately_without_sleeping(self):
+        challenge = _resp(429, "<html>Vercel Security Checkpoint</html>", "text/html")
+        with patch("src.pipeline.ingest_sources.httpx.get", return_value=challenge) as get:
+            with patch("src.pipeline.ingest_sources.time.sleep") as sleep:
+                result = _http_get_with_retry("https://walled.example/feed/", max_retries=4)
+        assert result is None
+        assert get.call_count == 1   # no retry
+        sleep.assert_not_called()    # no backoff
+
+    def test_plain_429_still_retries_with_backoff(self):
+        # A bare 429 (no challenge body) is a real rate limit — keep backing off.
+        with patch("src.pipeline.ingest_sources.httpx.get", return_value=_resp(429)) as get:
+            with patch("src.pipeline.ingest_sources.time.sleep") as sleep:
+                result = _http_get_with_retry("https://busy.example/feed/", max_retries=3)
+        assert result is None
+        assert get.call_count == 3
+        assert sleep.call_count == 3
 
 
 class TestBuildSearchQueries:
@@ -105,6 +152,17 @@ class TestConfiguredFeeds:
         
         for feed in expected_feeds:
             assert feed in publisher_feeds
+
+    def test_bot_walled_sources_stay_removed(self):
+        """humanglemedia.com went behind Vercel's checkpoint (2026-08-06): HTTP 429 +
+        a JS challenge on every path including "/". No plain-HTTP client can read it,
+        and routing it through Google News would only produce aggregator items whose
+        article pages hit the same wall — i.e. unverifiable dates, the exact bucket
+        that let a 2016 reprint fire an ALERT."""
+        from src.pipeline.pass_a_ingest import SETTINGS
+        all_sources = (SETTINGS["sources"]["publisher_feeds"]
+                       + SETTINGS["sources"]["news_queries"])
+        assert not any("humanglemedia" in u for u in all_sources)
 
     def test_the_two_source_lists_are_disjoint_and_correctly_sorted(self):
         """publisher_feeds and news_queries are split so their very different

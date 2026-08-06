@@ -51,14 +51,58 @@ def with_recency(query: str) -> str:
 # HTTP helpers with retry / backoff
 # ---------------------------------------------------------------------------
 
+# Bot-protection interstitials answer with a RETRYABLE-LOOKING status (429/403) but serve
+# an HTML challenge page instead of the feed. Backoff can never clear one — the challenge
+# wants a JS-capable browser — so every retry is guaranteed-wasted wall clock, every run,
+# forever. humanglemedia.com went behind Vercel's checkpoint and answered 429 on EVERY path
+# including "/" (found 2026-08-06; the feed had been silently dead for weeks while the logs
+# read like an ordinary rate limit). Detecting the challenge turns a permanent failure into
+# an honest one-line diagnosis instead of a misleading "Rate limit (429), retry in 2.0s".
+_CHALLENGE_MARKERS = (
+    "vercel security checkpoint",
+    "just a moment",
+    "checking your browser",
+    "cf-browser-verification",
+    "attention required",
+    "captcha",
+)
+
+
+def _is_bot_challenge(resp: httpx.Response) -> bool:
+    """True when the body is a bot-protection interstitial rather than real content.
+
+    Requires an HTML content-type: a feed endpoint serving text/html is already wrong,
+    and that guard keeps the marker scan from ever firing on a legitimate XML feed that
+    happens to quote one of these phrases in an article title.
+    """
+    if "html" not in resp.headers.get("content-type", "").lower():
+        return False
+    try:
+        head = resp.text[:4000].lower()
+    except Exception:  # undecodable body — can't be a challenge page we could read
+        return False
+    return any(marker in head for marker in _CHALLENGE_MARKERS)
+
+
 def _http_get_with_retry(url: str, headers: dict | None = None, timeout: float = 15.0,
                          max_retries: int = 4, backoff_base: float = 8.0,
                          params: dict | None = None) -> httpx.Response | None:
-    """Perform GET with exponential backoff on 429 / 5xx / network errors."""
+    """Perform GET with exponential backoff on 429 / 5xx / network errors.
+
+    Returns None when the URL is unusable — retries exhausted, or a bot-protection
+    challenge that retrying could never clear.
+    """
     headers = headers or {}
     for attempt in range(max_retries):
         try:
             resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True, params=params)
+            if resp.status_code in (429, 403) and _is_bot_challenge(resp):
+                logger.warning(
+                    "Bot-protection challenge on %s (HTTP %d) — not retryable, giving up; "
+                    "drop the source if this persists",
+                    url[:80], resp.status_code,
+                )
+                return None
             if resp.status_code == 429:
                 wait = backoff_base ** attempt
                 logger.warning("Rate limit (429) on %s, retry in %.1fs (attempt %d/%d)",
