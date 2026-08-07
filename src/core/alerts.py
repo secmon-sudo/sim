@@ -40,24 +40,41 @@ TIERS = {
 ADVISORY_EVENT_TYPES = {"travel_advisory", "travel_ban"}
 ADVISORY_ALERT_SEVERITY_MIN = 55
 
+# A time_certainty that pins the event to roughly "now" — the only values that make
+# an event newsworthy as a page rather than as background.
+FRESH_TIME_CERTAINTY = ["same_day", "previous_day"]
+
 # Tier thresholds live in config/settings.json -> alert.tiers. They used to be
 # duplicated here as literals, which meant editing the config changed nothing —
-# a silent trap for anyone tuning alert volume. The defaults below reproduce the
-# original V19 gates exactly, so a missing or partial config behaves as before.
+# a silent trap for anyone tuning alert volume.
 #
 # Each tier is evaluated in order and takes the first match:
 #   severity_min / confidence_min   — inclusive floors
-#   anchor_confidence               — allowed values (omit to accept any)
-#   time_certainty_exclude          — reject when time_certainty is in this list
+#   require_location                — event must resolve to a place (IATA anchor or coords)
+#   require_location_or_fresh       — ...or, failing that, carry a fresh time_certainty
 #   time_certainty_include          — require time_certainty to be in this list
+#   time_certainty_exclude          — reject when time_certainty is in this list
+#   anchor_confidence               — allowed values (omit to accept any)
+#
+# Calibration note (7 Aug 2026). The original V19 gates keyed ALERT/CRITICAL on
+# anchor_confidence and on time_certainty != unknown. Measured against a week of
+# real corpus, both signals turned out to be near-constant and the conjunction was
+# unsatisfiable — 1455 of 1469 alerted events were anchor LOW (the anchor level
+# really means "an IATA airport was resolved", which conflict reporting rarely
+# offers) and 86% of all scored events carry time_certainty='unknown'. So the
+# gates never fired and a fallback in dispatch_alert force-labelled everything
+# ALERT, which is why CRITICAL had never once fired. The gates below are set from
+# the observed distributions (confidence p50=0.41, p90=0.62, p95=0.66, max=0.78)
+# and treat "we know WHERE it happened" as a first-class signal alongside "we know
+# WHEN": ALERT needs one of the two, CRITICAL needs both.
 _DEFAULT_TIER_RULES = {
-    "CRITICAL": {"severity_min": 80, "confidence_min": 0.8,
-                 "anchor_confidence": ["HIGH"], "time_certainty_exclude": ["unknown"]},
-    "ALERT": {"severity_min": 65, "confidence_min": 0.65,
-              "anchor_confidence": ["HIGH", "MEDIUM"], "time_certainty_exclude": ["unknown"]},
-    "WATCH": {"severity_min": 45, "confidence_min": 0.5,
-              "anchor_confidence": ["HIGH", "MEDIUM", "LOW"],
-              "time_certainty_include": ["same_day", "previous_day"]},
+    "CRITICAL": {"severity_min": 80, "confidence_min": 0.62,
+                 "require_location": True,
+                 "time_certainty_include": FRESH_TIME_CERTAINTY},
+    "ALERT": {"severity_min": 65, "confidence_min": 0.50,
+              "require_location_or_fresh": True},
+    "WATCH": {"severity_min": 45, "confidence_min": 0.40,
+              "time_certainty_include": FRESH_TIME_CERTAINTY},
 }
 
 # Severity descends across tiers, so evaluation order is fixed rather than taken
@@ -80,8 +97,24 @@ def _tier_rules() -> dict:
 TIER_RULES = _tier_rules()
 
 
-def _matches_tier(rule: dict, sev, conf, anc: str, time_: str) -> bool:
+def is_located(event: dict) -> bool:
+    """True when the event resolved to a real place.
+
+    Either an IATA anchor (aviation events) or coordinates from the city gazetteer
+    (everything else). Pass D resolves both, so this is the honest "we know where
+    this happened" test — unlike anchor_confidence, which only ever means "an IATA
+    airport matched" and is LOW for ~99% of the corpus.
+    """
+    return bool(event.get("anchor_name_norm")) or event.get("latitude") is not None
+
+
+def _matches_tier(rule: dict, sev, conf, anc: str, time_: str, located: bool) -> bool:
     if sev < rule["severity_min"] or conf < rule["confidence_min"]:
+        return False
+    fresh = time_ in FRESH_TIME_CERTAINTY
+    if rule.get("require_location") and not located:
+        return False
+    if rule.get("require_location_or_fresh") and not (located or fresh):
         return False
     allowed = rule.get("anchor_confidence")
     if allowed is not None and anc not in allowed:
@@ -104,7 +137,8 @@ def evaluate_alert_tier(event: dict) -> str | None:
     sev = event.get("severity_score", 0)
     conf = event.get("system_confidence", 0.0)
     anc = event.get("anchor_confidence", "LOW")
-    time_ = event.get("time_certainty", "unknown")
+    time_ = event.get("time_certainty") or "unknown"
+    located = is_located(event)
 
     # Travel advisory path — country-level official warning, no airport anchor and its
     # "time" is the standing advisory date, so bypass the anchor/time gates and key on
@@ -113,7 +147,7 @@ def evaluate_alert_tier(event: dict) -> str | None:
         return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
 
     for name in TIER_ORDER:
-        if _matches_tier(TIER_RULES[name], sev, conf, anc, time_):
+        if _matches_tier(TIER_RULES[name], sev, conf, anc, time_, located):
             return name
 
     return None

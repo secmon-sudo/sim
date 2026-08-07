@@ -61,6 +61,7 @@ class TestAlertTier:
             "system_confidence": 0.9,
             "anchor_confidence": "HIGH",
             "time_certainty": "same_day",
+            "anchor_name_norm": "CAI",  # CRITICAL requires a resolved place
         }
         assert evaluate_alert_tier(event) == "CRITICAL"
 
@@ -180,13 +181,16 @@ class TestConfigDrivenTiers:
     """
 
     @staticmethod
-    def _event(sev, conf, anchor="HIGH", time_="same_day"):
-        return {"severity_score": sev, "system_confidence": conf,
-                "anchor_confidence": anchor, "time_certainty": time_}
+    def _event(sev, conf, anchor="HIGH", time_="same_day", located=True):
+        ev = {"severity_score": sev, "system_confidence": conf,
+              "anchor_confidence": anchor, "time_certainty": time_}
+        if located:
+            ev["anchor_name_norm"] = "IST"
+        return ev
 
     def test_config_and_code_agree(self):
-        # The shipped config must reproduce the V19 gates; a mismatch means the
-        # file was edited without the intent being reviewed.
+        # The shipped config must reproduce the calibrated gates; a mismatch means
+        # the file was edited without the intent being reviewed.
         import json
         from pathlib import Path
         from src.core.alerts import TIER_RULES
@@ -194,7 +198,7 @@ class TestConfigDrivenTiers:
             (Path(__file__).resolve().parents[1] / "config" / "settings.json").read_text(encoding="utf-8")
         )["alert"]["tiers"]
         assert cfg["CRITICAL"]["severity_min"] == TIER_RULES["CRITICAL"]["severity_min"] == 80
-        assert cfg["ALERT"]["confidence_min"] == TIER_RULES["ALERT"]["confidence_min"] == 0.65
+        assert cfg["ALERT"]["confidence_min"] == TIER_RULES["ALERT"]["confidence_min"] == 0.50
         assert cfg["WATCH"]["severity_min"] == TIER_RULES["WATCH"]["severity_min"] == 45
 
     def test_raising_a_threshold_takes_effect(self, monkeypatch):
@@ -216,8 +220,8 @@ class TestConfigDrivenTiers:
         )
         rules = alerts._tier_rules()
         assert rules["CRITICAL"]["severity_min"] == 70
-        assert rules["CRITICAL"]["confidence_min"] == 0.8
-        assert rules["CRITICAL"]["anchor_confidence"] == ["HIGH"]
+        assert rules["CRITICAL"]["confidence_min"] == 0.62
+        assert rules["CRITICAL"]["require_location"] is True
 
     def test_evaluation_order_is_fixed(self):
         # Tiers must be tried most-severe first regardless of config key order,
@@ -225,10 +229,34 @@ class TestConfigDrivenTiers:
         from src.core.alerts import TIER_ORDER
         assert TIER_ORDER == ("CRITICAL", "ALERT", "WATCH")
 
-    def test_low_anchor_cannot_reach_alert(self):
+    def test_low_anchor_no_longer_blocks_alert(self):
+        # anchor_confidence only ever means "an IATA airport resolved" and is LOW for
+        # ~99% of the corpus, so it must not gate paging. A located, fresh, confident
+        # event pages regardless of anchor level.
         from src.core.alerts import evaluate_alert_tier
-        assert evaluate_alert_tier(self._event(70, 0.7, anchor="LOW")) == "WATCH"
+        assert evaluate_alert_tier(self._event(70, 0.7, anchor="LOW")) == "ALERT"
+
+    def test_alert_needs_location_or_fresh_time(self):
+        from src.core.alerts import evaluate_alert_tier
+        # Neither located nor fresh → no page, however severe.
+        assert evaluate_alert_tier(
+            self._event(100, 0.7, time_="unknown", located=False)) is None
+        # Fresh but unlocated still pages...
+        assert evaluate_alert_tier(
+            self._event(70, 0.7, time_="same_day", located=False)) == "ALERT"
+        # ...as does located but undated.
+        assert evaluate_alert_tier(
+            self._event(70, 0.7, time_="unknown", located=True)) == "ALERT"
+
+    def test_critical_requires_both_location_and_fresh_time(self):
+        from src.core.alerts import evaluate_alert_tier
+        assert evaluate_alert_tier(
+            self._event(90, 0.7, time_="same_day", located=False)) == "ALERT"
+        assert evaluate_alert_tier(
+            self._event(90, 0.7, time_="same_day", located=True)) == "CRITICAL"
 
     def test_unknown_time_blocks_critical(self):
+        # 86% of the corpus carries time_certainty='unknown', so this must cost the
+        # event its CRITICAL standing without silencing it altogether.
         from src.core.alerts import evaluate_alert_tier
-        assert evaluate_alert_tier(self._event(90, 0.9, time_="unknown")) is None
+        assert evaluate_alert_tier(self._event(90, 0.9, time_="unknown")) == "ALERT"

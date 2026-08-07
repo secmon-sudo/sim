@@ -1,5 +1,13 @@
 name: SIM Dead-Man's Switch
 
+# SECONDARY watchdog. The primary one now lives in Postgres (db/migrations/020) and
+# fires on pg_cron, because this workflow shares infrastructure with the pipeline it
+# watches: on 6 Aug 2026 a GitHub incident took out pipeline runs #1374/#1375 and
+# deadman runs #318/#319 together, and the resulting 8h35m silence went unpaged.
+# GitHub also drops scheduled firings under load — this job actually ran 7-12x/day
+# against an hourly schedule — so treat its cadence as best-effort, not guaranteed.
+# Kept anyway: two watchdogs in two failure domains beat one in either.
+#
 # Independent of the main pipeline so it can detect the pipeline NOT running at all.
 # Hourly is well inside the 3h staleness threshold (pipeline runs every 2h).
 on:

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.core.alerts import (
+    TIER_RULES,
     build_geo_suppression_key,
     build_suppression_key,
     evaluate_alert_tier,
@@ -86,7 +87,10 @@ CZIB_BONUS = _SCORING.get("czib_bonus", 20)
 MAX_SEVERITY = _SCORING.get("max_severity", 100)
 AVIATION_NEXUS_BONUS = _SCORING.get("aviation_nexus_bonus", 15)
 ALERT_SUPPRESSION_TTL_HOURS = _SETTINGS.get("alert", {}).get("suppression_ttl_hours", 4)
-ALERT_SEVERITY_MIN = 80
+# Cheap pre-filter only — derived from the tier gates so it can never contradict them.
+# It used to be a hard-coded 80, which silently outranked the configured ALERT floor of
+# 65 and made the whole alert.tiers block unreachable policy.
+ALERT_SEVERITY_MIN = min(r["severity_min"] for r in TIER_RULES.values())
 NEW_ACTIVITY_WINDOW_HOURS = _SETTINGS.get("alert", {}).get("new_activity_window_hours", 24)
 # Events ingested longer ago than this never notify — they are old news being
 # (re)processed late (e.g. orphan recovery), not breaking incidents.
@@ -538,8 +542,12 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
             )
             return "skipped"
 
+    # No tier means the event cleared no gate — that is a decision, not a gap. This
+    # used to default to ALERT, which made evaluate_alert_tier() decorative: 84% of a
+    # week's pages had qualified for no tier at all, and CRITICAL could never outrank
+    # anything because everything below it was already labelled ALERT.
     if not event.get("alert_tier"):
-        event["alert_tier"] = "ALERT"
+        return "skipped"
 
     supp_key = build_suppression_key(event)
     # Storyline-independent safety net: mutes same-place/same-severity duplicates even
@@ -719,6 +727,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "anchor_confidence": anchor["level"],
             "time_certainty": event["llm_parsed"].get("time_certainty", "unknown"),
             "event_type": event["event_type"],
+            # Location gates read these: an IATA anchor OR gazetteer coordinates both
+            # count as "we know where this happened".
+            "anchor_name_norm": anchor["norm"],
+            "latitude": anchor.get("latitude"),
         }
         alert_tier = evaluate_alert_tier(alert_data)
 
@@ -764,14 +776,12 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         event["country_quiet_24h"] = country_quiet
         event["location_quiet_24h"] = location_quiet
 
-        # Send Telegram alert for high-severity events (suppression-claim BEFORE
-        # send to prevent duplicate notifications; see dispatch_alert).
-        # dispatch_alert may force event["alert_tier"] to "ALERT" when a
-        # severity-gated card goes out for an event that missed the full tier gate
-        # (low confidence / unresolved anchor). Read back the tier that ACTUALLY
-        # paged and the outcome, so the DB column and telemetry reflect what was
-        # sent — not the raw pre-dispatch tier, which is often None and historically
-        # made alerts_generated undercount real pages (0 counted vs N sent).
+        # Send Telegram alert (suppression-claim BEFORE send to prevent duplicate
+        # notifications; see dispatch_alert). The tier assigned above is now the only
+        # thing that can page — dispatch_alert no longer invents one — so read the
+        # result back purely to record whether the card actually went out. Counting
+        # dispatch_result rather than the tier is what keeps alerts_generated from
+        # undercounting real pages (see the 24 Jul 2026 telemetry fix).
         dispatch_result = dispatch_alert(db_conn, event, event_id)
         effective_tier = event.get("alert_tier")
 

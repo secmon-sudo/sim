@@ -565,10 +565,17 @@ Text: {canonical_text[:3000]}"""
 
 
 def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict,
-                              parsed: dict, result: dict, worker_id: uuid.UUID) -> dict | None:
+                              parsed: dict, result: dict, worker_id: uuid.UUID,
+                              log_telemetry: bool = True) -> dict | None:
     """Apply a parsed LLM classification to an event (tiering, validation, DB update).
 
     Shared by the single-event and batched paths. Caller holds the lock.
+
+    log_telemetry=False for the batched path: one LLM call covers the whole chunk, so
+    the caller logs it once. Logging here per event wrote the SAME call N times (same
+    latency_ms, same token counts), inflating system_telemetry ~4.7x and making every
+    per-call metric derived from it — call counts, average latency, token totals —
+    wrong by that factor.
     """
     event_id = event["id"]
     source_domain = event.get('source_domain', 'unknown') or 'unknown'
@@ -630,7 +637,8 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
                     event_id,
                 ),
             )
-        log_llm_telemetry(db_conn, result, router, success=True)
+        if log_telemetry:
+            log_llm_telemetry(db_conn, result, router, success=True)
         logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
                     event_id[:8], relevance, event_type,
                     parsed.get("relevance_reasoning", "")[:80])
@@ -713,8 +721,9 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     )
     db_conn.commit()
 
-    # Log telemetry
-    log_llm_telemetry(db_conn, result, router, success=True)
+    # Log telemetry (batched path logs once for the whole chunk instead)
+    if log_telemetry:
+        log_llm_telemetry(db_conn, result, router, success=True)
 
     logger.info(
         "Classified event %s as %s via %s/%s (%.0fms)",
@@ -938,6 +947,10 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
         stats["failed"] += len(llm_events)
         return stats
 
+    # One call covered the whole chunk — log it once, here, rather than once per
+    # event inside the apply loop (which recorded the same call N times over).
+    log_llm_telemetry(db_conn, result, router, success=True)
+
     for i, event in enumerate(llm_events, 1):
         item = items.get(i)
         try:
@@ -946,7 +959,8 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
                                i, event["id"][:8])
                 stats["failed"] += 1
                 continue
-            if _apply_llm_classification(db_conn, router, event, event["_det"], item, result, worker_id):
+            if _apply_llm_classification(db_conn, router, event, event["_det"], item, result,
+                                         worker_id, log_telemetry=False):
                 stats["classified"] += 1
             else:
                 stats["failed"] += 1

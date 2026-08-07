@@ -41,7 +41,7 @@ class TestDispatchAlert:
     def test_skipped_below_threshold(self, monkeypatch):
         calls = []
         _wire(monkeypatch, calls)
-        ev = {"severity_score": 50, "alert_tier": "WATCH"}
+        ev = {"severity_score": 30, "alert_tier": "WATCH"}
         assert d.dispatch_alert(_MockDB(), ev, "evt-1") == "skipped"
         assert calls == []
 
@@ -69,9 +69,12 @@ class TestDispatchAlert:
         assert calls == ["record", "send"]
         assert db.deletes == 1  # claim released for retry
 
-    def test_default_tier_when_missing(self, monkeypatch):
+    def test_missing_tier_is_not_paged(self, monkeypatch):
+        # An event that cleared no tier gate must not page. This used to default to
+        # ALERT, which made the tier engine decorative and CRITICAL unreachable.
         calls = []
         _wire(monkeypatch, calls)
         ev = {"severity_score": 85}  # no alert_tier
-        assert d.dispatch_alert(_MockDB(), ev, "evt-5") == "sent"
-        assert ev["alert_tier"] == "ALERT"
+        assert d.dispatch_alert(_MockDB(), ev, "evt-5") == "skipped"
+        assert ev.get("alert_tier") is None
+        assert calls == []

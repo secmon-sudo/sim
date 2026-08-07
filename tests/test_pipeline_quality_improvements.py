@@ -314,13 +314,14 @@ def test_dispatch_alert_skips_stale_ingested_event():
 @patch("src.pipeline.pass_d_score.record_suppression")
 @patch("src.pipeline.pass_d_score.is_suppressed")
 @patch("src.pipeline.pass_d_score.send_telegram_alert")
-def test_dispatch_alert_forces_tier_and_reports_sent(
+def test_dispatch_alert_reports_sent_with_its_own_tier(
     mock_send_tg, mock_is_supp, mock_record, mock_peak, mock_register
 ):
-    """Regression: a severity-gated event that missed the full tier gate (tier=None,
-    e.g. low confidence / unresolved anchor) must still page. dispatch_alert forces
-    the tier to ALERT, returns 'sent', and leaves the forced tier on the event so the
-    DB column and alerts_generated reflect the real page instead of undercounting to 0."""
+    """A tiered event pages under the tier it actually earned, and dispatch reports
+    'sent' so alerts_generated counts the real card (it used to count the raw
+    pre-dispatch tier and undercount to 0). The companion guarantee — that an
+    event which earned NO tier is not paged at all — is covered in
+    tests/test_alert_dispatch_ordering.py::test_missing_tier_is_not_paged."""
     from src.pipeline.pass_d_score import dispatch_alert
 
     mock_is_supp.return_value = False
@@ -329,18 +330,18 @@ def test_dispatch_alert_forces_tier_and_reports_sent(
 
     db_conn = MagicMock()
     event = {
-        "severity_score": 100,       # >= ALERT_SEVERITY_MIN, so the severity gate passes
-        "alert_tier": None,          # missed the confidence/anchor tier gate
+        "severity_score": 100,
+        "alert_tier": "CRITICAL",
         "anchor_name_norm": "UNKNOWN",
         "country_iso": "IR",
         "storyline_id": None,
         # no ingested_at -> not stale
     }
 
-    result = dispatch_alert(db_conn, event, "event_forced")
+    result = dispatch_alert(db_conn, event, "event_tiered")
 
     assert result == "sent"
-    assert event["alert_tier"] == "ALERT"   # forced, not left as None
+    assert event["alert_tier"] == "CRITICAL"  # never rewritten by dispatch
     mock_send_tg.assert_called_once()
     mock_register.assert_called_once()       # paging history recorded for closure/escalation
 

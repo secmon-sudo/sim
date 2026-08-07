@@ -135,6 +135,27 @@ def test_batch_classifies_all_events_with_one_call():
     assert "REPORT 1:" in prompt and "REPORT 3:" in prompt
 
 
+def test_batch_logs_telemetry_once_per_call_not_once_per_event():
+    """One LLM call covers the whole chunk, so system_telemetry must get exactly one
+    llm_call row for it. Logging inside the per-event apply loop recorded the same
+    call (identical latency/token counts) once per event and inflated the table ~4.7x,
+    which silently corrupted every per-call metric derived from it."""
+    events = [_event(1), _event(2), _event(3)]
+    call = MagicMock(return_value={"content": _batch_content(
+        {"report": 1, "event_type": "a"},
+        {"report": 2, "event_type": "b"},
+        {"report": 3, "event_type": "c"},
+    )})
+    patches, mocks = _patch_batch(call_llm=call)
+    with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
+        pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
+
+    mocks["log_llm_telemetry"].assert_called_once()
+    # ...and the apply path must be told not to log it a second time.
+    for c in mocks["_apply_llm_classification"].call_args_list:
+        assert c.kwargs.get("log_telemetry") is False
+
+
 def test_batch_missing_item_left_queued():
     events = [_event(1), _event(2)]
     call = MagicMock(return_value={"content": _batch_content(
