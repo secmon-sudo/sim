@@ -284,6 +284,32 @@ _CITY_COORDS: dict[str, tuple[float, float, str]] = {
 }
 
 
+# ISO-3166-1 alpha-2 for Africa (54 UN members + Western Sahara). Used to keep the
+# geographically-scoped `african_terrorism` event type inside Africa: the classifier
+# prompt scopes it to "Sahel, Horn of Africa", but free-tier models reach for it on
+# generic South Asian insurgency copy anyway — 8 of 29 uses over 14 days were Pakistan
+# (6) and India (2), which is how a Balochistan counter-terrorism operation came to be
+# filed as African terrorism.
+AFRICA_ISO = frozenset({
+    "DZ", "AO", "BJ", "BW", "BF", "BI", "CM", "CV", "CF", "TD", "KM", "CD", "CG",
+    "CI", "DJ", "EG", "GQ", "ER", "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "KE",
+    "LS", "LR", "LY", "MG", "MW", "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG",
+    "RW", "ST", "SN", "SC", "SL", "SO", "ZA", "SS", "SD", "TZ", "TG", "TN", "UG",
+    "ZM", "ZW", "EH",
+})
+
+
+def is_african(country_iso: str | None) -> bool:
+    """True when the ISO-3166-1 alpha-2 code names an African country.
+
+    Unknown/absent codes return False: the caller uses this to *narrow* an
+    over-applied geographic type, so an unresolved country must not silently keep it.
+    """
+    if not country_iso:
+        return False
+    return country_iso.strip().upper() in AFRICA_ISO
+
+
 _EARTH_RADIUS_KM = 6371.0
 
 

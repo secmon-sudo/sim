@@ -4,6 +4,9 @@ Blueprint V20.1 §PASS D
 """
 
 
+import itertools
+from datetime import datetime
+
 from src.core.storyline import jaccard_similarity, tokenize_storyline_hint
 
 
@@ -260,3 +263,63 @@ class TestConfigDrivenTiers:
         # event its CRITICAL standing without silencing it altogether.
         from src.core.alerts import evaluate_alert_tier
         assert evaluate_alert_tier(self._event(90, 0.9, time_="unknown")) == "ALERT"
+
+
+def test_balochistan_fragments_reach_the_adjudicator():
+    """Regression: the 7 Aug 2026 SITREP carried ONE Balochistan counter-terrorism
+    operation (12 militants, Mastung + Washuk IBOs) as four storylines with three
+    different event_types, and paged four separate ALERT cards for it. Every
+    deterministic path correctly declined — Jaccard 0.00-0.11, containment 0.33, and
+    the coarse geo keys all differ (BALOCHISTAN / WASHUK / MASTUNG / None) — so this
+    was the adjudicator's call to make. It never got to make it: 5 of the 6 pairs
+    scored under the old 0.15 candidate floor, several at exactly 0.143.
+    """
+    from src.core.storyline import lexical_kinship
+    from src.pipeline.pass_d_score import STORYLINE_ADJUDICATION_LEXICAL_FLOOR
+
+    hints = [
+        "pakistan balochistan militant killings",
+        "balochistan security forces militants",
+        "balochistan ispr terrorist killed",
+    ]
+    for a, b in itertools.combinations(hints, 2):
+        assert lexical_kinship(a, b) >= STORYLINE_ADJUDICATION_LEXICAL_FLOOR, (
+            f"{a!r} vs {b!r} would never be offered to the adjudicator"
+        )
+
+
+def test_adjudicator_floor_still_excludes_unrelated_same_country_events():
+    """The floor is what keeps adjudication from degenerating into an all-pairs LLM
+    sweep of every same-country event, so lowering it must not admit the unrelated."""
+    from src.core.storyline import lexical_kinship
+    from src.pipeline.pass_d_score import STORYLINE_ADJUDICATION_LEXICAL_FLOOR
+
+    assert lexical_kinship(
+        "balochistan ispr terrorist killed",
+        "karachi airport flight diverted weather",
+    ) < STORYLINE_ADJUDICATION_LEXICAL_FLOOR
+
+
+def test_adjudication_logs_llm_telemetry_when_given_a_connection(monkeypatch):
+    """Adjudication is the biggest LLM consumer (~180 calls/day vs ~120 for
+    classification) and logged none of it, so system_telemetry understated real usage
+    by more than half."""
+    from unittest.mock import MagicMock
+    from src.core import storyline_adjudicator as sa
+
+    db = MagicMock()
+    router = MagicMock()
+    calls = []
+    monkeypatch.setattr(sa, "log_llm_telemetry",
+                        lambda conn, res, r, success: calls.append(success))
+
+    event = {"storyline_hint": "balochistan ispr terrorist killed", "country_iso": "PK",
+             "occurred_at_est": datetime(2026, 8, 6, 12, 0)}
+    recent = [{"storyline_id": "sid-1", "storyline_hint": "pakistan balochistan militant killings",
+               "country_iso": "PK", "occurred_at_est": datetime(2026, 8, 6, 11, 0)}]
+
+    sa.adjudicate_storyline(
+        event, recent, router, db_conn=db,
+        call_llm_fn=lambda *a, **k: {"content": '{"match": null}'},
+    )
+    assert calls == [True]

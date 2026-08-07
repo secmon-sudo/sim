@@ -308,3 +308,66 @@ def test_run_pass_c_parse_error_counter_resets_on_success():
 
     assert len(outcomes) == 10
     assert "aborted_on_parse_errors" not in stats
+
+
+# ── geographically-scoped event type ────────────────────────────────────────
+
+def test_is_african_covers_the_corpus_countries():
+    from src.core.geo import is_african
+
+    # Countries that legitimately produced african_terrorism over 14 days.
+    for iso in ("NG", "NE", "CD", "KE", "SO"):
+        assert is_african(iso) is True
+    # The ones that produced it wrongly.
+    for iso in ("PK", "IN"):
+        assert is_african(iso) is False
+    # An unresolved country must not keep a geographic label by default.
+    assert is_african(None) is False
+    assert is_african("") is False
+    assert is_african("ke") is True   # case-insensitive
+
+
+def test_african_terrorism_outside_africa_is_demoted_to_terrorism():
+    """A Balochistan counter-terrorism operation was filed as `african_terrorism`
+    (6 Pakistani + 2 Indian events over 14 days). The prompt already scopes the type
+    to Africa; free-tier models ignore that, so the guard is deterministic."""
+    from src.pipeline.pass_c_classify import GEO_SCOPED_EVENT_TYPE, GEO_SCOPED_FALLBACK
+
+    captured = {}
+
+    class _DB:
+        def execute(self, sql, params=None):
+            r = MagicMock()
+            if sql.strip().upper().startswith("UPDATE"):
+                captured["params"] = params
+            else:
+                # every catalog lookup succeeds
+                r.fetchone.return_value = (params[0],) if params else ("x",)
+            return r
+
+        def commit(self):
+            pass
+
+        def transaction(self):
+            from contextlib import nullcontext
+            return nullcontext()
+
+    parsed = {
+        "event_type": GEO_SCOPED_EVENT_TYPE,
+        "relevance": 90,
+        "confidence": 0.8,
+        "country_iso": "PK",
+        "anchor_name": "Mastung",
+        "time_certainty": "same_day",
+    }
+    with patch.object(pc, "update_domain_penalty", MagicMock()):
+        pc._apply_llm_classification(
+            _DB(), MagicMock(),
+            {"id": "e" * 32, "source_domain": "dawn.com"},
+            {"score": 60, "has_high_signal": True},
+            parsed, {"provider": "p", "model": "m", "response": {}}, "wid",
+            log_telemetry=False,
+        )
+
+    assert parsed["event_type"] == GEO_SCOPED_FALLBACK
+    assert GEO_SCOPED_EVENT_TYPE not in captured["params"]

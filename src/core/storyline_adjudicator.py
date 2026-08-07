@@ -26,7 +26,7 @@ import logging
 import re
 
 from src.core.geo import geo_key
-from src.core.llm_client import call_llm
+from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.storyline import lexical_kinship
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def find_geo_candidates(
     recent_events: list[dict],
     window_hours: float = 48.0,
     max_candidates: int = 6,
-    lexical_floor: float = 0.15,
+    lexical_floor: float = 0.10,
 ) -> list[dict]:
     """Candidate storylines that plausibly describe the same incident.
 
@@ -202,11 +202,18 @@ def adjudicate_storyline(
     call_llm_fn=call_llm,
     window_hours: float = 48.0,
     max_candidates: int = 6,
-    lexical_floor: float = 0.15,
+    lexical_floor: float = 0.10,
+    db_conn=None,
 ) -> str | None:
     """Return an existing storyline_id if the LLM confirms the SAME incident, else None.
 
     Fails safe: any error or ambiguity yields None so the caller starts a new storyline.
+
+    db_conn is optional purely so existing callers/tests keep working, but passing it
+    matters: adjudication is the single largest consumer of LLM calls (~180/day against
+    ~120 for classification) and none of it was reaching system_telemetry, so every
+    quota, latency and cost figure read off that table understated real usage by more
+    than half.
     """
     candidates = find_geo_candidates(event, recent_events, window_hours,
                                      max_candidates, lexical_floor)
@@ -222,6 +229,8 @@ def adjudicate_storyline(
     except Exception:
         logger.exception("Storyline adjudication LLM call failed; treating as NEW")
         return None
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, result, router, success=True)
     decision = _parse_decision(result.get("content", ""), candidates)
     if decision:
         logger.info(

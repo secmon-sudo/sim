@@ -151,8 +151,15 @@ STORYLINE_CONTAINMENT_COMMON_MIN = _STORYLINE.get(
 STORYLINE_LLM_ADJUDICATION = _STORYLINE.get("llm_adjudication_enabled", True)
 STORYLINE_ADJUDICATION_WINDOW_HOURS = _STORYLINE.get("adjudication_window_hours", 48)
 STORYLINE_ADJUDICATION_MAX_CANDIDATES = _STORYLINE.get("adjudication_max_candidates", 6)
+# Candidate floor for the LLM adjudicator, NOT a linking decision — the model still has
+# to confirm the match. At 0.15 the four fragments of one Balochistan counter-terrorism
+# operation ("pakistan balochistan militant killings" / "balochistan security forces
+# militants" / "balochistan ispr terrorist killed") scored 0.143 against each other and
+# so were never even offered to the model: 5 of their 6 pairs fell under the floor.
+# Measured over 3 days of real hints, 0.10 costs ~25 extra adjudicator calls/day (+7%)
+# and the count saturates there — 0.08 admits one further call in three days.
 STORYLINE_ADJUDICATION_LEXICAL_FLOOR = _STORYLINE.get(
-    "adjudication_lexical_floor", 0.15)
+    "adjudication_lexical_floor", 0.10)
 
 
 def _safe_float(value, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -885,12 +892,13 @@ def run_pass_d(db_conn) -> dict:
                 from src.core.storyline_adjudicator import adjudicate_storyline
                 _adj_router = build_bulk_router()
 
-                def adjudicator(event, recent, _router=_adj_router):
+                def adjudicator(event, recent, _router=_adj_router, _db=db_conn):
                     return adjudicate_storyline(
                         event, recent, _router,
                         window_hours=STORYLINE_ADJUDICATION_WINDOW_HOURS,
                         max_candidates=STORYLINE_ADJUDICATION_MAX_CANDIDATES,
                         lexical_floor=STORYLINE_ADJUDICATION_LEXICAL_FLOOR,
+                        db_conn=_db,
                     )
             except Exception:
                 logger.exception("Failed to init storyline adjudicator; deterministic only")

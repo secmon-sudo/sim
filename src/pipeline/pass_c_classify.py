@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime as dt, timedelta, timezone
 from pathlib import Path
 
+from src.core.geo import is_african
 from src.core.heartbeat import HeartbeatWorker
 from src.core.llm_client import LLMAllThrottled, LLMRequestTooLarge, call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
@@ -37,6 +38,12 @@ QUEUE_DEPTH_ALERT_THRESHOLD = 400
 # 'unclassified' catalog row (migration 019), which the workflow applies before
 # this pass runs.
 FALLBACK_EVENT_TYPE = "unclassified"
+
+# `african_terrorism` is the one event type whose definition is geographic. The catalog
+# makes `terrorism` its parent with the same severity_base (95), so demoting an
+# out-of-region classification to the parent is label-only — it never changes scoring.
+GEO_SCOPED_EVENT_TYPE = "african_terrorism"
+GEO_SCOPED_FALLBACK = "terrorism"
 
 # Aviation is the priority domain, and "which carrier stopped flying where" is
 # the single highest-value line in these reports — but its vocabulary is low on
@@ -257,7 +264,10 @@ PRIORITY RULES:
 - Aviation personnel attacked → event_type: aviation_personnel_attack, HIGH priority
 - Drone attack on critical infrastructure → event_type: drone_attack_critical_infra
 - Mass casualty (3+ deaths OR 10+ injuries) → event_type: mass_casualty_event
-- African terrorism (Sahel, Horn of Africa) → event_type: african_terrorism
+- African terrorism → event_type: african_terrorism. ONLY for events physically
+  located in Africa (Sahel, Horn of Africa, Lake Chad, Mozambique). NEVER use it for
+  Asia or the Middle East — Pakistani, Indian or Afghan insurgency is `terrorism` or
+  `insurgency_attack`.
 - War escalation, ceasefire violations → event_type: war_escalation or ceasefire_violation
 - Resort/hotel/beach attacks → event_type: resort_attack
 - Protest with violence or casualties → event_type: riot, HIGH priority
@@ -682,6 +692,19 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     country_iso = raw_iso.strip().upper()[:2] if raw_iso else None
     if country_iso and (len(country_iso) != 2 or not country_iso.isalpha()):
         country_iso = None
+
+    # Keep the geographically-scoped type inside its geography. The prompt scopes
+    # african_terrorism to the Sahel / Horn of Africa, but the models reach for it on
+    # generic insurgency copy regardless of where the event happened. Falls back to its
+    # own catalog parent, `terrorism`, which carries the identical severity_base (95),
+    # so this corrects the label without moving the event's priority.
+    if event_type == GEO_SCOPED_EVENT_TYPE and not is_african(country_iso):
+        logger.info(
+            "Event %s reclassified %s→%s (country=%s is not African)",
+            event_id[:8], event_type, GEO_SCOPED_FALLBACK, country_iso or "unknown",
+        )
+        event_type = GEO_SCOPED_FALLBACK
+        parsed["event_type"] = event_type
 
     # Parse occurred_at from LLM output into a timestamp
     occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
