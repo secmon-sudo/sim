@@ -344,3 +344,59 @@ def test_flash_update_triggers():
     assert len(triggers_z) == 1
     assert triggers_z[0]["type"] == "Z-Score Exceeded"
     assert triggers_z[0]["country_iso"] == "IR"
+
+
+def test_flash_trigger3_confidence_branch_is_reachable():
+    """The confidence half of Trigger 3's "verified" test must actually be able to fire.
+
+    It was hard-coded at 0.7 while system_confidence is capped at 0.7 by construction
+    for any event without an IATA anchor (~99% of the corpus): 3 of 3213 events cleared
+    it over 14 days, and Trigger 3 had never fired once in 35 recorded flash triggers.
+    The existing coverage above hid this because every event in it used a high-credibility
+    domain, so it passed through the OTHER branch. This test keeps the credibility branch
+    firmly shut (unknown domain -> 0.6) so only confidence can carry it.
+    """
+    from src.services.flash_detector import (
+        FLASH_VERIFIED_CONFIDENCE_MIN,
+        FLASH_VERIFIED_CREDIBILITY_MIN,
+        check_flash_triggers,
+    )
+    from src.core.forecast_engine import get_source_credibility
+
+    low_cred_domain = "someblog.example"
+    assert get_source_credibility(low_cred_domain) < FLASH_VERIFIED_CREDIBILITY_MIN
+
+    dt = datetime(2026, 8, 7, 10, 0, 0)
+
+    def _events(conf):
+        return [
+            {
+                "id": f"c{i}",
+                "country_iso": "PK",
+                "event_type": "civil_unrest",
+                "occurred_at_est": dt + timedelta(hours=i),
+                "source_domain": low_cred_domain,
+                "system_confidence": conf,
+            }
+            for i in range(3)
+        ]
+
+    above = FLASH_VERIFIED_CONFIDENCE_MIN + 0.01
+    triggers = check_flash_triggers(_events(above), country_z_scores={})
+    assert [t["type"] for t in triggers] == ["High Volume Escalation"]
+
+    below = FLASH_VERIFIED_CONFIDENCE_MIN - 0.01
+    assert check_flash_triggers(_events(below), country_z_scores={}) == []
+
+
+def test_flash_confidence_floor_is_within_the_observed_range():
+    """Guard against the floor drifting back above what the score can actually produce.
+
+    system_confidence = llm*0.4 + anchor*0.3 + diversity*0.3, and the anchor term is 0
+    for any event with no IATA match, so unanchored events cannot exceed 0.7. A floor at
+    or above that ceiling silently disables the branch — which is exactly what happened.
+    """
+    from src.services.flash_detector import FLASH_VERIFIED_CONFIDENCE_MIN
+
+    unanchored_ceiling = 0.4 * 1.0 + 0.3 * 0.0 + 0.3 * 1.0
+    assert FLASH_VERIFIED_CONFIDENCE_MIN < unanchored_ceiling

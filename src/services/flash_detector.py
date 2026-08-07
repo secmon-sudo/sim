@@ -8,14 +8,44 @@ Critical Event Circuit Breaker (Flash Update) trigger logic:
 3. 3+ verified high-confidence events in a country within a 6h window.
 """
 
+import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any
 
 from src.core.forecast_engine import get_source_credibility
 from src.core.geo import haversine_km
 
 logger = logging.getLogger(__name__)
+
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+try:
+    with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as _f:
+        _SETTINGS = json.load(_f)
+except (OSError, json.JSONDecodeError):
+    _SETTINGS = {}
+
+# Trigger 3 counts an event as "verified" when its source is inherently credible OR
+# the system is confident in it. The confidence half was hard-coded at 0.7 and was
+# dead on arrival: system_confidence tops out at 0.7 by construction for any event
+# without an IATA anchor (the anchor term contributes 0 of its 0.3 weight), which is
+# 99% of the corpus. Measured over 14 days: 3 of 3213 events cleared 0.7, and the
+# credibility half fired 0 times on its own — so Trigger 3 had NEVER fired in the 35
+# flash triggers recorded since 12 Jul 2026, all of which were Z-score or
+# cross-domain.
+#
+# 0.66 is the 95th percentile of the observed distribution (p50=0.41, p90=0.62,
+# max=0.78), which simulates to ~2 triggering countries per 24h window — i.e. the
+# feature actually fires, stays inside the 5-flash cap, and still means "top 5%".
+# Re-derive this from percentiles if the confidence formula ever changes scale;
+# an absolute constant against a drifting score is exactly how it died the first time.
+FLASH_VERIFIED_CONFIDENCE_MIN = float(
+    _SETTINGS.get("flash", {}).get("verified_confidence_min", 0.66)
+)
+FLASH_VERIFIED_CREDIBILITY_MIN = float(
+    _SETTINGS.get("flash", {}).get("verified_credibility_min", 0.8)
+)
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -153,8 +183,11 @@ def check_flash_triggers(
             verified_evs = []
             for ev in window_evs:
                 cred = get_source_credibility(ev.get("source_domain"))
-                # Consider verified if source credibility >= 0.8 or system confidence is high
-                if cred >= 0.8 or float(ev.get("system_confidence") or 0.0) >= 0.7:
+                # Verified = inherently credible source, or the system is confident.
+                # Both floors are config-backed; see FLASH_VERIFIED_CONFIDENCE_MIN for
+                # why the confidence one is 0.66 and not a round 0.7.
+                if (cred >= FLASH_VERIFIED_CREDIBILITY_MIN
+                        or float(ev.get("system_confidence") or 0.0) >= FLASH_VERIFIED_CONFIDENCE_MIN):
                     verified_evs.append(ev)
             
             if len(verified_evs) >= 3:

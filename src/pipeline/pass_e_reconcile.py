@@ -9,6 +9,7 @@ clears Top-10 arrays on anchor upgrade, and recalculates scores.
 import json
 import logging
 
+from src.core.alerts import evaluate_alert_tier, tier_rank
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.pipeline.pass_d_score import (
     _safe_float,
@@ -18,7 +19,6 @@ from src.pipeline.pass_d_score import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 def reconcile_single_event(db_conn, event_id: str) -> bool:
     """
@@ -34,7 +34,8 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, anchor_name_norm,
                       anchor_confidence, storyline_id, storyline_hint,
-                      llm_parsed_output, severity_score, system_confidence
+                      llm_parsed_output, severity_score, system_confidence,
+                      alert_tier
                FROM events WHERE id = %s AND status = 'scored'""",
             (event_id,),
         ).fetchone()
@@ -49,6 +50,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         current_conf_level = row[4]
         storyline_id = row[5]
         llm_parsed = row[7] if isinstance(row[7], dict) else json.loads(row[7] or "{}")
+        current_tier = row[10]
 
         # 1. Gather all text from storyline siblings
         concatenated_text = raw_anchor or ""
@@ -103,6 +105,23 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 llm_conf = _safe_float(llm_parsed.get("confidence", 0.5))
                 new_system_conf = compute_confidence(llm_conf, new_conf)
 
+                # Re-evaluate the alert tier against the values we just rewrote.
+                # Without this the row kept a tier derived from the PRE-upgrade
+                # anchor/severity/confidence — an invariant break that stayed
+                # invisible only because anchor_upgrades has been 0 on every
+                # observed run. It matters more now that resolving a location is
+                # itself a tier gate: an upgrade is exactly the event that turns an
+                # unlocated event into a located one.
+                new_tier = evaluate_alert_tier({
+                    "severity_score": new_severity,
+                    "system_confidence": new_system_conf,
+                    "anchor_confidence": new_level,
+                    "time_certainty": llm_parsed.get("time_certainty", "unknown"),
+                    "event_type": event_type,
+                    "anchor_name_norm": new_norm,
+                    "latitude": lat,
+                })
+
                 # Update with upgraded anchor
                 with db_conn.transaction():
                     db_conn.execute(
@@ -114,14 +133,27 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                                country_iso = COALESCE(%s, country_iso),
                                severity_score = %s,
                                system_confidence = %s,
+                               alert_tier = %s,
                                is_safety = %s,
                                status = 'reconciled',
                                updated_at = NOW()
                            WHERE id = %s""",
                         (new_norm, new_level, lat, lon, country,
-                         new_severity, new_system_conf, is_safety, event_id),
+                         new_severity, new_system_conf, new_tier, is_safety, event_id),
                     )
                 db_conn.commit()
+
+                # An upgrade that RAISES the tier is a real escalation that Pass D
+                # already declined to page. Pass E deliberately does not dispatch —
+                # suppression/escalation state lives in Pass D — so surface it loudly
+                # instead of deciding silently. This path has never executed in
+                # production; if it starts to, the log is the signal to wire paging.
+                if tier_rank(new_tier) > tier_rank(current_tier):
+                    logger.warning(
+                        "Event %s escalated %s→%s on anchor upgrade but was NOT paged "
+                        "(Pass E does not dispatch)",
+                        event_id[:8], current_tier or "none", new_tier,
+                    )
                 return True
 
         # No upgrade — just mark as reconciled

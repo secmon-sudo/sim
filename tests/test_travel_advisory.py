@@ -70,11 +70,22 @@ class TestAdvisoryAlertTier:
                 "anchor_confidence": "LOW", "time_certainty": "this_week",
                 "event_type": etype}
 
-    def test_advisory_alerts_despite_no_anchor(self):
-        assert evaluate_alert_tier(self._adv(60)) == "ALERT"
+    def test_high_level_advisory_alerts_despite_no_anchor(self):
+        # Level-3/4 "do not travel" grade (severity 75/90) still bypasses the
+        # anchor/time gates it could never satisfy, and still reaches ALERT.
+        assert evaluate_alert_tier(self._adv(75)) == "ALERT"
+        assert evaluate_alert_tier(self._adv(90)) == "ALERT"
 
     def test_travel_ban_alerts(self):
-        assert evaluate_alert_tier(self._adv(60, "travel_ban")) == "ALERT"
+        assert evaluate_alert_tier(self._adv(75, "travel_ban")) == "ALERT"
+
+    def test_routine_advisory_is_watch_not_alert(self):
+        # Advisory severity is three discrete values (60/75/90). 60 is the routine
+        # Level-2 bulk — 134 of 160 over 14 days. At the old floor of 55 every one of
+        # them reached ALERT, which is how "US Raises Belgium Travel Advisory to
+        # Level 2" came to outrank a suicide bombing that killed 14. A standing
+        # country advisory is not a breaking incident.
+        assert evaluate_alert_tier(self._adv(60)) == "WATCH"
 
     def test_low_severity_advisory_is_watch(self):
         assert evaluate_alert_tier(self._adv(50)) == "WATCH"
@@ -152,3 +163,52 @@ class TestFetchUkAtomFeed:
 
         items = fetch_travel_advisories(stats={"age_filtered": 0, "queries_executed": 0})
         assert items == []  # Level 1 routine -> filtered out
+
+
+class TestSeverityOrderingInvariant:
+    """The defect this guards: on 7 Aug 2026 a Level-2 Belgium travel advisory
+    (severity 60) was labelled ALERT while "14 people killed in suicide attack during
+    peace rally in Pakistan" (severity 100, same_day) was labelled WATCH. Both page —
+    WATCH dispatches too — so this was a pure mislabelling, but it inverted the one
+    signal an operator triages on."""
+
+    @staticmethod
+    def _incident(sev, conf, time_="same_day"):
+        # Deliberately the hard case: no anchor, no coords, single source.
+        return {"severity_score": sev, "system_confidence": conf,
+                "anchor_confidence": "LOW", "time_certainty": time_,
+                "event_type": "suicide_bombing"}
+
+    @staticmethod
+    def _advisory(sev):
+        return {"severity_score": sev, "system_confidence": 0.6,
+                "anchor_confidence": "LOW", "time_certainty": "this_week",
+                "event_type": "travel_advisory"}
+
+    def test_mass_casualty_outranks_routine_advisory(self):
+        from src.core.alerts import evaluate_alert_tier, tier_rank
+
+        bombing = evaluate_alert_tier(self._incident(100, 0.47))   # the real Aug 7 case
+        belgium = evaluate_alert_tier(self._advisory(60))
+        assert tier_rank(bombing) > tier_rank(belgium)
+
+    def test_severity_floor_only_lifts_to_alert_never_to_critical(self):
+        # The floor rescues under-corroborated severe events from WATCH; it must not
+        # hand out CRITICAL, which still has to be earned on location + confidence.
+        from src.core.alerts import evaluate_alert_tier
+
+        assert evaluate_alert_tier(self._incident(100, 0.10)) == "ALERT"
+
+    def test_severity_floor_needs_a_fresh_time(self):
+        # Severity alone is not enough: 86% of the corpus is time_certainty='unknown',
+        # so without the freshness requirement the floor would swallow everything.
+        from src.core.alerts import evaluate_alert_tier
+
+        assert evaluate_alert_tier(self._incident(100, 0.10, time_="unknown")) is None
+
+    def test_floor_does_not_downgrade_an_earned_critical(self):
+        from src.core.alerts import evaluate_alert_tier
+
+        ev = self._incident(100, 0.7)
+        ev["anchor_name_norm"] = "ISB"
+        assert evaluate_alert_tier(ev) == "CRITICAL"

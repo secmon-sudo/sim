@@ -38,7 +38,26 @@ TIERS = {
 # They are pre-filtered upstream (Level 3-4 / "do not travel", curated high-risk
 # countries) so gate them on severity alone.
 ADVISORY_EVENT_TYPES = {"travel_advisory", "travel_ban"}
-ADVISORY_ALERT_SEVERITY_MIN = 55
+
+# A standing country-level advisory is not a breaking incident, so it must not outrank
+# one. At the old floor of 55 every single advisory reached ALERT (88 of 88 over 7 days)
+# while 108 of 252 confirmed mass-casualty-grade fresh events sat at WATCH — a Level-2
+# Belgium advisory literally outranking a suicide bombing that killed 14.
+#
+# Advisory severity is effectively three discrete values (60 / 75 / 90), so 75 is the
+# natural seam: it keeps the Level-3-4 "do not travel" advisories the docstring above
+# describes at ALERT and drops the routine Level-2 bulk to WATCH.
+ADVISORY_ALERT_SEVERITY_MIN = _SETTINGS.get("alert", {}).get(
+    "advisory_alert_severity_min", 75
+)
+
+# Severity floor: a confirmed high-severity event that is happening NOW cannot rank
+# below WATCH, whatever the corroboration signals say. system_confidence measures how
+# well-sourced a report is, which is a fair reason to rank one incident above another
+# but not a fair reason to rank a mass-casualty attack below a travel advisory.
+# Deliberately does NOT reach CRITICAL — that tier still has to be earned on location
+# and confidence.
+SEVERITY_ALERT_FLOOR = _SETTINGS.get("alert", {}).get("severity_alert_floor", 90)
 
 # A time_certainty that pins the event to roughly "now" — the only values that make
 # an event newsworthy as a page rather than as background.
@@ -81,6 +100,13 @@ _DEFAULT_TIER_RULES = {
 # from dict order in the config — a reordered config file must not silently make
 # every CRITICAL event fire as WATCH.
 TIER_ORDER = ("CRITICAL", "ALERT", "WATCH")
+
+_TIER_RANK = {name: i for i, name in enumerate(reversed(TIER_ORDER), start=1)}
+
+
+def tier_rank(tier: str | None) -> int:
+    """Order tiers so escalations are comparable. None/unrecognised sorts below WATCH."""
+    return _TIER_RANK.get(tier or "", 0)
 
 
 def _tier_rules() -> dict:
@@ -146,11 +172,20 @@ def evaluate_alert_tier(event: dict) -> str | None:
     if event.get("event_type") in ADVISORY_EVENT_TYPES:
         return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
 
+    tier = None
     for name in TIER_ORDER:
         if _matches_tier(TIER_RULES[name], sev, conf, anc, time_, located):
-            return name
+            tier = name
+            break
 
-    return None
+    # Severity floor — see SEVERITY_ALERT_FLOOR. Applied after the ladder so it can
+    # only ever raise a tier to ALERT, never lower one or manufacture a CRITICAL.
+    if (sev >= SEVERITY_ALERT_FLOOR
+            and time_ in FRESH_TIME_CERTAINTY
+            and tier_rank(tier) < tier_rank("ALERT")):
+        return "ALERT"
+
+    return tier
 
 
 def build_suppression_key(event: dict) -> str:

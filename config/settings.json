@@ -72,6 +72,8 @@
     "suppression_ttl_hours": 4,
     "new_activity_window_hours": 24,
     "alert_max_age_days": 2,
+    "advisory_alert_severity_min": 75,
+    "severity_alert_floor": 90,
     "storyline_quiet_hours": 12,
     "tiers": {
       "CRITICAL": {
@@ -220,5 +222,9 @@
     "airspace_max_clusters": 5,
     "airspace_max_airports": 6,
     "exclude_safety_events": true
+  },
+  "flash": {
+    "verified_confidence_min": 0.66,
+    "verified_credibility_min": 0.8
   }
 }
