@@ -23,6 +23,9 @@ Checklist for adding a NEW model slot:
   4. request_timeout — how long a long completion actually takes on this provider.
      mistral-large needs >30s for a 4K-token SITREP; the old fixed 30s timeout
      made every call ReadTimeout and restart generation from scratch (2026-07-17).
+     Raised again to 180s on 2026-08-10 when the SITREP budget went 4K → 6K tokens:
+     a budget the timeout won't let the model spend is not a budget, it is a
+     ReadTimeout with extra steps.
 """
 
 from dataclasses import dataclass, field
@@ -97,5 +100,5 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         supports_json_mode=supports_json,
         payload_extras=extras,
         max_request_tokens=max_request,
-        request_timeout=120.0 if provider == "mistral" else 30.0,
+        request_timeout=180.0 if provider == "mistral" else 30.0,
     )

@@ -11,7 +11,9 @@ Token discipline:
     are skipped (no LLM call).
   - Runs on the bulk router (gpt-oss-20b, pooled across Groq keys A+B for ~2K RPD) so
     it never competes with Pass C for smart-model quota.
-  - Capped at max_per_run generations per pipeline run.
+  - Capped at max_per_run CANDIDATES per pipeline run — a candidate that turns out to
+    be a cache hit consumes its slot without producing anything, which is why
+    fetch_active_storylines ranks likely-stale storylines first rather than biggest.
 """
 
 import hashlib
@@ -101,18 +103,45 @@ def build_narrative_prompt(events: list[dict]) -> str:
 
 
 def fetch_active_storylines(db_conn) -> list[dict]:
-    """Storylines worth narrating: recent, multi-event, high peak severity."""
+    """Storylines worth narrating: recent, multi-event, high peak severity.
+
+    Ranking, not just filtering, decides whether this stage does any work at all —
+    the per-run budget is spent on the first max_per_run rows, and a row that turns
+    out to be a cache hit is a slot burned for nothing.
+
+    It used to rank `MAX(severity_score) DESC, COUNT(*) DESC`. Pass D saturates
+    severity at 100, so on 2026-08-10 that first key tied across 267 of the 353
+    qualifying storylines and the ordering collapsed onto event_count: the ten
+    largest storylines of the whole 14-day window took every slot, permanently.
+    All ten were already narrated at their current size, so six consecutive runs
+    reported `generated: 0, skipped_cached: 10` — and the newest of them had last
+    seen an event three days earlier, while genuinely active storylines could never
+    enter the list. Total narratives ever written: 51, against 353 candidates.
+
+    So rank by what "story so far" actually means: storylines that look stale
+    against the cache first, then the most recently active. The cache comparison
+    here is only a cheap ordering hint — compute_signature() in the caller stays
+    the authority on whether a regeneration is really needed.
+    """
     rows = db_conn.execute(
-        """SELECT storyline_id,
-                  COUNT(*) AS event_count,
-                  MAX(severity_score) AS peak_severity
-           FROM events
-           WHERE storyline_id IS NOT NULL
-             AND status IN ('scored', 'reconciled')
-             AND occurred_at_est > NOW() - (%s * INTERVAL '1 day')
-           GROUP BY storyline_id
-           HAVING COUNT(*) >= %s AND MAX(severity_score) >= %s
-           ORDER BY MAX(severity_score) DESC, COUNT(*) DESC
+        """SELECT c.storyline_id, c.event_count, c.peak_severity
+           FROM (
+               SELECT storyline_id,
+                      COUNT(*) AS event_count,
+                      MAX(severity_score) AS peak_severity,
+                      MAX(occurred_at_est) AS last_activity
+               FROM events
+               WHERE storyline_id IS NOT NULL
+                 AND status IN ('scored', 'reconciled')
+                 AND occurred_at_est > NOW() - (%s * INTERVAL '1 day')
+               GROUP BY storyline_id
+               HAVING COUNT(*) >= %s AND MAX(severity_score) >= %s
+           ) c
+           LEFT JOIN storyline_narratives n ON n.storyline_id = c.storyline_id
+           ORDER BY (n.storyline_id IS NULL
+                     OR n.event_count IS DISTINCT FROM c.event_count) DESC,
+                    c.last_activity DESC,
+                    c.event_count DESC
            LIMIT %s""",
         (NARRATIVE_LOOKBACK_DAYS, NARRATIVE_MIN_EVENTS, NARRATIVE_MIN_SEVERITY, NARRATIVE_MAX_PER_RUN),
     ).fetchall()

@@ -74,8 +74,13 @@ class TestRequestSizeCeiling:
 
 class TestRequestTimeout:
     def test_mistral_gets_long_completion_timeout(self):
-        # mistral-large ReadTimeout storm on 4K-token SITREPs (2026-07-17).
-        assert get_profile("mistral", "mistral-large-2512").request_timeout == 120.0
+        # mistral-large ReadTimeout storm on 4K-token SITREPs (2026-07-17). Raised
+        # to 180s on 2026-08-10 with the narrative budget (4K → 6K tokens): the
+        # timeout has to outlast the budget or the extra tokens are unspendable.
+        from src.services.sitrep_generator import NARRATIVE_MAX_TOKENS
+        assert get_profile("mistral", "mistral-large-2512").request_timeout == 180.0
+        assert NARRATIVE_MAX_TOKENS <= 6000, \
+            "raising the narrative budget again needs the mistral timeout raised with it"
 
     def test_fast_providers_keep_default(self):
         assert get_profile("groq", "openai/gpt-oss-20b").request_timeout == 30.0

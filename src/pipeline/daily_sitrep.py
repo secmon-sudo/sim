@@ -16,13 +16,17 @@ from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
 from src.services.czib_client import fetch_active_czib_by_country
 from src.services.sitrep_generator import (
+    NARRATIVE_MAX_TOKENS,
+    TRUNCATION_NOTICE,
     WINDOW_HOURS,
     build_sitrep_clusters,
+    cap_for_prompt,
     drop_safety_clusters,
     fetch_aviation_spillover_events,
     fetch_penalized_domains,
     fetch_sitrep_events,
     fetch_spillover_events,
+    is_truncated,
     relabel_cluster,
     run_sitrep_llm,
     select_sitrep_countries,
@@ -79,10 +83,22 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     # the model still wrote them up as report bullets on 1 Aug. Enforce it here
     # instead of asking again. They stay in `clusters`, so the appendix log and
     # the stat cards remain a complete record of the day.
-    field, strategic = split_strategic(drop_safety_clusters(clusters))
+    #
+    # `clusters` is the full ranked day; only the prompt is capped (cap_for_prompt).
+    # Safety clusters are dropped BEFORE the cap so they no longer spend narrative
+    # slots the reader will never see them in.
+    narrated = cap_for_prompt(drop_safety_clusters(clusters))
+    if len(clusters) > len(narrated):
+        logger.info(
+            "SITREP %s: %d clusters in the record, top %d narrated (prompt cap)",
+            country_iso, len(clusters), len(narrated),
+        )
+    field, strategic = split_strategic(narrated)
     spillover_events = fetch_spillover_events(db_conn, country_iso, country_name,
                                               window_start, window_end)
-    spillover = build_sitrep_clusters(spillover_events, penalized) if spillover_events else []
+    # Spillover rides in the same prompt, so it is capped too.
+    spillover = cap_for_prompt(
+        build_sitrep_clusters(spillover_events, penalized)) if spillover_events else []
 
     # Regional aviation disruptions relevant to this country but attributed to
     # the region/neighbours (null or other country_iso). Rendered as its own
@@ -122,7 +138,10 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
 
     # Verification labels are re-derived after URL resolution: a resolved link
     # reveals the real publisher domain, which is what label_cluster counts.
-    for cluster in field:
+    # Over the whole record, not just the narrated slice: `clusters` is what the
+    # appendix, the stat cards and the digest's confirmed-severe count read, and
+    # those beyond the prompt cap would otherwise keep their pre-resolution labels.
+    for cluster in clusters:
         relabel_cluster(cluster, penalized)
 
     if not clusters:
@@ -139,6 +158,17 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
             s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
         ]
         report_text = validate_sitrep(res["content"], allowed_urls)
+        # A completion cut off at max_tokens still passes every guardrail above —
+        # the header is there, the URLs are allowlisted — so it used to ship as a
+        # normal report. Mark it instead of pretending it finished.
+        if is_truncated(res):
+            logger.warning(
+                "SITREP %s: narrative hit the %d-token ceiling and was cut off "
+                "(%d chars, %d clusters) — shipping it marked; raise "
+                "sitrep.narrative_max_tokens if this keeps happening",
+                country_iso, NARRATIVE_MAX_TOKENS, len(report_text), len(field),
+            )
+            report_text += TRUNCATION_NOTICE
     except Exception as e:
         logger.exception("SITREP %s: LLM generation failed", country_iso)
         _save_sitrep(db_conn, country_iso, window_start, window_end,
@@ -147,8 +177,10 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         return {"country_iso": country_iso, "status": "failed", "error": str(e)}
 
     # Delivery is best-effort; the report row is the source of truth.
-    # Full cluster list (field + strategic) so the stat cards and the appendix
-    # log cover the complete day, not just field events.
+    # `clusters`, not `narrated`: the stat cards and the appendix log cover the
+    # complete day — every cluster, field and strategic, above and below the prompt
+    # cap. This comment used to claim as much while the list it named was itself
+    # capped at 25 (fixed 2026-08-10, see cap_for_prompt).
     html_doc = render_sitrep_html(
         country_name, country_iso,
         f"{window_start:%Y-%m-%d %H:%M}", f"{window_end:%Y-%m-%d %H:%M}",

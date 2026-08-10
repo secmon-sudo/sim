@@ -214,6 +214,7 @@
     "max_countries_per_run": 5,
     "min_events_threshold": 3,
     "max_clusters_in_prompt": 25,
+    "narrative_max_tokens": 6000,
     "snippet_chars": 600,
     "high_severity_override": 80,
     "aviation_selection_min": 1,

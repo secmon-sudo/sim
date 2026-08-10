@@ -40,6 +40,16 @@ WINDOW_HOURS = int(SITREP_CFG.get("window_hours", 24))
 MAX_COUNTRIES_PER_RUN = int(SITREP_CFG.get("max_countries_per_run", 5))
 MIN_EVENTS_THRESHOLD = int(SITREP_CFG.get("min_events_threshold", 3))
 MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 25))
+# Completion budget for the narrative. It used to be a hard-coded 4000, which a
+# busy country blows straight through: the model spends most of its output on the
+# per-bullet citation lists (one UA bullet carried 14 URLs), so an active-conflict
+# report runs ~11.2K characters — almost exactly 4000 tokens of Turkish. 25% of the
+# SITREPs written in the two weeks to 2026-08-10 ended mid-sentence or mid-URL
+# because of it, and nothing in the pipeline noticed: the row still saved as
+# 'completed' and the half report still shipped to Telegram. Raising this to 6000
+# needs the mistral request_timeout raised with it (model_profiles) — the budget is
+# only spendable if the call is allowed to run long enough to spend it.
+NARRATIVE_MAX_TOKENS = int(SITREP_CFG.get("narrative_max_tokens", 6000))
 SNIPPET_CHARS = int(SITREP_CFG.get("snippet_chars", 600))
 # A single event at/above this severity (0-100, same scale as alert.severity_min)
 # qualifies its country for a SITREP even below the volume threshold.
@@ -650,7 +660,24 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
                         -len(members), -len(sources)), cluster))
 
     ranked.sort(key=lambda pair: pair[0])
-    return [cluster for _, cluster in ranked[:MAX_CLUSTERS_IN_PROMPT]]
+    # Ranked but NOT capped: this list is the day's record — it becomes events_json,
+    # the stat cards and the appendix. Callers that pay per cluster (the narrative
+    # prompt) trim it themselves with cap_for_prompt().
+    return [cluster for _, cluster in ranked]
+
+
+def cap_for_prompt(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Trim a ranked cluster list down to what the narrative prompt can afford.
+
+    The cap used to live at the end of build_sitrep_clusters, so the single list it
+    returned was BOTH the prompt payload and the stored record — and the constant's
+    own name ("in_prompt") was a lie about half its effect. Ukraine ran 72 events /
+    48 storylines on 2026-08-09 and its report, its events_json and its appendix all
+    stopped at 25: roughly half the day was unrecorded, not merely un-narrated, which
+    is exactly what the deterministic appendix exists to prevent. Now only the prompt
+    is capped and the record is whole.
+    """
+    return clusters[:MAX_CLUSTERS_IN_PROMPT]
 
 
 def relabel_cluster(cluster: Dict[str, Any], penalized_domains: List[str]) -> None:
@@ -829,7 +856,8 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
         "RAPOR DİLİ: TÜRKÇE (veri İngilizce olsa bile).\n\n"
         + json.dumps(payload, ensure_ascii=False, indent=1, default=str)
     )
-    return call_llm(router, user_prompt, _SYSTEM_PROMPT, max_tokens=4000, json_mode=False)
+    return call_llm(router, user_prompt, _SYSTEM_PROMPT,
+                    max_tokens=NARRATIVE_MAX_TOKENS, json_mode=False)
 
 
 # A verification label span the model may have editorialized, e.g.
@@ -886,6 +914,26 @@ def _normalize_label_line(line: str) -> str:
         src = _SOURCE_SEP_RE.search(tail)
         remainder = tail[src.start():] if src else ""
     return f"{head}Doğruluk Durumu: {canonical}{remainder}"
+
+
+# finish_reason values the OpenAI-compatible providers return when the completion
+# was cut off by max_tokens instead of ending on its own.
+_TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
+
+# Appended to a report the model did not get to finish. Without it the cut is
+# invisible: the row saves as 'completed', the HTML renders, and the reader has no
+# way to tell a report that ended from one that stopped mid-URL.
+TRUNCATION_NOTICE = (
+    "\n\n---\n\n"
+    "**⚠ NOT: Bu rapor uzunluk sınırına takıldığı için tamamlanamadan kesildi; "
+    "son madde eksik ve sonrasındaki olaylar anlatıya girmemiş olabilir. "
+    "Günün olay kaydı için rapor sonundaki künye bölümüne bakın.**"
+)
+
+
+def is_truncated(llm_result: Dict[str, Any]) -> bool:
+    """True when the provider cut the completion off at the max_tokens ceiling."""
+    return (llm_result.get("finish_reason") or "").strip().lower() in _TRUNCATED_FINISH_REASONS
 
 
 def validate_sitrep(text: str, allowed_urls: List[str]) -> str:

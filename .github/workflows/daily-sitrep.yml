@@ -44,7 +44,10 @@ env:
 jobs:
   sitrep_run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 5 countries + digest ran in ~9 min at the old 4K-token narrative budget. The
+    # budget is now 6K with a 180s per-call timeout, so the worst case (every country
+    # running the full timeout) needs headroom the old 20 min did not have.
+    timeout-minutes: 35
 
     steps:
       - name: Checkout repository
