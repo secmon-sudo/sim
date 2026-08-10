@@ -39,10 +39,20 @@ class TestIsOfficialDomain:
         assert is_official_domain("travel.state.gov")
         assert is_official_domain("nato.int")
 
-    def test_state_agencies(self):
-        assert is_official_domain("en.irna.ir")
-        assert is_official_domain("www.aa.com.tr")
-        assert is_official_domain("tass.com")
+    def test_state_agencies_are_official_at_home(self):
+        assert is_official_domain("en.irna.ir", {"IR"})
+        assert is_official_domain("www.aa.com.tr", {"TR"})
+        assert is_official_domain("tass.com", {"RU"})
+
+    def test_state_agencies_are_not_official_abroad(self):
+        # A belligerent's agency reporting the adversary's territory is a claim,
+        # not a confirmation — TASS on Ukraine, Anadolu on Iran.
+        assert not is_official_domain("tass.com", {"UA"})
+        assert not is_official_domain("www.aa.com.tr", {"IR"})
+        assert not is_official_domain("en.irna.ir", {"IL"})
+
+    def test_state_agency_without_country_context_is_not_official(self):
+        assert not is_official_domain("tass.com")
 
     def test_regular_press_is_not_official(self):
         assert not is_official_domain("reuters.com")

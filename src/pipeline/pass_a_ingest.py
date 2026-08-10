@@ -194,12 +194,35 @@ def check_domain_penalty(db_conn, domain: str) -> float:
 # Main Pass A runner
 # ---------------------------------------------------------------------------
 
+# A priority_score at or above this is treated as important enough to outrank source
+# diversity. 4 is one distinct critical-term hit — the smallest score that cannot be
+# produced by generic security vocabulary alone (see priority_score).
+PRIORITY_BAND_MIN = 4
+
+
+def _round_robin(buckets: list[list[dict]], epoch_min: datetime) -> list[dict]:
+    """One item from each domain per round, most important lead item first."""
+    ordered = sorted(
+        (b for b in buckets if b),
+        key=lambda b: (b[0]["_priority"], b[0].get("pub_dt") or epoch_min),
+        reverse=True,
+    )
+    out: list[dict] = []
+    depth = 0
+    while True:
+        row = [b[depth] for b in ordered if depth < len(b)]
+        if not row:
+            return out
+        out.extend(row)
+        depth += 1
+
+
 def _interleave_by_domain(items: list[dict]) -> list[dict]:
     """
-    Round-robin items across source domains, highest-priority first within each
-    domain (priority_score; pub_dt breaks ties, newest first).
+    Order candidates for the per-run insert budget: importance across bands, source
+    diversity within each band.
 
-    Two failure modes this ordering prevents:
+    Two failure modes the round-robin prevents:
       - A plain newest-first fill let whichever story dominated the global news
         cycle (and got reprinted by every outlet) eat the entire per-run insert
         budget, crowding out quieter regions. Interleaving guarantees every
@@ -207,8 +230,19 @@ def _interleave_by_domain(items: list[dict]) -> list[dict]:
         second.
       - Within a domain, feed order used to decide which items survived the
         per-domain cap — so a routine post could claim a capped domain's slot
-        while a mass-casualty report behind it was dropped. Priority ordering
-        makes budget/cap cuts fall on the least valuable items instead.
+        while a mass-casualty report behind it was dropped.
+
+    …and the failure mode the BANDS prevent. A single round-robin is depth-first:
+    round 0 takes one item from every domain before any domain gets a second. SIM
+    draws on more contributing domains than max_events_per_run (100), so round 0 alone
+    exhausted the budget and nothing at depth 1 was ever reachable. Priority then had
+    no say at all in what survived: measured over the runs to 2026-08-10, the three
+    that hit the cap inserted items with a MEDIAN priority of 1 while dropping items
+    scoring 5, 7 and 9 — the exact inversion priority_score exists to prevent.
+
+    Banding fixes it without giving up diversity: high-priority items round-robin
+    across domains first, everything else round-robins after. Diversity still decides
+    the order inside a band; importance decides which band gets served first.
     """
     _EPOCH_MIN = datetime.min.replace(tzinfo=timezone.utc)
     buckets: dict[str, list[dict]] = {}
@@ -223,20 +257,9 @@ def _interleave_by_domain(items: list[dict]) -> list[dict]:
             reverse=True,
         )
 
-    # Domains whose lead item is most important go first within each round
-    ordered = sorted(
-        buckets.values(),
-        key=lambda b: (b[0]["_priority"], b[0].get("pub_dt") or _EPOCH_MIN),
-        reverse=True,
-    )
-    interleaved = []
-    depth = 0
-    while True:
-        row = [b[depth] for b in ordered if depth < len(b)]
-        if not row:
-            return interleaved
-        interleaved.extend(row)
-        depth += 1
+    high = [[i for i in b if i["_priority"] >= PRIORITY_BAND_MIN] for b in buckets.values()]
+    rest = [[i for i in b if i["_priority"] < PRIORITY_BAND_MIN] for b in buckets.values()]
+    return _round_robin(high, _EPOCH_MIN) + _round_robin(rest, _EPOCH_MIN)
 
 
 def run_pass_a(db_conn, max_events: int | None = None) -> dict:

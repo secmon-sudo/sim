@@ -19,14 +19,24 @@ LABEL_SINGLE = "Doğrulanmamış (Tek kaynak)"
 
 CANONICAL_LABELS = (LABEL_OFFICIAL, LABEL_MULTI, LABEL_SINGLE)
 
-# Government / military / intergovernmental TLD suffixes. Matched against the
-# end of the registrable host, so "centcom.mil" and "mod.gov.ua" both hit.
-OFFICIAL_TLD_SUFFIXES = (".gov", ".mil", ".int")
+# Intergovernmental TLD, matched as a suffix ("nato.int", "reliefweb.int").
+OFFICIAL_TLD_SUFFIXES = (".int",)
+
+# Government / military domain LABELS. This used to be a suffix test against
+# (".gov", ".mil", ".int") whose comment claimed "centcom.mil and mod.gov.ua both
+# hit" — mod.gov.ua did not, because it ends in ".ua". Only US-style .gov/.mil plus
+# the hard-coded gov.uk/gov.il qualified, so Ukraine's MoD, India's MHA and South
+# Africa's police were never official while (until 2026-08-10) TASS was official
+# everywhere. Matching on the label instead covers every country's gov.XX form.
+#
+# A label test, not a substring one: "mygovnews.com" has the single label
+# "mygovnews" and stays unofficial.
+OFFICIAL_DOMAIN_LABELS = frozenset({"gov", "mil"})
 
 # Suffix match also covers subdomains and country variants (e.g. "travel.state.gov",
-# "gov.uk", "gov.il"). State news agencies are treated as official in v1 — for the
-# SITREP use case "the state said it happened" is the confirmation signal, even
-# when the state is a party to the conflict.
+# "gov.uk", "gov.il"). These confer "official" wherever the event happened: a
+# multinational body has no adversary, and a government portal publishing an advisory
+# or a statement is officially speaking for itself whatever country it is about.
 OFFICIAL_DOMAINS = (
     # multi-national / NGO-official
     "un.org",
@@ -37,23 +47,49 @@ OFFICIAL_DOMAINS = (
     # national portals that don't use .gov/.mil
     "gov.uk",
     "gov.il",
-    "petra.gov.jo",
-    # state news agencies
-    "irna.ir",
-    "mehrnews.com",
-    "tasnimnews.com",
-    "farsnews.ir",
-    "iribnews.ir",
-    "aa.com.tr",
-    "sana.sy",
-    "tass.com",
-    "kuna.net.kw",
-    "wam.ae",
-    "spa.gov.sa",
-    "bna.bh",
-    "ina.iq",
-    "saba.ye",
 )
+
+# State news agencies, mapped to the country whose state they speak for.
+#
+# v1 treated these as official everywhere, reasoning that "the state said it happened"
+# is the confirmation signal even when the state is a party to the conflict. Measuring
+# it (14 days to 2026-08-10) showed the rule fires almost entirely in the case where it
+# is wrong: Anadolu carried 143 events of which 2 were about Turkey and 81 about other
+# countries, TASS 126 of which 21 were about Russia and 55 about others — overwhelmingly
+# Ukraine. So the 2026-08-09 Ukraine SITREP told its reader, as "Onaylandı (Resmî)",
+# that Russian forces had struck "military warehouses storing electronic warfare
+# equipment" in Odesa port — sourced to TASS quoting the Russian MoD. That is a
+# belligerent's targeting claim about the adversary's territory presented as verified
+# fact, which is the one thing a verification label must never do.
+#
+# A state agency reporting its OWN country is still the strongest available
+# confirmation and keeps the official label. Reporting anyone else it is an ordinary
+# source: it still counts toward multi-source corroboration, it just cannot confer
+# "officially confirmed" on its own.
+STATE_MEDIA_HOME_ISO = {
+    "irna.ir": "IR",
+    "mehrnews.com": "IR",
+    "tasnimnews.com": "IR",
+    "farsnews.ir": "IR",
+    "iribnews.ir": "IR",
+    "aa.com.tr": "TR",
+    "sana.sy": "SY",
+    "tass.com": "RU",
+    "kuna.net.kw": "KW",
+    "wam.ae": "AE",
+    # These four are the reason the state-media check must run BEFORE the generic
+    # government-label rule: they are wire services sitting on gov domains, and they
+    # report abroad far more than at home. Over the 14 days to 2026-08-10
+    # newsonair.gov.in filed 2 events about India against 7 about Iran, 3 about
+    # Pakistan and 3 about Saudi Arabia; ddnews.gov.in filed none about India at all.
+    "spa.gov.sa": "SA",
+    "petra.gov.jo": "JO",
+    "newsonair.gov.in": "IN",
+    "ddnews.gov.in": "IN",
+    "bna.bh": "BH",
+    "ina.iq": "IQ",
+    "saba.ye": "YE",
+}
 
 # Known second-level public suffixes so registrable_domain("news.gov.uk") returns
 # "gov.uk"-anchored hosts correctly. Not a full PSL — covers the feeds SIM ingests.
@@ -87,12 +123,40 @@ def registrable_domain(domain_or_url: str) -> str:
     return last_two
 
 
-def is_official_domain(domain: str) -> bool:
-    """True if the domain (or its registrable parent) is an official/state source."""
+def state_media_home_iso(domain: str) -> str | None:
+    """The ISO2 whose state this domain's news agency speaks for, if it is one."""
+    reg = registrable_domain(domain)
+    if not reg:
+        return None
+    for agency, iso in STATE_MEDIA_HOME_ISO.items():
+        if reg == agency or reg.endswith("." + agency):
+            return iso
+    return None
+
+
+def is_official_domain(domain: str, event_isos: Iterable[str] = ()) -> bool:
+    """True if the domain counts as an official source FOR THESE EVENTS.
+
+    `event_isos` is the country (or countries) the reporting is about. It only
+    matters for state news agencies, which speak officially for their own country
+    and are ordinary — often interested — sources about anyone else; see
+    STATE_MEDIA_HOME_ISO. Callers that genuinely have no country context pass
+    nothing, in which case a state agency does not qualify: an unverifiable
+    "official" is the failure mode this guard exists to prevent.
+    """
     reg = registrable_domain(domain)
     if not reg:
         return False
+    # State media is checked FIRST and decides on its own: SPA and Petra are news
+    # agencies that happen to sit on gov.sa / gov.jo, so the generic government-label
+    # rule below would otherwise hand them the very cross-border authority this
+    # function exists to withhold.
+    home = state_media_home_iso(reg)
+    if home is not None:
+        return home in {iso for iso in event_isos if iso}
     if reg.endswith(OFFICIAL_TLD_SUFFIXES):
+        return True
+    if OFFICIAL_DOMAIN_LABELS & set(reg.split(".")):
         return True
     return any(reg == d or reg.endswith("." + d) for d in OFFICIAL_DOMAINS)
 
@@ -114,7 +178,10 @@ def label_cluster(
         if reg and reg not in penalized:
             domains.append(reg)
 
-    if any(is_official_domain(d) for d in domains):
+    # Which country the cluster is about — a state agency is only "official" at home.
+    event_isos = {(ev.get("country_iso") or "").strip().upper() for ev in events}
+
+    if any(is_official_domain(d, event_isos) for d in domains):
         return LABEL_OFFICIAL
     if len(set(domains)) >= 2:
         return LABEL_MULTI
