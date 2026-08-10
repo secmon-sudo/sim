@@ -35,7 +35,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
             """SELECT id, event_type, anchor_name_raw, anchor_name_norm,
                       anchor_confidence, storyline_id, storyline_hint,
                       llm_parsed_output, severity_score, system_confidence,
-                      alert_tier
+                      alert_tier, source_title
                FROM events WHERE id = %s AND status = 'scored'""",
             (event_id,),
         ).fetchone()
@@ -51,6 +51,9 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         storyline_id = row[5]
         llm_parsed = row[7] if isinstance(row[7], dict) else json.loads(row[7] or "{}")
         current_tier = row[10]
+        # Needed by the aftermath gate in evaluate_alert_tier — without it an anchor
+        # upgrade would re-promote a roundup that Pass D correctly refused to page.
+        source_title = row[11]
 
         # 1. Gather all text from storyline siblings
         concatenated_text = raw_anchor or ""
@@ -120,6 +123,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                     "event_type": event_type,
                     "anchor_name_norm": new_norm,
                     "latitude": lat,
+                    "source_title": source_title,
                 })
 
                 # Update with upgraded anchor

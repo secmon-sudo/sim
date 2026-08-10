@@ -738,6 +738,9 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # count as "we know where this happened".
             "anchor_name_norm": anchor["norm"],
             "latitude": anchor.get("latitude"),
+            # The aftermath gate reads the headline's shape to tell a fresh incident
+            # from a report about an old one — see _AFTERMATH_PATTERNS in core.alerts.
+            "source_title": event.get("source_title"),
         }
         alert_tier = evaluate_alert_tier(alert_data)
 

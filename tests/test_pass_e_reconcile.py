@@ -47,7 +47,8 @@ class _FakeConn:
         pass
 
 
-def _row(alert_tier, time_certainty="same_day"):
+def _row(alert_tier, time_certainty="same_day",
+         source_title="Missile strike reported near Istanbul airport"):
     return (
         "11111111-1111-1111-1111-111111111111",   # id
         "missile_strike",                          # event_type
@@ -60,6 +61,7 @@ def _row(alert_tier, time_certainty="same_day"):
         60,                                        # severity_score
         0.41,                                      # system_confidence
         alert_tier,                                # alert_tier
+        source_title,                              # source_title (aftermath gate)
     )
 
 
@@ -91,6 +93,24 @@ def test_upgrade_that_raises_the_tier_is_logged_not_silently_paged():
     assert warn.called
     msg = " ".join(str(a) for a in warn.call_args[0])
     assert "NOT paged" in msg
+
+
+def test_upgrade_does_not_re_promote_an_aftermath_report():
+    # Pass D refuses to page roundups/retrospectives (core.alerts aftermath gate).
+    # Pass E re-evaluates the tier from scratch after an anchor upgrade, so without
+    # the headline in its SELECT it would hand the page straight back.
+    # time_certainty='unknown' keeps this below CRITICAL, which is exempt by design.
+    conn = _upgrade(_row(None, time_certainty="unknown",
+                         source_title="Ukraine war latest: Russia makes slow gains"))
+    assert "ALERT" not in conn.update_params
+    assert "CRITICAL" not in conn.update_params
+
+
+def test_critical_upgrade_of_a_roundup_is_still_allowed():
+    # The deliberate exemption: when a roundup is the only carrier of a major
+    # development, withholding the page costs more than the noise it admits.
+    conn = _upgrade(_row(None, source_title="Ukraine war latest: Russia makes slow gains"))
+    assert "CRITICAL" in conn.update_params
 
 
 def test_upgrade_without_fresh_time_does_not_reach_critical():

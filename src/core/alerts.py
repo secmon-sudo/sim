@@ -8,6 +8,7 @@ composite suppression key to prevent duplicate notifications.
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -123,6 +124,85 @@ def _tier_rules() -> dict:
 TIER_RULES = _tier_rules()
 
 
+# ── Aftermath reports ──────────────────────────────────────────────────────
+#
+# A page is a claim that something is happening NOW. Neither of the two gates that
+# are supposed to enforce that can tell a fresh incident from a report ABOUT an old
+# one:
+#
+#   - severity comes from the underlying subject, so "Canyon Park West Shooting: one
+#     week later" scores 95 exactly like the shooting did;
+#   - time_certainty ends up "same_day"/"previous_day" because occurred_at_est falls
+#     back to publication time — measured 2026-08-10, occurred_at_est equals
+#     published_at to the millisecond in 93% of "previous_day" events. So "fresh"
+#     really means "published today", which a week-old retrospective satisfies.
+#
+# So severity ≥ 90 + fresh — the SEVERITY_ALERT_FLOOR path that produced 61% of the
+# ALERTs in the 2 days to 2026-08-10 — promotes live-blog roundups, anniversary
+# pieces, prosecutions and rescue-completed stories into pages.
+#
+# Confidence cannot separate them: over that corpus the junk (0.33-0.41) sits in the
+# same band as real incidents (Colombia car bomb 0.41, Sumy train strike 0.41), so a
+# confidence guard on the floor would cut both. The distinguishing signal is in the
+# headline's SHAPE, and these patterns were chosen by measuring precision against 724
+# real alerts rather than by intuition — an earlier, looser version matched publisher
+# taglines ("… | Shafaq News | Latest breaking news") and ordinary adjectives ("killed
+# in latest strikes"), i.e. mostly real incidents.
+#
+# Gated events are still scored, stored, clustered and reported — only the page is
+# withheld. And CRITICAL is exempt (see evaluate_alert_tier): when a roundup is the
+# only carrier of a genuinely major development, losing the page is worse than the
+# noise.
+
+# Publisher/section suffix: "Headline - Reuters", "Headline | Shafaq News | Latest…".
+# Stripped before the desk-label test so a publisher's tagline cannot trip it.
+_PUBLISHER_SUFFIX_RE = re.compile(r"\s+[-|–—]\s+[^-|–—]*$")
+
+_AFTERMATH_PATTERNS = (
+    # Desk label: the marker sits in LABEL position — at the head of the headline and
+    # immediately before the colon, optionally trailed by desk words. This is what
+    # separates "Ukraine war latest: …" (a running roundup) from "At least 7 killed in
+    # latest Russia-Ukraine strikes" (an incident that happens to use the word).
+    # Applied to the publisher-stripped headline.
+    ("desk_label",
+     re.compile(r"^[^:]{0,70}\b(latest|live|updates?|timeline|recap|roundup)\b"
+                r"(\s+(news|live|updates?|blog|coverage|briefing))*\s*:", re.I)),
+    # "one week later", "2 Years After Kursk Incursion", "three years after".
+    ("retrospective",
+     re.compile(r"\b(one|two|three|four|five|\d+)\s+"
+                r"(week|month|year|day)s?\s+(later|after|since)\b", re.I)),
+    ("explainer",
+     re.compile(r"\b(what we know|as it happened|key moments|explainer)\b", re.I)),
+    ("probe",
+     re.compile(r"(expands? probe|probe into|investigation into|inquiry into)", re.I)),
+    # The news is the prosecution, not the attack. "charges" needs its object and
+    # preposition ("Ecuador charges ex-minister OVER …") because the bare noun is a
+    # demolition term — "troops planted charges" is an incident, not a court filing.
+    ("judicial",
+     re.compile(r"\b(charged|sentenced|convicted|indicted|pleads? guilty|on trial)\b"
+                r"|\bcharges\s+(\w+[- ]){1,3}(over|with|in connection)\b", re.I)),
+    # The news is that it ENDED — a rescue completed, a hostage freed, a site reopened.
+    ("resolution",
+     re.compile(r"(safely rescued|released hostage|freed after|reopens? after|to demolish)", re.I)),
+)
+
+
+def aftermath_kind(title: str | None) -> str | None:
+    """Name the aftermath pattern this headline matches, or None if it reads as news.
+
+    Returns the pattern name (not just a bool) so the suppression is auditable in the
+    logs — a silent gate on the alert path is how the last one went unnoticed.
+    """
+    if not title:
+        return None
+    stripped = _PUBLISHER_SUFFIX_RE.sub("", title).strip()
+    for name, pattern in _AFTERMATH_PATTERNS:
+        target = stripped if name == "desk_label" else title
+        if pattern.search(target):
+            return name
+    return None
+
+
 def is_located(event: dict) -> bool:
     """True when the event resolved to a real place.
 
@@ -183,7 +263,19 @@ def evaluate_alert_tier(event: dict) -> str | None:
     if (sev >= SEVERITY_ALERT_FLOOR
             and time_ in FRESH_TIME_CERTAINTY
             and tier_rank(tier) < tier_rank("ALERT")):
-        return "ALERT"
+        tier = "ALERT"
+
+    # Aftermath gate — see _AFTERMATH_PATTERNS. Last, so it can veto both the ladder
+    # and the floor: those two decide whether the SUBJECT is alert-worthy, and this
+    # decides whether the ARTICLE is reporting it as news. CRITICAL is deliberately
+    # exempt — a roundup is sometimes the only carrier of a genuinely major
+    # development, and missing that costs more than the noise it lets through.
+    if tier is not None and tier != "CRITICAL":
+        kind = aftermath_kind(event.get("source_title"))
+        if kind:
+            logger.info("Alert suppressed as %s report (would have been %s): %.80s",
+                        kind, tier, event.get("source_title") or "")
+            return None
 
     return tier
 
