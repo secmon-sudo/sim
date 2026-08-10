@@ -312,10 +312,10 @@ def test_dispatch_alert_skips_stale_ingested_event():
 @patch("src.pipeline.pass_d_score.register_alert")
 @patch("src.pipeline.pass_d_score.get_peak_tier")
 @patch("src.pipeline.pass_d_score.record_suppression")
-@patch("src.pipeline.pass_d_score.is_suppressed")
+@patch("src.pipeline.pass_d_score.suppression_blocks")
 @patch("src.pipeline.pass_d_score.send_telegram_alert")
 def test_dispatch_alert_reports_sent_with_its_own_tier(
-    mock_send_tg, mock_is_supp, mock_record, mock_peak, mock_register
+    mock_send_tg, mock_supp_blocks, mock_record, mock_peak, mock_register
 ):
     """A tiered event pages under the tier it actually earned, and dispatch reports
     'sent' so alerts_generated counts the real card (it used to count the raw
@@ -324,7 +324,7 @@ def test_dispatch_alert_reports_sent_with_its_own_tier(
     tests/test_alert_dispatch_ordering.py::test_missing_tier_is_not_paged."""
     from src.pipeline.pass_d_score import dispatch_alert
 
-    mock_is_supp.return_value = False
+    mock_supp_blocks.return_value = False
     mock_send_tg.return_value = True
     mock_peak.return_value = None
 

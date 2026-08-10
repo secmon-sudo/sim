@@ -18,8 +18,8 @@ from src.core.alerts import (
     build_geo_suppression_key,
     build_suppression_key,
     evaluate_alert_tier,
-    is_suppressed,
     record_suppression,
+    suppression_blocks,
 )
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.geo import geo_coords
@@ -557,23 +557,30 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
         return "skipped"
 
     supp_key = build_suppression_key(event)
-    # Storyline-independent safety net: mutes same-place/same-severity duplicates even
-    # when the storyline_id fragments across paraphrased sources (None if no location).
+    # Storyline-independent safety net: mutes same-place duplicates even when the
+    # storyline_id fragments across paraphrased sources (None if no location).
     geo_supp_key = build_geo_suppression_key(event)
     supp_keys = [k for k in (supp_key, geo_supp_key) if k]
 
-    if any(is_suppressed(db_conn, k) for k in supp_keys):
+    storyline_id = event.get("storyline_id")
+    tier = event["alert_tier"]
+
+    # A claim mutes only cards at or below the tier it fired at, so a storyline that
+    # genuinely gets worse still pages — see suppression_blocks. Both keys are checked
+    # the same way, which keeps the geo net intact: a fragmented sibling at the same
+    # tier stays muted even though its own storyline never paged.
+    if any(suppression_blocks(db_conn, k, tier) for k in supp_keys):
         return "suppressed"
 
     # Durably claim the alert slot(s) first (record_suppression commits internally).
+    # On an escalation this overwrites the claim with the new, higher tier, so the
+    # storyline is muted again until it escalates further.
     for k in supp_keys:
-        record_suppression(db_conn, k, event["alert_tier"], event_id,
+        record_suppression(db_conn, k, tier, event_id,
                            ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
 
     # Escalation context: if this storyline already paged at a lower tier, mark the card
     # so the higher-tier alert reads as "this got worse", not an unrelated fresh event.
-    storyline_id = event.get("storyline_id")
-    tier = event["alert_tier"]
     try:
         prev_peak = get_peak_tier(db_conn, storyline_id)
         if is_escalation(prev_peak, tier):

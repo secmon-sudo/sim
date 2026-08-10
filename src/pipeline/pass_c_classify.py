@@ -108,11 +108,29 @@ _CASUALTY_NUM_PATTERN = re.compile(
 # HEADLINE claims a hostile act — the honest false-negative signal. Watch
 # pass_c.high_signal_archived: a rising count is the evidence that would justify
 # building a real guard, and the sample to build it from.
+#
+# Calibration note (10 Aug 2026). The first version listed only NOUN phrases for each
+# act ("drone attack", "missile strike"), so every headline that used the verb slipped
+# past and the counter read as reassuring when it was not: over 700 archived events it
+# matched 1, while a loose hostile-act scan matched 16. The verb forms below were added
+# and re-measured on those same 700 — 1 → 22 matches, of which 20 are genuine hostile
+# acts. The recovered sample is dominated by exactly the class this system has never
+# surfaced: the Leipzig airport explosive-drone incident, archived across five separate
+# headlines, plus "A drone carrying explosives attacked a Ukrainian An-124 in Germany".
 HOSTILE_ACT_PATTERN = re.compile(
     r"\b(explosions?|bombings?|shelling|airstrikes?|air strikes?|missile strike|"
     r"missile attack|drone attack|drone strikes?|gunfire|assassinat(ion|ed)|"
     r"massacred?|ambush|suicide bomb(er)?|car bomb|truck bomb|improvised explosive|"
-    r"terror(ist)? attack|artillery|mortar|kidnapped|abducted)\b",
+    r"terror(ist)? attack|artillery|mortar|kidnapped|abducted"
+    # Verb forms of the same acts — "the enemy ATTACKED Kharkiv", "vessels ATTACKED".
+    r"|attacked|bombed|shelled|stormed|detonated|hijacked|opened fire|shot dead"
+    # Weapon + verb — "Russian drones TARGET Naftogaz", "drones HIT Erbil".
+    r"|(drones?|missiles?|rockets?|uavs?)\s+(target(ed|s)?|hit|struck|strike[sd]?)"
+    # Ordnance found rather than delivered — the Leipzig airport class.
+    r"|explosive (device|drone|belt)"
+    # Airspace incursion, the aviation-adjacent signal this pipeline exists to catch.
+    r"|drones? (spotted|sighted|flew) over"
+    r")\b",
     re.IGNORECASE,
 )
 

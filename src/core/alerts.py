@@ -167,6 +167,13 @@ _AFTERMATH_PATTERNS = (
     ("desk_label",
      re.compile(r"^[^:]{0,70}\b(latest|live|updates?|timeline|recap|roundup)\b"
                 r"(\s+(news|live|updates?|blog|coverage|briefing))*\s*:", re.I)),
+    # Running war diary: "Ukraine Invasion Day 1,628: 135/151 RU drones neutralized",
+    # "Israel-Hamas war, day 700: what we know". Same roundup shape as desk_label but
+    # the marker is a day counter rather than a desk word, so the pattern above misses
+    # it — measured 2026-08-10, one such headline paged as ALERT. The colon is
+    # required: it is what separates the label from "Two killed on day 2 of protests".
+    ("war_diary",
+     re.compile(r"^[^:]{0,50}\bday\s+\d[\d,]{0,6}\b[^:]{0,20}:", re.I)),
     # "one week later", "2 Years After Kursk Incursion", "three years after".
     ("retrospective",
      re.compile(r"\b(one|two|three|four|five|\d+)\s+"
@@ -187,6 +194,11 @@ _AFTERMATH_PATTERNS = (
 )
 
 
+# Patterns whose marker must sit in LABEL position (at the head, before a colon).
+# They are tested against the publisher-stripped headline.
+_LABEL_POSITION_PATTERNS = {"desk_label", "war_diary"}
+
+
 def aftermath_kind(title: str | None) -> str | None:
     """Name the aftermath pattern this headline matches, or None if it reads as news.
 
@@ -197,7 +209,9 @@ def aftermath_kind(title: str | None) -> str | None:
         return None
     stripped = _PUBLISHER_SUFFIX_RE.sub("", title).strip()
     for name, pattern in _AFTERMATH_PATTERNS:
-        target = stripped if name == "desk_label" else title
+        # Label-position patterns read the publisher-stripped headline so a tagline
+        # cannot supply the colon they key on; the rest read the headline as written.
+        target = stripped if name in _LABEL_POSITION_PATTERNS else title
         if pattern.search(target):
             return name
     return None
@@ -284,11 +298,28 @@ def build_suppression_key(event: dict) -> str:
     """
     Build composite key to prevent duplicate alerts.
     Uses IATA code (not raw text) to avoid key fragmentation.
+
+    Deliberately carries NO severity component. It used to bucket severity by tens,
+    which meant one storyline paged once per bucket its members happened to land in:
+    measured 2026-08-10 (run 20260810T105738), storyline 37d41620 sent two cards
+    eight seconds apart because one member scored 100 and another 90. Severity is a
+    per-report estimate of the SAME incident, so it must not fragment the key.
+
+    A storyline that genuinely gets worse still re-pages: suppression_blocks lets a
+    card through when its tier outranks the tier the key last fired at. Tier is the
+    honest "this changed" signal; a severity bucket is not.
+
+    With no storyline_id there is no evidence two events are the same incident, so
+    the key falls back to the event's own id rather than collapsing every unclustered
+    alert into one shared "no_storyline|UNKNOWN" slot. (Measured over 7 days: 0 of
+    1148 tiered events lacked a storyline, so this is a guard, not a live path.)
     """
+    storyline_id = event.get("storyline_id")
+    if not storyline_id:
+        return f"no_storyline|{event.get('id') or id(event)}"
     return "|".join([
-        str(event.get("storyline_id") or "no_storyline"),
+        str(storyline_id),
         event.get("anchor_name_norm") or "UNKNOWN",
-        str(int(event.get("severity_score", 0) // 10) * 10),
     ])
 
 
@@ -305,6 +336,10 @@ def build_geo_suppression_key(event: dict) -> str | None:
     Location resolution prefers the precise IATA anchor, then a coarse geo_key derived
     from the raw location text. Returns None when no usable location is known (so the
     net is never so broad that it mutes unrelated same-country alerts).
+
+    Severity is excluded for the same reason as in build_suppression_key: two reports
+    of one incident routinely differ by a bucket, and a net with a hole that shape
+    catches nothing.
     """
     loc = event.get("anchor_name_norm") or geo_key(
         event.get("anchor_name_raw"), event.get("country_iso")
@@ -315,18 +350,33 @@ def build_geo_suppression_key(event: dict) -> str | None:
         "geofp",
         event.get("country_iso") or "??",
         loc,
-        str(int(event.get("severity_score", 0) // 10) * 10),
     ])
 
 
-def is_suppressed(db_conn, suppression_key: str) -> bool:
-    """Check if an alert with this key was already fired within TTL."""
+def active_suppression_tier(db_conn, suppression_key: str) -> str | None:
+    """The tier this key last fired at within the TTL, or None if it is free."""
     row = db_conn.execute(
-        """SELECT 1 FROM alert_suppression
+        """SELECT alert_tier FROM alert_suppression
            WHERE suppression_key = %s AND expires_at > NOW()""",
         (suppression_key,),
     ).fetchone()
-    return row is not None
+    return row[0] if row else None
+
+
+def suppression_blocks(db_conn, suppression_key: str, tier: str) -> bool:
+    """True when an existing claim on this key should mute a card at `tier`.
+
+    A claim only mutes cards at or below the tier it fired at, so a storyline (or a
+    location, via the geo fingerprint) that genuinely gets WORSE still pages once at
+    the higher tier. That escalation allowance is the only reason the same key may
+    fire twice — the keys themselves deliberately carry no severity component, because
+    severity is a per-report estimate of one incident and bucketing it produced
+    duplicate cards (see build_suppression_key).
+    """
+    fired_at = active_suppression_tier(db_conn, suppression_key)
+    if fired_at is None:
+        return False
+    return tier_rank(tier) <= tier_rank(fired_at)
 
 
 def record_suppression(db_conn, suppression_key: str, tier: str, event_id: str, ttl_hours: int = 4):

@@ -30,7 +30,7 @@ class _MockDB:
 
 def _wire(monkeypatch, calls, *, suppressed=False, send_ok=True):
     monkeypatch.setattr(d, "build_suppression_key", lambda ev: "KEY")
-    monkeypatch.setattr(d, "is_suppressed", lambda db, key: suppressed)
+    monkeypatch.setattr(d, "suppression_blocks", lambda db, key, tier: suppressed)
     monkeypatch.setattr(d, "record_suppression",
                         lambda *a, **k: calls.append("record"))
     monkeypatch.setattr(d, "send_telegram_alert",

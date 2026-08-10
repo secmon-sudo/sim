@@ -45,6 +45,11 @@ AFTERMATH = [
     ("Russia-Ukraine War Latest News: Russia Strikes Odesa Port Fuel Facilities", "desk_label"),
     ("War update: 233 combat clashes on frontline over past day", "desk_label"),
     ("Iran War Timeline: Key Moments and Attacks In U.S. and Israel's Campaign", "desk_label"),
+    # Running war diary — the marker is a day counter, not a desk word. This one paged
+    # as ALERT on 2026-08-10 (run 20260810T105738) before the pattern existed.
+    ("Ukraine Invasion Day 1,628: 135/151 RU drones neutralized - Daily Kos", "war_diary"),
+    ("Israel-Hamas war, day 700: what we know", "war_diary"),
+    ("Day 45 of the siege: aid convoys still blocked", "war_diary"),
     ("At least 4 people took heroic actions during In-N-Out shooting. Here's what we know",
      "explainer"),
     ("IDF expands probe into abnormally strong explosion that killed two reservists",
@@ -84,6 +89,10 @@ REAL_NEWS = [
     "Russian drone strikes passenger train travelling from Sumy to Kyiv",
     "Explosion heard in Saudi Arabia's Jubail as fires reported at energy facilities",
     "Fires seen in Russia's Belgorod amid reported Ukrainian drone attack",
+    # A day count that is part of the sentence, not a label — no colon follows it.
+    "Two killed on day 2 of protests in Nairobi",
+    "Car bomb hits Colombia highway day after new president sworn in",
+    "Day care centre shelled in Kharkiv, three children injured",
     # "charges" as a demolition term, not a court filing.
     "Troops planted explosive charges under the bridge before withdrawing",
     "Shaped charges used in attack on Kerch bridge, investigators say",
