@@ -96,6 +96,26 @@ _CASUALTY_NUM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Unambiguous hostile ACTS — a deliberate subset of _HIGH_SIGNAL_TERMS with every
+# outcome word ("killed", "dead", "casualties"), every ambient-politics word ("war",
+# "conflict", "sanctions", "nuclear") and every humanitarian word ("refugee",
+# "famine") removed. Those belong in a recall-tuned relevance score; they are useless
+# for deciding that a specific incident occurred, because a flood report and an
+# opinion column both carry them.
+#
+# NOT used to override the LLM (see the note in _apply_llm_classification for why
+# that failed). This measures how often the classifier archives something whose
+# HEADLINE claims a hostile act — the honest false-negative signal. Watch
+# pass_c.high_signal_archived: a rising count is the evidence that would justify
+# building a real guard, and the sample to build it from.
+HOSTILE_ACT_PATTERN = re.compile(
+    r"\b(explosions?|bombings?|shelling|airstrikes?|air strikes?|missile strike|"
+    r"missile attack|drone attack|drone strikes?|gunfire|assassinat(ion|ed)|"
+    r"massacred?|ambush|suicide bomb(er)?|car bomb|truck bomb|improvised explosive|"
+    r"terror(ist)? attack|artillery|mortar|kidnapped|abducted)\b",
+    re.IGNORECASE,
+)
+
 
 def deterministic_relevance(title: str, text: str, trusted_domain: bool = False) -> dict:
     """Zero-LLM relevance estimate used to skip clearly off-topic articles before
@@ -594,19 +614,30 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     event_type = parsed.get("event_type", FALLBACK_EVENT_TYPE)
     relevance = _safe_relevance(parsed.get("relevance_score", 50))
 
-    # LLM false-negative guard: if a hard deterministic signal is present
-    # (explosion/airstrike/killed/etc.) but the LLM scored this as noise,
-    # keep it in the pipeline rather than silently archiving. Better a
-    # low-priority event than a missed real incident.
-    if det["has_high_signal"] and relevance < 30:
-        logger.warning(
-            "Event %s: LLM relevance=%d but high-signal term present — overriding archive, keeping event",
-            event_id[:8], relevance,
-        )
-        relevance = max(relevance, 30)
-        if event_type == "noise":
-            event_type = FALLBACK_EVENT_TYPE
-            parsed["event_type"] = event_type
+    # There used to be an "LLM false-negative guard" here: any _HIGH_SIGNAL_TERMS hit
+    # with relevance < 30 floored relevance to 30 and kept the event, on the reasoning
+    # that a low-priority event beats a missed incident. Measured over the 7 days to
+    # 2026-08-10 it rescued 642 events and produced ZERO alerts — and it could not have
+    # produced one, because rescuing a "noise" verdict also stamps FALLBACK_EVENT_TYPE,
+    # whose catalog severity_base is 20 against an ALERT floor of 65 and a severity
+    # floor of 90. The rescue and the cap were the same line of code: a safety net woven
+    # from the hole it was meant to cover.
+    #
+    # The trigger was hopeless too, for a reason worth remembering: _HIGH_SIGNAL_TERMS
+    # exists to SCORE relevance, so it is deliberately broad ("war", "conflict",
+    # "killed", "sanctions", "refugee", "nuclear"), and it matched title+body. A
+    # recall-tuned vocabulary makes a terrible precision-tuned veto. Narrowing it to
+    # unambiguous hostile acts in the title alone still left 38 rescues of which 2 were
+    # real incidents — the rest were a tech blog on the domain explosion.com, a metal
+    # band called Car Bomb, the 1933 Simele massacre and a kidnapped Serbian eagle.
+    #
+    # It also laundered domain reputations: the keep path credits the domain
+    # (update_domain_penalty(..., 0)), so explosion.com sat at penalty_score 0.000 on
+    # 3 rescued events. Archiving them scores those domains honestly.
+    #
+    # Replaced by measurement rather than another guess — see HOSTILE_ACT_PATTERN and
+    # the high_signal_archived counter, which make the real false-negative rate visible
+    # so any future guard can be built on evidence.
 
     # Aviation-priority guard: a genuine flight disruption (not weather) is never
     # archived. Floored above the noise tiers so it survives to scoring, where
@@ -652,6 +683,14 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
         logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
                     event_id[:8], relevance, event_type,
                     parsed.get("relevance_reasoning", "")[:80])
+        # Flagged AFTER the row is written so this private marker never lands in the
+        # stored llm_parsed_output. Counted by the callers into
+        # pass_c.high_signal_archived — the measurement that replaced the old
+        # false-negative override (see the note above).
+        if HOSTILE_ACT_PATTERN.search(event.get("source_title") or ""):
+            logger.info("Event %s archived despite a hostile-act headline: %.90s",
+                        event_id[:8], event.get("source_title") or "")
+            parsed["_high_signal_archived"] = True
         return parsed
 
 
@@ -884,7 +923,7 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
     with requeue so run_pass_c's pacing retry can re-acquire them, then the
     exception propagates — mirroring the single-event contract.
     """
-    stats = {"classified": 0, "failed": 0}
+    stats = {"classified": 0, "failed": 0, "high_signal_archived": 0}
     llm_events: list[dict] = []
 
     for event in events:
@@ -982,9 +1021,12 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
                                i, event["id"][:8])
                 stats["failed"] += 1
                 continue
-            if _apply_llm_classification(db_conn, router, event, event["_det"], item, result,
-                                         worker_id, log_telemetry=False):
+            applied = _apply_llm_classification(db_conn, router, event, event["_det"], item,
+                                                result, worker_id, log_telemetry=False)
+            if applied:
                 stats["classified"] += 1
+                if applied.get("_high_signal_archived"):
+                    stats["high_signal_archived"] += 1
             else:
                 stats["failed"] += 1
         except Exception:
@@ -1025,6 +1067,11 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
         "events_available": 0,
         "events_classified": 0,
         "events_failed": 0,
+        # Events the classifier archived even though their HEADLINE claimed a hostile
+        # act. This is the honest false-negative signal that replaced the old override
+        # (642 rescues, 0 alerts, over the 7 days to 2026-08-10). If this climbs, the
+        # classifier — not a keyword veto — is what needs fixing.
+        "high_signal_archived": 0,
         "llm_exhausted": False,
     }
 
@@ -1075,6 +1122,7 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
                     batch = classify_event_batch(db_conn, router, chunk, worker_id)
                     stats["events_classified"] += batch["classified"]
                     stats["events_failed"] += batch["failed"]
+                    stats["high_signal_archived"] += batch.get("high_signal_archived", 0)
                     if batch.get("parse_error"):
                         consecutive_parse_errors += 1
                     else:
@@ -1083,6 +1131,8 @@ def run_pass_c(db_conn, router: LLMRouter, limit: int = 50) -> dict:
                     result = classify_single_event(db_conn, router, chunk[0], worker_id)
                     if result:
                         stats["events_classified"] += 1
+                        if result.get("_high_signal_archived"):
+                            stats["high_signal_archived"] += 1
                     else:
                         stats["events_failed"] += 1
                 break  # this chunk is done → move on

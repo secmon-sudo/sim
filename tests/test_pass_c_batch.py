@@ -129,7 +129,7 @@ def test_batch_classifies_all_events_with_one_call():
     patches, mocks = _patch_batch(call_llm=call)
     with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
         stats = pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
-    assert stats == {"classified": 3, "failed": 0}
+    assert stats == {"classified": 3, "failed": 0, "high_signal_archived": 0}
     assert call.call_count == 1
     prompt = call.call_args.kwargs["prompt"]
     assert "REPORT 1:" in prompt and "REPORT 3:" in prompt
@@ -164,7 +164,7 @@ def test_batch_missing_item_left_queued():
     patches, mocks = _patch_batch(call_llm=call)
     with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
         stats = pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
-    assert stats == {"classified": 1, "failed": 1}
+    assert stats == {"classified": 1, "failed": 1, "high_signal_archived": 0}
     # The missing event's lock must be released with requeue so it can retry.
     requeued = [c for c in mocks["release_lock"].call_args_list if c.kwargs.get("requeue")]
     assert len(requeued) == 1
@@ -187,7 +187,7 @@ def test_batch_parse_error_leaves_events_queued():
     patches, mocks = _patch_batch(call_llm=call)
     with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
         stats = pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
-    assert stats == {"classified": 0, "failed": 2, "parse_error": True}
+    assert stats == {"classified": 0, "failed": 2, "high_signal_archived": 0, "parse_error": True}
     assert not mocks["_apply_llm_classification"].called
 
 
@@ -241,7 +241,7 @@ def test_batch_prescreen_skips_llm_call():
     )
     with patch.multiple(pc, **{n: m for n, m in mocks.items()}):
         stats = pc.classify_event_batch(MagicMock(), MagicMock(), events, "wid")
-    assert stats == {"classified": 1, "failed": 0}
+    assert stats == {"classified": 1, "failed": 0, "high_signal_archived": 0}
     assert not call.called
 
 
