@@ -63,4 +63,4 @@ jobs:
       - name: DB-backed tests (real Postgres)
         env:
           SIM_SMOKE_DATABASE_URL: postgresql://postgres:pg@localhost:5432/simsmoke
-        run: python -m pytest tests/test_pipeline_smoke.py tests/test_alert_suppression_db.py -q -rs
+        run: python -m pytest tests/test_pipeline_smoke.py tests/test_alert_suppression_db.py tests/test_linking_pool_db.py -q -rs

@@ -457,25 +457,45 @@ def resolve_occurred_at_fallback(
     return min(published_at, now)
 
 
-def link_storylines(event: dict, recent_events: list[dict]) -> str | None:
+def cycle_common_tokens(recent_events: list[dict]) -> set:
+    """Words that name the current news cycle rather than one incident.
+
+    Computed from the RECENCY SLICE of the linking candidates, not from all of them.
+    Two reasons, and they point the same way: the question ("what is this week about")
+    is inherently about now, and min_storylines=3 was calibrated against a ~200-row
+    pool. Feeding it all 2147 storylines of a 14-day window would make three-storyline
+    agreement trivial, and the first casualty would be the very incident this fix
+    exists to merge — "nizhnekamsk" named 14 fragmented storylines in one day.
+
+    Callers pass the already recency-ordered candidate list; slicing here keeps the
+    ordering contract in one place.
+    """
+    return overexposed_tokens(
+        ((r.get("storyline_id"), r.get("storyline_hint"))
+         for r in recent_events[:CYCLE_SLICE_STORYLINES]),
+        STORYLINE_CONTAINMENT_COMMON_MIN,
+    )
+
+
+def link_storylines(event: dict, recent_events: list[dict],
+                    common_tokens: set | None = None) -> str | None:
     """Link this event to the BEST-matching existing storyline.
 
     Uses config-driven thresholds (settings.json -> storyline.*) and picks the
     candidate with the highest Jaccard similarity among those that pass
     should_link_storyline — not merely the first match (which was order-dependent).
+
+    common_tokens: pass the per-run value from cycle_common_tokens() to avoid
+    recomputing it for every event. Omitted, it is derived here so existing callers
+    and tests keep working.
     """
     # Guard: skip storyline linking if occurred_at_est is missing
     if event.get("occurred_at_est") is None:
         return None
 
     event_hint = event.get("storyline_hint") or ""
-    # What the current news cycle is *about* — recomputed per event because the
-    # containment path must not read "idf" or "kyiv" as naming an incident during
-    # a week when a dozen separate storylines carry them.
-    common_tokens = overexposed_tokens(
-        ((r.get("storyline_id"), r.get("storyline_hint")) for r in recent_events),
-        STORYLINE_CONTAINMENT_COMMON_MIN,
-    )
+    if common_tokens is None:
+        common_tokens = cycle_common_tokens(recent_events)
     best_id: str | None = None
     best_sim = -1.0
 
@@ -644,17 +664,56 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
     return "failed"
 
 
+# How many of the (storyline-deduplicated, recency-ordered) linking candidates feed
+# overexposed_tokens. That function asks "what is the current news cycle about", so its
+# input is deliberately a RECENCY slice rather than the whole linking window: a token
+# that named three separate storylines a week ago says nothing about today. 200 also
+# preserves the denominator the min_storylines=3 threshold was calibrated against — the
+# pre-2026-08-11 pool was 200 rows, which is why widening the LINKING pool below had to
+# stop short of widening this one too.
+CYCLE_SLICE_STORYLINES = 200
+
+
 def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
-    """Fetch recent scored/reconciled events once for storyline linking."""
+    """One representative event per storyline across the full linking window.
+
+    This used to be `ORDER BY occurred_at_est DESC LIMIT 200` over raw events, which
+    made the configured 14-day window a fiction: at ~800 events/day the 200 newest rows
+    reach back about 21 hours. Measured 2026-08-11 — at the moment a run scored a fresh
+    Nizhnekamsk report, the pool's oldest member was 08-10 11:27, so the two largest
+    storylines for that same incident (18 events and 7 events, both dated 08-10 before
+    11:25) were INVISIBLE and the event opened a new storyline. One Ukrainian drone
+    strike on the TANECO refinery ended the day as 14 storylines over 47 events, which
+    is what put three mutually contradictory casualty tolls in the RU SITREP as if they
+    were three separate attacks.
+
+    Keying the cap to storylines rather than to events is what makes the window honest:
+    linking asks "does this belong to an existing storyline", so one recent
+    representative per storyline is the complete candidate set, and it is SMALLER than
+    the old raw-event pool would have to be to cover the same time span (2147 storylines
+    vs 3976 events over 14 days). Cost measured at 0.8s per run for the whole pool.
+
+    The representative is each storyline's most RECENT member: the anchor-assist and
+    containment paths in should_link_storyline carry tight 72-hour windows, so the
+    freshest member is the one most likely to still be inside them.
+    """
     try:
         rows = db_conn.execute(
             """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est,
                       anchor_name_norm, anchor_name_raw
-               FROM events
-               WHERE status IN ('scored', 'reconciled')
-                 AND storyline_hint IS NOT NULL
-                 AND occurred_at_est > NOW() - INTERVAL '14 days'
-               ORDER BY occurred_at_est DESC LIMIT 200""",
+               FROM (
+                   SELECT DISTINCT ON (storyline_id)
+                          id, storyline_id, storyline_hint, country_iso,
+                          occurred_at_est, anchor_name_norm, anchor_name_raw
+                   FROM events
+                   WHERE status IN ('scored', 'reconciled')
+                     AND storyline_hint IS NOT NULL
+                     AND storyline_id IS NOT NULL
+                     AND occurred_at_est > NOW() - (%s * INTERVAL '1 day')
+                   ORDER BY storyline_id, occurred_at_est DESC
+               ) reps
+               ORDER BY occurred_at_est DESC""",
+            (STORYLINE_TIME_WINDOW_DAYS,),
         ).fetchall()
 
         return [
@@ -675,7 +734,8 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
 
 
 def score_single_event(db_conn, event_id: str, recent_events: list[dict],
-                       adjudicator=None, dup_adjudicator=None) -> dict | None:
+                       adjudicator=None, dup_adjudicator=None,
+                       common_tokens=None) -> dict | None:
     """Score a single classified event: resolve anchor, compute severity/confidence, assign alert tier.
 
     adjudicator: optional callable(event, recent_events) -> storyline_id | None, invoked
@@ -744,7 +804,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         severity, is_safety = apply_safety_downrank(event["event_type"], severity, llm_parsed)
 
         # 3. Try storyline linking first (needed for diversity score)
-        storyline_id = link_storylines(event, recent_events)
+        storyline_id = link_storylines(event, recent_events, common_tokens)
         if not storyline_id and adjudicator is not None:
             # Deterministic linking failed — let the LLM adjudicator judge same-place,
             # near-time candidates (paraphrases the lexical path could not confirm).
@@ -943,8 +1003,12 @@ def run_pass_d(db_conn) -> dict:
     }
 
     try:
-        # Fetch recent events once for storyline linking
+        # Fetch linking candidates once for the run. common_tokens is derived from the
+        # same list and pinned here rather than recomputed per event: with the pool now
+        # covering whole storylines instead of 21 hours of raw rows, recomputing it 100
+        # times a run would scan 200K hints to reach the same answer every time.
         recent_events = _fetch_recent_events_for_linking(db_conn)
+        common_tokens = cycle_common_tokens(recent_events)
 
         # Build the LLM adjudicators once per pass (bulk router, isolated quota). Both
         # share one router: they ask the same kind of question at different moments, and
@@ -988,7 +1052,7 @@ def run_pass_d(db_conn) -> dict:
 
         for row in rows:
             result = score_single_event(db_conn, str(row[0]), recent_events,
-                                        adjudicator, dup_adjudicator)
+                                        adjudicator, dup_adjudicator, common_tokens)
             if result:
                 stats["events_scored"] += 1
                 # Count an alert only when a Telegram card was ACTUALLY dispatched
