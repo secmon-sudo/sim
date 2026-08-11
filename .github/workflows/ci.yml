@@ -56,7 +56,11 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/ -q
 
-      - name: E2E smoke test (real Postgres)
+      # Everything gated on SIM_SMOKE_DATABASE_URL: the E2E run plus the unit tests whose
+      # subject is SQL the mocked db_conn never executes (the alert_suppression upsert
+      # was wrong for a day precisely because mocks cannot run ON CONFLICT). Each such
+      # test builds its own disposable schema, so they are order-independent.
+      - name: DB-backed tests (real Postgres)
         env:
           SIM_SMOKE_DATABASE_URL: postgresql://postgres:pg@localhost:5432/simsmoke
-        run: python -m pytest tests/test_pipeline_smoke.py -q -rs
+        run: python -m pytest tests/test_pipeline_smoke.py tests/test_alert_suppression_db.py -q -rs

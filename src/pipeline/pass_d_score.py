@@ -17,9 +17,11 @@ from src.core.alerts import (
     TIER_RULES,
     build_geo_suppression_key,
     build_suppression_key,
-    evaluate_alert_tier,
+    evaluate_alert_tier_verbose,
+    recent_paged_alerts,
     record_suppression,
     suppression_blocks,
+    tier_rank,
 )
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.geo import geo_coords
@@ -160,6 +162,14 @@ STORYLINE_ADJUDICATION_MAX_CANDIDATES = _STORYLINE.get("adjudication_max_candida
 # and the count saturates there — 0.08 admits one further call in three days.
 STORYLINE_ADJUDICATION_LEXICAL_FLOOR = _STORYLINE.get(
     "adjudication_lexical_floor", 0.10)
+
+# Layer 3 — LLM duplicate check at dispatch time, for cards that cleared BOTH suppression
+# keys. Those keys collapse duplicates only when two reports agree on a storyline_id or a
+# normalized location string, and measured 2026-08-11 neither survives paraphrase: one
+# Colombian earthquake paged four times under four storyline_ids. Costs about one bulk
+# call per card actually about to be sent (~30/day), which is why it sits last.
+ALERT_DUPLICATE_ADJUDICATION = _SETTINGS.get("alert", {}).get(
+    "duplicate_adjudication_enabled", True)
 
 
 def _safe_float(value, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -521,7 +531,7 @@ def _alert_label(event: dict) -> str:
     return f"{title} · {loc}" if title else loc
 
 
-def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
+def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) -> str:
     """Outbox-ordered Telegram alert dispatch.
 
     Correctness fix: the suppression record is committed BEFORE the alert is sent,
@@ -529,8 +539,14 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
     If the send fails outright, the suppression claim is released so a sibling event
     in the same storyline can retry.
 
-    Returns one of: 'skipped' (below threshold), 'suppressed' (already alerted),
-    'sent', or 'failed'.
+    dup_adjudicator: optional callable(event, paged_alerts) -> matched alert | None, the
+    last-resort duplicate check for cards that cleared both suppression keys. Omitted (or
+    failing) means the card is sent, which is the safe direction here.
+
+    Returns one of: 'skipped' (below threshold), 'suppressed' (a suppression key already
+    fired), 'suppressed_duplicate' (the keys were free but the adjudicator recognised the
+    incident), 'sent', or 'failed'. The two suppressed states are reported separately so
+    telemetry can show what each layer is actually catching.
     """
     if event.get("severity_score", 0) < ALERT_SEVERITY_MIN:
         return "skipped"
@@ -571,6 +587,27 @@ def dispatch_alert(db_conn, event: dict, event_id: str) -> str:
     # tier stays muted even though its own storyline never paged.
     if any(suppression_blocks(db_conn, k, tier) for k in supp_keys):
         return "suppressed"
+
+    # Layer 3: both keys are free, which only means no OTHER report of this incident
+    # produced the same machine identity — not that this incident has not already paged.
+    # Ask the model directly, and treat its verdict exactly as a suppression claim at the
+    # matched card's tier, so a genuine escalation still pages (the rule in
+    # suppression_blocks) and the answer is cached into this event's own keys below
+    # rather than re-derived for every later sibling.
+    if dup_adjudicator is not None:
+        try:
+            match = dup_adjudicator(
+                event, recent_paged_alerts(db_conn, event.get("country_iso"), event_id)
+            )
+        except Exception:
+            logger.exception("Duplicate-page adjudication failed for %s; sending",
+                             event_id[:8])
+            match = None
+        if match and tier_rank(tier) <= tier_rank(match.get("alert_tier")):
+            for k in supp_keys:
+                record_suppression(db_conn, k, match["alert_tier"], event_id,
+                                   ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
+            return "suppressed_duplicate"
 
     # Durably claim the alert slot(s) first (record_suppression commits internally).
     # On an escalation this overwrites the claim with the new, higher tier, so the
@@ -638,11 +675,14 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
 
 
 def score_single_event(db_conn, event_id: str, recent_events: list[dict],
-                       adjudicator=None) -> dict | None:
+                       adjudicator=None, dup_adjudicator=None) -> dict | None:
     """Score a single classified event: resolve anchor, compute severity/confidence, assign alert tier.
 
     adjudicator: optional callable(event, recent_events) -> storyline_id | None, invoked
     ONLY when deterministic linking finds no match, to resolve same-place paraphrases.
+
+    dup_adjudicator: optional callable(event, paged_alerts) -> matched alert | None,
+    passed through to dispatch_alert as the last duplicate-page check.
     """
     try:
         row = db_conn.execute(
@@ -748,8 +788,13 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # The aftermath gate reads the headline's shape to tell a fresh incident
             # from a report about an old one — see _AFTERMATH_PATTERNS in core.alerts.
             "source_title": event.get("source_title"),
+            # ...and report_kind is the classifier's read of the whole article, which
+            # catches the same class of non-news the headline gives no sign of. Absent
+            # on events classified before the field existed; the gate treats a missing
+            # value as new_incident, so those keep their old behaviour.
+            "report_kind": event["llm_parsed"].get("report_kind"),
         }
-        alert_tier = evaluate_alert_tier(alert_data)
+        alert_tier, alert_veto = evaluate_alert_tier_verbose(alert_data)
 
         # Prepare event dict for suppression & notification
         event["storyline_id"] = storyline_id
@@ -799,7 +844,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         # result back purely to record whether the card actually went out. Counting
         # dispatch_result rather than the tier is what keeps alerts_generated from
         # undercounting real pages (see the 24 Jul 2026 telemetry fix).
-        dispatch_result = dispatch_alert(db_conn, event, event_id)
+        dispatch_result = dispatch_alert(db_conn, event, event_id, dup_adjudicator)
         effective_tier = event.get("alert_tier")
 
         # 6. Update event — wrapped in savepoint for isolation
@@ -862,6 +907,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "severity": severity,
             "confidence": system_conf,
             "alert_tier": effective_tier,
+            "alert_veto": alert_veto,
             "dispatch_result": dispatch_result,
             "anchor_norm": anchor["norm"],
             "storyline_id": storyline_id,
@@ -887,39 +933,62 @@ def run_pass_d(db_conn) -> dict:
         "events_scored": 0,
         "events_failed": 0,
         "alerts_generated": {"CRITICAL": 0, "ALERT": 0, "WATCH": 0},
+        # Cards the dispatch-time adjudicator caught that both suppression keys missed —
+        # the measurement that says whether this layer is earning its LLM calls.
+        "duplicate_pages_suppressed": 0,
+        # Tiers the article-shape gates vetoed, by gate. Without this a veto is
+        # indistinguishable from an event that never qualified, so neither gate could be
+        # tuned on anything but log-reading.
+        "alert_vetoes": {},
     }
 
     try:
         # Fetch recent events once for storyline linking
         recent_events = _fetch_recent_events_for_linking(db_conn)
 
-        # Build the Layer 2 LLM adjudicator once per pass (bulk router, isolated quota).
-        # Any init failure degrades gracefully to deterministic-only linking.
+        # Build the LLM adjudicators once per pass (bulk router, isolated quota). Both
+        # share one router: they ask the same kind of question at different moments, and
+        # neither should compete with Pass C classification for smart-model quota. Any
+        # init failure degrades gracefully — deterministic-only linking, and duplicate
+        # cards that get sent rather than dropped.
         adjudicator = None
-        if STORYLINE_LLM_ADJUDICATION:
+        dup_adjudicator = None
+        if STORYLINE_LLM_ADJUDICATION or ALERT_DUPLICATE_ADJUDICATION:
             try:
                 from src.core.llm_router import build_bulk_router
-                from src.core.storyline_adjudicator import adjudicate_storyline
+                from src.core.storyline_adjudicator import (
+                    adjudicate_duplicate_page,
+                    adjudicate_storyline,
+                )
                 _adj_router = build_bulk_router()
 
-                def adjudicator(event, recent, _router=_adj_router, _db=db_conn):
-                    return adjudicate_storyline(
-                        event, recent, _router,
-                        window_hours=STORYLINE_ADJUDICATION_WINDOW_HOURS,
-                        max_candidates=STORYLINE_ADJUDICATION_MAX_CANDIDATES,
-                        lexical_floor=STORYLINE_ADJUDICATION_LEXICAL_FLOOR,
-                        db_conn=_db,
-                    )
+                if STORYLINE_LLM_ADJUDICATION:
+                    def adjudicator(event, recent, _router=_adj_router, _db=db_conn):
+                        return adjudicate_storyline(
+                            event, recent, _router,
+                            window_hours=STORYLINE_ADJUDICATION_WINDOW_HOURS,
+                            max_candidates=STORYLINE_ADJUDICATION_MAX_CANDIDATES,
+                            lexical_floor=STORYLINE_ADJUDICATION_LEXICAL_FLOOR,
+                            db_conn=_db,
+                        )
+
+                if ALERT_DUPLICATE_ADJUDICATION:
+                    def dup_adjudicator(event, paged, _router=_adj_router, _db=db_conn):
+                        return adjudicate_duplicate_page(
+                            event, paged, _router, db_conn=_db,
+                        )
             except Exception:
-                logger.exception("Failed to init storyline adjudicator; deterministic only")
+                logger.exception("Failed to init adjudicators; deterministic only")
                 adjudicator = None
+                dup_adjudicator = None
 
         rows = db_conn.execute(
             "SELECT id FROM events WHERE status = 'classified' ORDER BY ingested_at ASC",
         ).fetchall()
 
         for row in rows:
-            result = score_single_event(db_conn, str(row[0]), recent_events, adjudicator)
+            result = score_single_event(db_conn, str(row[0]), recent_events,
+                                        adjudicator, dup_adjudicator)
             if result:
                 stats["events_scored"] += 1
                 # Count an alert only when a Telegram card was ACTUALLY dispatched
@@ -929,6 +998,11 @@ def run_pass_d(db_conn) -> dict:
                 if result.get("dispatch_result") == "sent":
                     tier = result.get("alert_tier") or "ALERT"
                     stats["alerts_generated"][tier] = stats["alerts_generated"].get(tier, 0) + 1
+                elif result.get("dispatch_result") == "suppressed_duplicate":
+                    stats["duplicate_pages_suppressed"] += 1
+                veto = result.get("alert_veto")
+                if veto:
+                    stats["alert_vetoes"][veto] = stats["alert_vetoes"].get(veto, 0) + 1
             else:
                 stats["events_failed"] += 1
 

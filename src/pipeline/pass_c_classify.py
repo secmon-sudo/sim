@@ -72,11 +72,15 @@ _CLASSIFICATION = _SETTINGS.get("classification", {})
 PRESCREEN_ENABLED = _CLASSIFICATION.get("deterministic_prescreen_enabled", True)
 PRESCREEN_SKIP_FLOOR = _CLASSIFICATION.get("deterministic_skip_floor", 15)
 
-# Batch classification: how many reports to classify per LLM call. The ~2300-token
+# Batch classification: how many reports to classify per LLM call. The ~2650-token
 # system prompt is paid ONCE per call instead of once per event, and each call burns
 # one RPM slot for N events — the free tier's two scarcest currencies. Sized so a
 # full batch (system + N truncated reports + JSON array output) stays inside Groq's
 # 8K TPM window. 1 disables batching (classic per-event path).
+#
+# The prompt grew ~320 tokens on 2026-08-11 with the report_kind field, which is the
+# largest single item of headroom spent so far — a full batch now runs near 6K of the
+# 8K window. Anything else added here should come with the same arithmetic.
 BATCH_CLASSIFY_SIZE = int(_CLASSIFICATION.get("llm_batch_size", 6))
 # Per-report truncation inside a batch prompt (chars). Tighter than the single-event
 # path's 3000 so the whole batch fits the TPM window; headlines carry most signal.
@@ -146,13 +150,32 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     """
     blob = f"{title} {text}"
     has_high_signal = bool(_HIGH_SIGNAL_PATTERN.search(blob))
+    # The verb construction most wire copy actually uses. _HIGH_SIGNAL_TERMS and the
+    # security keywords are built from NOUN PHRASES ("drone attack", "air strike", "car
+    # bomb") — the right shape for precision, but they match nothing in "Drones ATTACKED
+    # the petrochemical center" or "The enemy ATTACKED Kharkiv". HOSTILE_ACT_PATTERN
+    # already carries those forms; it was written for the high_signal_archived counter,
+    # so the two vocabularies were measuring different things while only one of them
+    # decided anything.
+    #
+    # Measured 2026-08-11 over 7 days: 64 of 1779 prescreen-archived events matched the
+    # verb forms and scored 0 — archived without an LLM ever seeing them, among them "A
+    # drone carrying explosives attacked a Ukrainian An-124 in Germany". Costs ~9 extra
+    # classification calls a day.
+    #
+    # Deliberately NOT folded into has_high_signal. That flag suppresses the is_noise()
+    # penalty below, and a bare verb is exactly where the metaphors live: "the film
+    # BOMBED at the box office", "stock market ATTACKED by inflation fears". is_noise()
+    # catches both, so a verb-only match is scored as ordinary security vocabulary and
+    # left subject to that veto, while a noun-phrase hit still overrides it.
+    has_hostile_act = bool(HOSTILE_ACT_PATTERN.search(blob))
     has_casualty = bool(_CASUALTY_NUM_PATTERN.search(blob))
     noisy = is_noise(f"{title} {text[:500]}")
     # Aviation stopped flying, and not because of weather — the security scope.
     # is_noise() catches snowstorm/maintenance cancellations, so excluding noisy
     # here leaves only disruptions worth keeping (mirrors the ingest gate).
     has_flight_disruption = _is_flight_disruption(blob) and not noisy
-    has_security = (has_high_signal or has_flight_disruption
+    has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -174,6 +197,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "score": score,
         "has_security": has_security,
         "has_high_signal": has_high_signal,
+        "has_hostile_act": has_hostile_act,
         "has_flight_disruption": has_flight_disruption,
         "has_casualty": has_casualty,
         "noisy": noisy,
@@ -258,6 +282,26 @@ Extract the following fields:
       (e.g. conflict/airstrikes near a city with an airport, unrest affecting airport access)
     - "none": no plausible connection to aviation operations
     Aviation is the PRIORITY domain — assess this field carefully for every event.
+
+13. report_kind: What this ARTICLE is, independent of how serious its subject is.
+    An alert claims something is happening NOW, so a report ABOUT an earlier incident
+    must be recognisable even when the incident itself was severe. One of:
+    - "new_incident": reports an incident, attack, strike or operational disruption as
+      NEWLY happening. Includes a closure, suspension or evacuation being announced now
+      (e.g. "Airport suspends operations after drone sighting"), and includes a first
+      report that is still fragmentary.
+    - "followup": further developments in an incident already reported — arrests,
+      charges, trials, sentences, funerals, compensation, demolitions, repairs,
+      reopenings, released footage or police briefings, revised death tolls, "one week
+      later" / anniversary pieces, recovery and rescue-completed stories.
+    - "roundup": covers several separate incidents at once, or is a running live blog /
+      daily war summary / timeline ("Day 1,625", "live updates", "key moments").
+    - "commentary": analysis, opinion, explainer, or pure reaction — condemnations,
+      statements, warnings, diplomatic responses — with no new physical event.
+    Judge the ARTICLE, not the subject: "Police release video of the mass shooting" is
+    followup even though a mass shooting is severe. If a report describes a fresh
+    incident AND adds later detail, it is new_incident. When genuinely unsure, answer
+    new_incident.
 
 WHEN TO USE event_type "noise" (relevance < 30):
 - Flight simulators, plane spotting, aviation photography, model aircraft
@@ -410,6 +454,33 @@ def _safe_relevance(value, default: int = 50) -> int:
         return max(0, min(100, int(float(value))))
     except (TypeError, ValueError):
         return default
+
+
+# The article-shape classes the alert gate reads (see REPORT_KIND_NOT_NEWS in
+# core.alerts). NEW_INCIDENT is the fail-safe: an absent, misspelled or invented value
+# resolves to it, so a degraded model reply can only ever let alerts through, never
+# silence them.
+REPORT_KIND_NEW = "new_incident"
+REPORT_KINDS = {REPORT_KIND_NEW, "followup", "roundup", "commentary"}
+
+
+# Vocabulary keyed on letters alone, so "follow-up", "follow up" and "followup" are one
+# value. Models are consistent about the WORD and careless about the separator.
+_REPORT_KIND_BY_LETTERS = {k.replace("_", ""): k for k in REPORT_KINDS}
+
+
+def _safe_report_kind(value) -> str:
+    """Coerce the LLM's report_kind to a known class, defaulting to new_incident.
+
+    Deliberately strict about the vocabulary and lenient about everything else: this
+    field can only ever WITHHOLD a page, so an unrecognised value must not be trusted
+    to mean "not news". Models paraphrase enum values ("follow-up", "Roundup "), which
+    is worth normalising; they also invent them, which is not worth guessing at.
+    """
+    if not isinstance(value, str):
+        return REPORT_KIND_NEW
+    letters = re.sub(r"[^a-z]", "", value.lower())
+    return _REPORT_KIND_BY_LETTERS.get(letters, REPORT_KIND_NEW)
 
 
 class LLMParseError(Exception):
@@ -749,6 +820,12 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     country_iso = raw_iso.strip().upper()[:2] if raw_iso else None
     if country_iso and (len(country_iso) != 2 or not country_iso.isalpha()):
         country_iso = None
+
+    # Normalize report_kind into `parsed` (the dict stored as llm_parsed_output) so the
+    # alert gate reads a known value on every event, including ones classified before
+    # the field existed. Both classification paths land here, so this is the single
+    # place the vocabulary is enforced.
+    parsed["report_kind"] = _safe_report_kind(parsed.get("report_kind"))
 
     # Keep the geographically-scoped type inside its geography. The prompt scopes
     # african_terrorism to the Sahel / Horn of Africa, but the models reach for it on

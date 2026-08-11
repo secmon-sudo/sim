@@ -98,7 +98,8 @@
           "previous_day"
         ]
       }
-    }
+    },
+    "duplicate_adjudication_enabled": true
   },
   "radius_mapping": {
     "airport": 5.0

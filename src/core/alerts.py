@@ -154,6 +154,16 @@ TIER_RULES = _tier_rules()
 # only carrier of a genuinely major development, losing the page is worse than the
 # noise.
 
+# The classifier's verdict on what the ARTICLE is (pass_c's report_kind). These three
+# classes report on something already in the news rather than something happening now,
+# so they cannot carry a page below CRITICAL.
+#
+# Only these three veto: `new_incident` is also what an absent, unparseable or invented
+# value resolves to (see _safe_report_kind), which keeps the failure direction right —
+# a degraded classification lets alerts through rather than silencing them. That is why
+# the check is written as membership in this set and never as `!= "new_incident"`.
+REPORT_KIND_NOT_NEWS = frozenset({"followup", "roundup", "commentary"})
+
 # Publisher/section suffix: "Headline - Reuters", "Headline | Shafaq News | Latest…".
 # Stripped before the desk-label test so a publisher's tagline cannot trip it.
 _PUBLISHER_SUFFIX_RE = re.compile(r"\s+[-|–—]\s+[^-|–—]*$")
@@ -254,6 +264,17 @@ def evaluate_alert_tier(event: dict) -> str | None:
 
     Returns: 'CRITICAL', 'ALERT', 'WATCH', or None
     """
+    return evaluate_alert_tier_verbose(event)[0]
+
+
+def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
+    """Tier plus the name of the gate that vetoed it, or (tier, None).
+
+    The veto reason exists so the article-shape gates are measurable. Both of them turn
+    a tier into None, which is indistinguishable in the stored data from an event that
+    simply never qualified — so without this, the only evidence either gate does
+    anything is a log line, and the only way to tune them is to guess.
+    """
     sev = event.get("severity_score", 0)
     conf = event.get("system_confidence", 0.0)
     anc = event.get("anchor_confidence", "LOW")
@@ -264,7 +285,7 @@ def evaluate_alert_tier(event: dict) -> str | None:
     # "time" is the standing advisory date, so bypass the anchor/time gates and key on
     # severity only (already pre-filtered to Level 3-4 / "do not travel" upstream).
     if event.get("event_type") in ADVISORY_EVENT_TYPES:
-        return "ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"
+        return ("ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"), None
 
     tier = None
     for name in TIER_ORDER:
@@ -279,19 +300,34 @@ def evaluate_alert_tier(event: dict) -> str | None:
             and tier_rank(tier) < tier_rank("ALERT")):
         tier = "ALERT"
 
-    # Aftermath gate — see _AFTERMATH_PATTERNS. Last, so it can veto both the ladder
-    # and the floor: those two decide whether the SUBJECT is alert-worthy, and this
-    # decides whether the ARTICLE is reporting it as news. CRITICAL is deliberately
-    # exempt — a roundup is sometimes the only carrier of a genuinely major
-    # development, and missing that costs more than the noise it lets through.
+    # Article-shape gates — see _AFTERMATH_PATTERNS and REPORT_KIND_NOT_NEWS. Last, so
+    # they can veto both the ladder and the floor: those two decide whether the SUBJECT
+    # is alert-worthy, and these decide whether the ARTICLE is reporting it as news.
+    # CRITICAL is deliberately exempt from both — a roundup is sometimes the only carrier
+    # of a genuinely major development, and missing that costs more than the noise it
+    # lets through.
+    #
+    # Two gates rather than one because they read different evidence and fail
+    # differently. The title patterns are free and catch desk labels the classifier
+    # never sees the shape of; report_kind is the classifier's judgement of the whole
+    # article, which is the only thing that separates "Police release video of the mass
+    # shooting" from the shooting. Measured 2026-08-11 over 7 days: the severity floor
+    # produced 296 of 561 ALERT-tier events with no confidence requirement at all, and
+    # the junk among them was overwhelmingly this shape — arrests, charges, reopenings,
+    # released footage, condemnations, "Day 1,625" war diaries.
     if tier is not None and tier != "CRITICAL":
         kind = aftermath_kind(event.get("source_title"))
         if kind:
             logger.info("Alert suppressed as %s report (would have been %s): %.80s",
                         kind, tier, event.get("source_title") or "")
-            return None
+            return None, "aftermath_title"
+        report_kind = event.get("report_kind")
+        if report_kind in REPORT_KIND_NOT_NEWS:
+            logger.info("Alert suppressed as %s article (would have been %s): %.80s",
+                        report_kind, tier, event.get("source_title") or "")
+            return None, f"report_kind_{report_kind}"
 
-    return tier
+    return tier, None
 
 
 def build_suppression_key(event: dict) -> str:
@@ -353,6 +389,66 @@ def build_geo_suppression_key(event: dict) -> str | None:
     ])
 
 
+def recent_paged_alerts(db_conn, country_iso: str | None, exclude_event_id: str | None,
+                        limit: int = 6) -> list[dict]:
+    """Alerts that already paged and are still inside their suppression window.
+
+    The candidate set for the dispatch-time duplicate adjudicator (see
+    adjudicate_duplicate_page). Scoped to live suppression claims, so it stays small
+    enough to hand to a model whole: over the 11 Aug 2026 sample the busiest country held
+    5 live claims.
+
+    Scoped to one country when the event has one. When it does not — 57 of 922 tiered
+    events over the week to 2026-08-11 carry no country_iso — the candidates are the
+    most recent live claims regardless of country, because the alternative was returning
+    nothing and skipping the duplicate check entirely for those 6%. A broader candidate
+    list is safe here in a way a broader suppression KEY would not be: nothing is muted
+    without the model affirming the incidents are the same, and it fails toward sending.
+
+    An event holds one claim per suppression key (primary + geo), so rows are folded back
+    to one row per event, carrying the HIGHEST tier any of its keys fired at. Ordering
+    tier by array_position rather than by the tier string keeps 'CRITICAL' above 'WATCH';
+    alphabetically it is not.
+    """
+    try:
+        rows = db_conn.execute(
+            """SELECT e.id,
+                      (ARRAY['WATCH','ALERT','CRITICAL'])[
+                          MAX(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
+                                             s.alert_tier))] AS alert_tier,
+                      e.source_title, e.storyline_hint,
+                      e.anchor_name_raw, e.anchor_name_norm,
+                      MAX(s.expires_at) AS last_expiry
+               FROM alert_suppression s
+               JOIN events e ON e.id = s.event_id
+               WHERE s.expires_at > NOW()
+                 AND (%s::text IS NULL OR e.country_iso = %s)
+                 AND (%s::uuid IS NULL OR e.id <> %s::uuid)
+               GROUP BY e.id, e.source_title, e.storyline_hint,
+                        e.anchor_name_raw, e.anchor_name_norm
+               ORDER BY last_expiry DESC
+               LIMIT %s""",
+            (country_iso, country_iso, exclude_event_id, exclude_event_id, limit),
+        ).fetchall()
+    except Exception:
+        logger.exception("Failed to fetch recently paged alerts; treating as none")
+        return []
+    return [
+        {
+            "id": str(r[0]),
+            "alert_tier": r[1],
+            "source_title": r[2],
+            "storyline_hint": r[3],
+            "anchor_name_raw": r[4],
+            "anchor_name_norm": r[5],
+        }
+        for r in rows
+        # A claim whose tier never resolved carries no rank to compare against, so it
+        # cannot mute anything — leaving it in would only spend prompt space.
+        if r[1]
+    ]
+
+
 def active_suppression_tier(db_conn, suppression_key: str) -> str | None:
     """The tier this key last fired at within the TTL, or None if it is free."""
     row = db_conn.execute(
@@ -380,11 +476,41 @@ def suppression_blocks(db_conn, suppression_key: str, tier: str) -> bool:
 
 
 def record_suppression(db_conn, suppression_key: str, tier: str, event_id: str, ttl_hours: int = 4):
-    """Record a suppression entry so future duplicates are muted."""
+    """Record a suppression entry so future duplicates are muted.
+
+    On conflict the stored tier is RAISED to the tier that just fired. Without that the
+    row kept the tier of its first claim forever, so the one-off escalation allowance in
+    suppression_blocks became unlimited: a storyline that paged once at ALERT then paged
+    at CRITICAL on every subsequent run, because the stored tier never stopped being
+    ALERT. Measured 2026-08-11 across runs 1453/1456/1458.
+
+    The tier is only ever raised, never lowered. record_suppression is reached only when
+    suppression_blocks let the card through, which already implies the new tier outranks
+    the stored one — but keying the write off an explicit comparison rather than that
+    invariant keeps a future caller from silently re-opening the same hole. Tier order
+    matches tier_rank(); an unrecognised stored tier sorts below WATCH, so it is replaced.
+    """
     db_conn.execute(
         """INSERT INTO alert_suppression (suppression_key, alert_tier, event_id, expires_at)
            VALUES (%s, %s, %s, NOW() + (%s * INTERVAL '1 hour'))
-           ON CONFLICT (suppression_key) DO UPDATE SET expires_at = EXCLUDED.expires_at""",
+           ON CONFLICT (suppression_key) DO UPDATE SET
+               expires_at = EXCLUDED.expires_at,
+               alert_tier = CASE
+                   WHEN COALESCE(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
+                                                EXCLUDED.alert_tier), 0)
+                      > COALESCE(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
+                                                alert_suppression.alert_tier), 0)
+                   THEN EXCLUDED.alert_tier
+                   ELSE alert_suppression.alert_tier
+               END,
+               event_id = CASE
+                   WHEN COALESCE(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
+                                                EXCLUDED.alert_tier), 0)
+                      > COALESCE(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
+                                                alert_suppression.alert_tier), 0)
+                   THEN EXCLUDED.event_id
+                   ELSE alert_suppression.event_id
+               END""",
         (suppression_key, tier, event_id, ttl_hours),
     )
     db_conn.commit()

@@ -166,8 +166,8 @@ def _build_prompt(event: dict, candidates: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _parse_decision(content: str, candidates: list[dict]) -> str | None:
-    """Map the LLM reply to a storyline_id, or None for NEW/unparseable."""
+def _parse_match_index(content: str, n_candidates: int) -> int | None:
+    """Map the LLM reply to a 0-based candidate index, or None for NEW/unparseable."""
     if not content:
         return None
     val = None
@@ -189,9 +189,105 @@ def _parse_decision(content: str, candidates: list[dict]) -> str | None:
         idx = int(val)
     except (TypeError, ValueError):
         return None
-    if 1 <= idx <= len(candidates):
-        return candidates[idx - 1]["storyline_id"]
+    if 1 <= idx <= n_candidates:
+        return idx - 1
     return None
+
+
+def _parse_decision(content: str, candidates: list[dict]) -> str | None:
+    """Map the LLM reply to a storyline_id, or None for NEW/unparseable."""
+    idx = _parse_match_index(content, len(candidates))
+    return None if idx is None else candidates[idx]["storyline_id"]
+
+
+_DUP_SYSTEM_PROMPT = (
+    "You are a precise duplicate-detection assistant for an OSINT security alerting "
+    "pipeline. You decide whether a candidate alert reports the SAME real-world incident "
+    "as an alert that was already sent. Answer ONLY with strict JSON."
+)
+
+
+def _describe(ev: dict) -> str:
+    """One line of what an alert is about — title first, since it is always present."""
+    title = (ev.get("source_title") or "").strip()[:160]
+    hint = (ev.get("storyline_hint") or "").strip()[:120]
+    loc = (ev.get("anchor_name_raw") or ev.get("anchor_name_norm") or "").strip()
+    parts = [p for p in (title, hint, loc) if p]
+    return " · ".join(parts) if parts else "(no description)"
+
+
+def _build_duplicate_prompt(event: dict, paged: list[dict]) -> str:
+    lines = [
+        "CANDIDATE ALERT (not yet sent):",
+        f"  {_describe(event)}",
+        "",
+        "ALERTS ALREADY SENT (within the last few hours):",
+    ]
+    for i, p in enumerate(paged, 1):
+        lines.append(f"  [{i}] {_describe(p)}")
+    lines += [
+        "",
+        "Would sending the CANDIDATE be a DUPLICATE — does it report the same real-world "
+        "incident as one of the alerts already sent? Two outlets covering one incident "
+        "with different wording, different casualty counts, or different levels of "
+        "geographic detail (a region and a town inside it) are the SAME incident.",
+        "Different incidents in the same country on the same day are NOT duplicates, even "
+        "when they are the same kind of event (two separate strikes, two separate "
+        "bombings, an attack and the retaliation for it).",
+        'Reply with strict JSON only: {"match": <number of the duplicated alert, or "NEW">}.',
+    ]
+    return "\n".join(lines)
+
+
+def adjudicate_duplicate_page(
+    event: dict,
+    paged: list[dict],
+    router,
+    *,
+    call_llm_fn=call_llm,
+    db_conn=None,
+) -> dict | None:
+    """Return the already-sent alert this event duplicates, or None to let it page.
+
+    The suppression keys collapse duplicates only when two reports agree on a machine
+    identity — a storyline_id, or a normalized location string. Measured 2026-08-11
+    (runs 1453/1456/1458) neither holds for the cases that actually flood the channel:
+    one Colombian earthquake paged four times under four storyline_ids, twice inside a
+    single run, because each outlet's paraphrase clustered separately and their location
+    strings ("western Colombia", "San Jose Del Palmar, Chocó", absent) keyed differently.
+    Of 922 tiered events in the preceding week only 49 carried an IATA anchor and 258 had
+    no location at all, so the geo net could not have caught them.
+
+    This is the same judgement `adjudicate_storyline` makes, asked at the moment it
+    matters and against a different candidate set: not "which storyline is this" but
+    "did we already page this". It runs on the bulk router, only for cards that have
+    already cleared every cheap gate, so it costs roughly one call per card actually
+    about to be sent.
+
+    Fails safe in the OPPOSITE direction to storyline adjudication: any error, empty
+    candidate set or unparseable reply yields None, meaning the alert is SENT. Losing a
+    page is worse than repeating one.
+    """
+    if not paged:
+        return None
+    prompt = _build_duplicate_prompt(event, paged)
+    try:
+        result = call_llm_fn(router, prompt, system_prompt=_DUP_SYSTEM_PROMPT,
+                             max_tokens=512)
+    except Exception:
+        logger.exception("Duplicate-page adjudication failed; sending the alert")
+        return None
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, result, router, success=True)
+    idx = _parse_match_index(result.get("content", ""), len(paged))
+    if idx is None:
+        return None
+    match = paged[idx]
+    logger.info(
+        "Adjudicator judged alert a duplicate of an already-sent %s card: %.80s",
+        match.get("alert_tier"), _describe(match),
+    )
+    return match
 
 
 def adjudicate_storyline(
