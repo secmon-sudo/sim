@@ -749,7 +749,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             """SELECT id, event_type, anchor_name_raw, country_iso,
                       llm_parsed_output, storyline_hint, occurred_at_est,
                       source_title, source_url, ingested_at, source_domain,
-                      published_at
+                      published_at, date_verified
                FROM events WHERE id = %s AND status = 'classified'""",
             (event_id,),
         ).fetchone()
@@ -789,6 +789,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "source_title": row[7],
             "source_url": row[8],
             "source_domain": row[10],
+            # Whether published_at is the publisher's own date or an aggregator's crawl
+            # stamp (migration 021). The alert gate refuses to read the latter as
+            # freshness, and the notifier labels it instead of presenting it as fact.
+            "date_verified": bool(row[12]),
         }
 
         # 1. Resolve anchor
@@ -853,6 +857,9 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # on events classified before the field existed; the gate treats a missing
             # value as new_incident, so those keep their old behaviour.
             "report_kind": event["llm_parsed"].get("report_kind"),
+            # An aggregator crawl stamp cannot stand in for a publication date, so it
+            # cannot satisfy the freshness gates either — see evaluate_alert_tier_verbose.
+            "date_verified": event["date_verified"],
         }
         alert_tier, alert_veto = evaluate_alert_tier_verbose(alert_data)
 

@@ -447,6 +447,14 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
         # Get published_at date
         pub_dt = item.get("pub_dt")
+        # Only aggregator links carry the restamping risk: a publisher's own feed
+        # reports its own CMS date, while Google News reports when IT last crawled the
+        # page. Read BEFORE the fetch below, which rewrites `url` to the resolved
+        # publisher address and would erase the evidence of where the item came from.
+        from_aggregator = "news.google.com" in url
+        # Provenance of pub_dt (migration 021): a publisher's own date starts out
+        # verified, an aggregator's stamp has to earn it from the page or the URL path.
+        date_verified = not from_aggregator
 
         # Fetch the article itself: resolves the Google News handle to the
         # publisher's URL, and returns the page's own date and body in ONE round
@@ -456,10 +464,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         if (_VERIFY_PUBLISH_DATE or _FETCH_FULL_TEXT) and \
                 stats["full_text_attempted"] < _ARTICLE_FETCH_MAX_PER_RUN:
             stats["full_text_attempted"] += 1
-            # Only aggregator links carry the restamping risk: a publisher's own
-            # feed reports its own CMS date, while Google News reports when IT
-            # last crawled the page.
-            from_aggregator = "news.google.com" in url
             article = fetch_article(url)
 
             # Prefer the publisher's URL: it is what a reader should be handed in
@@ -486,6 +490,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     continue
                 stats["publish_dates_verified"] += 1
                 pub_dt = page_dt
+                date_verified = True
             elif from_aggregator:
                 # Publisher blocked the fetch and left no date in the path, so
                 # this row keeps Google's crawl stamp. Counted, not dropped:
@@ -512,14 +517,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             with db_conn.transaction():
                 result = db_conn.execute(
                     """INSERT INTO events (source_url, source_url_hash, source_domain,
-                                           source_title, raw_text, canonical_text, status, published_at)
-                       SELECT %s, %s, %s, %s, %s, %s, 'raw', %s
+                                           source_title, raw_text, canonical_text, status,
+                                           published_at, date_verified)
+                       SELECT %s, %s, %s, %s, %s, %s, 'raw', %s, %s
                        WHERE NOT EXISTS (
                            SELECT 1 FROM events WHERE source_url_hash = %s
                        )
                        RETURNING id""",
                     (url, url_hash, domain, item.get("title", ""),
-                     raw_text, canonical, pub_dt, url_hash),
+                     raw_text, canonical, pub_dt, date_verified, url_hash),
                 )
                 new_row = result.fetchone()
                 if new_row:

@@ -6,6 +6,7 @@ fetch and best-effort translation. Everything that talks to the outside world
 during ingest lives here. Split out of pass_a_ingest.py on 2026-07-16.
 """
 
+import calendar
 import email.utils
 import json
 import logging
@@ -627,13 +628,25 @@ _URL_DATE_RES = (
     re.compile(r"/(20\d{2})(\d{2})(\d{2})[-_/]"),
 )
 
+# Month precision: /2022/09/slug — a very common WordPress permalink shape, and one the
+# day-precision patterns above silently ignored. Measured cost of ignoring it (30 days
+# to 2026-08-12): 15 events whose path month predated their Google-stamped date by more
+# than a month, three of which fired ALERT — including a 2022 Waziristan bombing sent as
+# an 2026-08-05 incident at severity 95. Tried only after the day patterns miss.
+_URL_MONTH_RE = re.compile(r"/(20\d{2})/(0?[1-9]|1[0-2])/")
+
 
 def extract_date_from_url(url: str) -> datetime | None:
     """Publication date encoded in the article path, or None.
 
-    Day-precision only, so it resolves to END of day: the age check must never
-    make a story look older than it is, and this date only ever decides whether
-    something is inside the freshness window, not when an incident happened.
+    Coarse precision, so it resolves to the END of the period it names — end of day for
+    /2026/08/05/, end of month for /2026/08/. The age check must never make a story look
+    older than it is, and this date only ever decides whether something is inside the
+    freshness window, not when an incident happened.
+
+    End-of-month also makes the month pattern self-limiting: for the CURRENT month the
+    result lands past the caller's future-date guard and is discarded, so a path month
+    can only ever age an article that is already at least a month old.
     """
     for pattern in _URL_DATE_RES:
         match = pattern.search(url or "")
@@ -644,6 +657,12 @@ def extract_date_from_url(url: str) -> datetime | None:
             return datetime(year, month, day, 23, 59, 59, tzinfo=timezone.utc)
         except ValueError:
             continue
+
+    match = _URL_MONTH_RE.search(url or "")
+    if match:
+        year, month = int(match.group(1)), int(match.group(2))
+        last_day = calendar.monthrange(year, month)[1]
+        return datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
     return None
 
 

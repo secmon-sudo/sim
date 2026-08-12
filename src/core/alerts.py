@@ -281,6 +281,20 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     time_ = event.get("time_certainty") or "unknown"
     located = is_located(event)
 
+    # Freshness has to rest on a date the PUBLISHER declared. When it doesn't (migration
+    # 021: an aggregator crawl stamp we could not confirm), "same_day" only means Google
+    # re-crawled the page today — measured 2026-08-12 on a 2026-03-25 Nepalnews explainer
+    # stored as published 01:33 that day. Downgrading to "unknown" is the same treatment
+    # an event with no time evidence gets, because that is what this is.
+    #
+    # Absent field reads as verified: every caller that predates the column, and every
+    # test that builds an event dict by hand, must keep behaving as before. A gate that
+    # fails closed on a missing key would silence alerts on a query someone forgot to
+    # update — the same fail-open direction as REPORT_KIND_NOT_NEWS.
+    unverified_fresh = not event.get("date_verified", True) and time_ in FRESH_TIME_CERTAINTY
+    if unverified_fresh:
+        time_ = "unknown"
+
     # Travel advisory path — country-level official warning, no airport anchor and its
     # "time" is the standing advisory date, so bypass the anchor/time gates and key on
     # severity only (already pre-filtered to Level 3-4 / "do not travel" upstream).
@@ -299,6 +313,15 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
             and time_ in FRESH_TIME_CERTAINTY
             and tier_rank(tier) < tier_rank("ALERT")):
         tier = "ALERT"
+
+    # Date-provenance attribution. Reported here rather than at the substitution above
+    # because the downgrade only COSTS an event its page when freshness was the evidence
+    # carrying it: an event that qualifies on location and severity is unaffected, and
+    # recording a veto there would overstate the gate the way the old tier telemetry did.
+    if tier is None and unverified_fresh:
+        logger.info("Alert withheld — %s date is an unverified aggregator stamp: %.80s",
+                    event.get("time_certainty"), event.get("source_title") or "")
+        return None, "date_unverified"
 
     # Article-shape gates — see _AFTERMATH_PATTERNS and REPORT_KIND_NOT_NEWS. Last, so
     # they can veto both the ladder and the floor: those two decide whether the SUBJECT

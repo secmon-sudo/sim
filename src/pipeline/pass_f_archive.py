@@ -36,6 +36,10 @@ _EVENT_COLUMNS = [
     "id", "source_url", "source_title", "canonical_text", "event_type",
     "alert_tier", "severity_score", "anchor_name_norm", "country_iso",
     "occurred_at_est", "ingested_at", "llm_parsed_output", "storyline_id",
+    # Provenance of published_at (migration 021). Exported so the archive records
+    # WHICH dates were the publisher's and which were an aggregator's crawl stamp —
+    # a distinction that cannot be recovered from the JSONL after the fact.
+    "date_verified",
 ]
 
 
@@ -75,7 +79,8 @@ def get_archivable_events(db_conn) -> list[dict]:
     query = """
         SELECT id, source_url, source_title, canonical_text, event_type,
                alert_tier, severity_score, anchor_name_norm, country_iso,
-               occurred_at_est, ingested_at, llm_parsed_output, storyline_id
+               occurred_at_est, ingested_at, llm_parsed_output, storyline_id,
+               date_verified
         FROM events e
         WHERE e.status = 'reconciled'
           AND (
@@ -312,7 +317,8 @@ def get_run_events(db_conn, run_started_at: datetime) -> list[dict]:
     query = """
         SELECT id, source_url, source_title, canonical_text, event_type,
                alert_tier, severity_score, anchor_name_norm, country_iso,
-               occurred_at_est, ingested_at, llm_parsed_output, storyline_id
+               occurred_at_est, ingested_at, llm_parsed_output, storyline_id,
+               date_verified
         FROM events
         WHERE updated_at >= %s
           AND storyline_id IS NOT NULL

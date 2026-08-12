@@ -150,6 +150,8 @@ def _scoring_db(llm_parsed: dict):
         "Missile strike hits Kyiv district, three killed",
         "https://example.com/kyiv", datetime.now(timezone.utc) - timedelta(hours=1),
         "example.com",
+        datetime.now(timezone.utc) - timedelta(hours=2),  # published_at
+        True,  # date_verified — publisher's own date, so the gate is testing report_kind
     )
     cursor_counts = MagicMock(); cursor_counts.fetchone.return_value = (0, 0)
     cursor_cat = MagicMock(); cursor_cat.fetchone.return_value = (95,)

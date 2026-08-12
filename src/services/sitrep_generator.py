@@ -81,6 +81,9 @@ _EVENT_COLUMNS = [
     # Carried so clusters can be placed in an airspace (src/core/airspace.py);
     # Pass D/E resolve these from the anchor gazetteer where they can.
     "latitude", "longitude",
+    # Provenance of published_at (migration 021) — _event_date_label refuses to state
+    # a date the publisher never declared as if it had.
+    "date_verified",
 ]
 
 # When an event has no estimated incident time, the window falls back to
@@ -269,6 +272,12 @@ def _event_date_label(event: Dict[str, Any]) -> str:
     """
     occurred = event.get("occurred_at_est") or event.get("published_at")
     day = str(occurred)[:10] if occurred else "tarih belirsiz"
+    # An unverified date is an aggregator's crawl stamp (migration 021), so the day
+    # above is when the page was re-read, not when anything was published. That
+    # outranks every time_certainty qualifier: the classifier's "same_day" was itself
+    # derived from this timestamp, so repeating it would launder the same bad date.
+    if not event.get("date_verified", True):
+        return f"{day} (tarih doğrulanmadı — yayın tarihi teyit edilemedi)"
     certainty = (event.get("time_certainty") or "unknown").strip()
     qualifier = {
         "same_day": "",

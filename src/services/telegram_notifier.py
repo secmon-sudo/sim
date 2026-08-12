@@ -108,10 +108,17 @@ def send_telegram_alert(event: dict) -> bool:
             if hasattr(occurred_at, "strftime")
             else str(occurred_at)
         )
-        if event.get("occurred_at_is_fallback"):
+        if event.get("occurred_at_is_fallback") and not event.get("date_verified", True):
+            # Worst case of both: the incident time fell back to the article's date, and
+            # that date is an aggregator's crawl stamp. Saying "Reported <today>" here
+            # would assert the one thing we specifically could not confirm.
+            time_line = "🕰️ Report date unverified · incident time unknown"
+        elif event.get("occurred_at_is_fallback"):
             # The timestamp is when WE ingested the report, not when the incident
             # happened — label it so it doesn't read as a confirmed incident time.
             time_line = f"🕰️ Reported {stamp} EST · incident time unknown"
+        elif not event.get("date_verified", True):
+            time_line = f"🕰️ {stamp} EST · date unverified"
         else:
             time_line = f"🕰️ {stamp} EST"
     else:

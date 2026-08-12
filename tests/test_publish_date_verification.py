@@ -130,6 +130,28 @@ class TestExtractDateFromUrl:
         from src.pipeline.ingest_sources import extract_date_from_url
         assert extract_date_from_url("https://example.com/2026/13/45/story") is None
 
+    def test_month_precision_path_resolves_to_end_of_month(self):
+        # WordPress's /YYYY/MM/slug permalink. Ignoring it let a 2022 bombing through
+        # as a 2026-08-05 ALERT at severity 95 (thenewsmill, measured 2026-08-12):
+        # Google News stamps its crawl date and the page declared none.
+        from src.pipeline.ingest_sources import extract_date_from_url
+        dt = extract_date_from_url(
+            "https://thenewsmill.com/2022/09/pakistan-one-killed-after-blast-in-south-waziristan/")
+        assert dt.date().isoformat() == "2022-09-30"
+
+    def test_day_precision_wins_over_month(self):
+        from src.pipeline.ingest_sources import extract_date_from_url
+        dt = extract_date_from_url("https://example.com/2026/08/05/story/")
+        assert dt.date().isoformat() == "2026-08-05"
+
+    def test_impossible_month_rejected(self):
+        from src.pipeline.ingest_sources import extract_date_from_url
+        assert extract_date_from_url("https://example.com/2026/13/story") is None
+
+    def test_bare_year_segment_is_not_a_date(self):
+        from src.pipeline.ingest_sources import extract_date_from_url
+        assert extract_date_from_url("https://example.com/section/2026/tag/") is None
+
 
 class TestDayPrecisionIsConservative:
     """A date without a time must never make an article look older than it is."""

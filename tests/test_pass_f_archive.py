@@ -39,6 +39,7 @@ def _row(**overrides):
         "ingested_at": datetime(2026, 7, 20, 4, 0, tzinfo=timezone.utc),
         "llm_parsed_output": '{"aviation_impact": "direct"}',
         "storyline_id": uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        "date_verified": True,
     }
     values.update(overrides)
     return tuple(values[c] for c in _EVENT_COLUMNS)

@@ -247,7 +247,9 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
         "Active Shooter at JFK Airport Terminal 4", # source_title
         "https://reuters.com/jfk-shooter", # source_url
         datetime.now(timezone.utc) - timedelta(hours=1), # ingested_at
-        "reuters.com" # source_domain
+        "reuters.com", # source_domain
+        datetime.now(timezone.utc) - timedelta(hours=2), # published_at
+        True, # date_verified — publisher's own feed, so freshness may be claimed
     )
     
     # New-activity query returns a single row (country_cnt, location_cnt); 0/0 means
