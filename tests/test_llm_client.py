@@ -6,12 +6,13 @@ OpenRouter free endpoints can fail INSIDE an HTTP 200: the body carries an
 from nemotron-3-super:free). call_llm must treat those as provider failures
 and rotate to the next cascade slot, not return them as success.
 """
+import time
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from src.core import llm_client
+from src.core import llm_client, llm_router, model_profiles
 from src.core.llm_router import LLMAccount, LLMRouter, ProviderStatus
 from src.core.token_bucket import TokenBucket
 
@@ -235,3 +236,111 @@ def test_json_mode_probe_not_triggered_for_prose_callers():
             llm_client._send_request(acct, [{"role": "user", "content": "hi"}], json_mode=False)
     assert len(sent) == 1
     assert not llm_client._json_mode_sidelined(acct)
+
+
+# ── Wall-clock ceiling (2026-08-12) ────────────────────────────────────────
+# httpx's timeout is per read, and OpenRouter drips keepalive bytes while an upstream
+# generates, so a 30s read timeout never fired on 44-108s nemotron batches. Pass C is
+# sequential: every one of those seconds was run duration. The ceiling below bounds
+# slowness itself, and hands the work to the next cascade slot.
+
+def _slow_post(delay, sent=None):
+    """A POST that takes `delay` seconds, recording the accounts it was called for."""
+    def fake_post(url, headers=None, json=None, timeout=None):
+        if sent is not None:
+            sent.append(json)
+        time.sleep(delay)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.is_success = True
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = _GOOD
+        return resp
+    return fake_post
+
+
+@pytest.fixture
+def _tiny_ceiling():
+    """Shrink the ceiling so tests measure the mechanism, not the wait."""
+    with patch.object(model_profiles, "DEFAULT_WALL_CLOCK_SECONDS", 0.05):
+        yield
+
+
+def test_slow_slot_is_sidelined_and_call_rotates(_tiny_ceiling):
+    router = LLMRouter([
+        _acct("nvidia/nemotron-3-super-120b-a12b:free"),
+        _acct("openai/gpt-oss-20b:free", account_id="B"),
+    ])
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(headers["Authorization"])
+        if len(calls) == 1:
+            time.sleep(0.5)          # first slot outruns the ceiling
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.is_success = True
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = _GOOD
+        return resp
+
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        result = llm_client.call_llm(router, "prompt")
+
+    assert result["model"] == "openai/gpt-oss-20b:free"
+    # Sidelined for the rest of the run, not merely error-counted: re-probing a slow
+    # slot costs another full ceiling, so it must outlast the 120s client-error cooldown.
+    assert router.accounts[0].status == ProviderStatus.RATE_LIMITED
+    assert router.accounts[0].cooldown_until - time.monotonic() > llm_router.CLIENT_ERROR_COOLDOWN_SECONDS
+
+
+def test_ceiling_does_not_retry_the_slow_slot(_tiny_ceiling):
+    # tenacity retries httpx timeouts; re-sending to a slot that is already too slow
+    # would multiply the very wait the ceiling exists to cut, so the exception must
+    # stay outside that retry class — one attempt per slot, then rotate.
+    router = LLMRouter([_acct("nvidia/nemotron-3-super-120b-a12b:free")])
+    sent = []
+    with patch.object(llm_client.httpx, "post", side_effect=_slow_post(0.5, sent)):
+        with pytest.raises(RuntimeError, match="exhausted"):
+            llm_client.call_llm(router, "prompt")
+    assert len(sent) == 1
+
+
+def test_fast_response_is_untouched_by_the_ceiling(_tiny_ceiling):
+    router = LLMRouter([_acct("nvidia/nemotron-3-super-120b-a12b:free")])
+    with patch.object(llm_client.httpx, "post", side_effect=_slow_post(0)):
+        result = llm_client.call_llm(router, "prompt")
+    assert result["content"] == '{"ok": 1}'
+    assert router.accounts[0].status == ProviderStatus.ACTIVE
+
+
+def test_transport_errors_still_reach_the_caller(_tiny_ceiling):
+    # The ceiling runs the request on another thread; an exception raised there must
+    # surface on the calling thread, not be swallowed into a timeout.
+    acct = _acct("openai/gpt-oss-120b", provider="groq")
+    fake_post, _ = _post_stub(400)
+    with patch.object(llm_client.httpx, "post", side_effect=fake_post):
+        with pytest.raises(httpx.HTTPStatusError):
+            llm_client._send_request(acct, [{"role": "user", "content": "hi"}],
+                                     json_mode=False)
+
+
+def test_prose_slot_keeps_a_ceiling_long_enough_to_write():
+    # mistral-large spends minutes on a 6K-token SITREP by design; policing it with the
+    # classification ceiling would sideline the only slot that writes the prose well.
+    mistral = model_profiles.get_profile("mistral", "mistral-large-2512")
+    groq = model_profiles.get_profile("groq", "openai/gpt-oss-120b")
+    assert model_profiles.wall_clock_ceiling(mistral, 6000) \
+        > model_profiles.wall_clock_ceiling(groq, 2312)
+
+
+def test_ceiling_scales_with_the_completion_budget():
+    # The SITREP narrative (6K tokens) can fall through to the main cascade when the
+    # quality slots are down. A flat classification ceiling would sideline every slot
+    # able to write it — the Groq ones are already skipped at that size — and the
+    # narrative would fail outright rather than merely run slow.
+    profile = model_profiles.get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free")
+    batch = model_profiles.wall_clock_ceiling(profile, 450 * 4 + 512)
+    narrative = model_profiles.wall_clock_ceiling(profile, 6000)
+    assert batch == model_profiles.DEFAULT_WALL_CLOCK_SECONDS
+    assert narrative > 2 * batch

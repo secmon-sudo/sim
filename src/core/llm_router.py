@@ -35,6 +35,11 @@ ERROR_THRESHOLD = 10
 # router stops re-selecting it within the same rotation loop — where no cooldown means
 # a broken slot gets picked again on its remaining burst tokens (the double-400 we saw).
 CLIENT_ERROR_COOLDOWN_SECONDS = 120
+# A slot that blew its wall-clock ceiling is sidelined for longer than a 4xx one: a
+# broken slot answers a re-probe instantly, a slow slot charges another full ceiling
+# for the same information. Routers are rebuilt per run, so a cooldown this long means
+# "for the rest of this run" and nothing more — the next run re-probes from scratch.
+SLOW_SLOT_COOLDOWN_SECONDS = 1800
 # Max tokens held at once per model slot — smooths the opening burst.
 DEFAULT_BURST = 8
 # Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.6-27b all list 8K).
@@ -164,15 +169,19 @@ class LLMRouter:
         is_rate_limit: bool = False,
         retry_after: float | None = None,
         hard_error: bool = False,
+        cooldown: float | None = None,
     ):
         """Mark an account as degraded after a failed call.
 
         retry_after: seconds from the provider's Retry-After header (429), if any.
         Honored over the default cooldown, clamped to MAX_RATE_LIMIT_COOLDOWN_SECONDS.
-        hard_error: the slot is returning unusable responses right now — a deterministic
-        client 4xx (not 429), or an empty/error body inside an HTTP 200 (OpenRouter free
-        upstream failures). Sideline it on a short cooldown so it leaves the rotation
-        instead of being re-picked on burst tokens.
+        hard_error: the slot is unusable right now — a deterministic client 4xx (not
+        429), an empty/error body inside an HTTP 200 (OpenRouter free upstream
+        failures), or a response so slow it blew the profile's wall-clock ceiling.
+        Sideline it on a short cooldown so it leaves the rotation instead of being
+        re-picked on burst tokens.
+        cooldown: overrides the default hard-error cooldown, for callers that know
+        re-probing this slot is expensive (see SLOW_SLOT_COOLDOWN_SECONDS).
         """
         with self._lock:
             if is_rate_limit:
@@ -187,12 +196,13 @@ class LLMRouter:
                     " (Retry-After)" if retry_after else "",
                 )
             elif hard_error:
+                sideline = cooldown if cooldown is not None else CLIENT_ERROR_COOLDOWN_SECONDS
                 acct.daily_errors += 1
                 acct.status = ProviderStatus.RATE_LIMITED
-                acct.cooldown_until = time.monotonic() + CLIENT_ERROR_COOLDOWN_SECONDS
+                acct.cooldown_until = time.monotonic() + sideline
                 logger.warning(
-                    "Account %s returning unusable responses (4xx or empty-200), cooldown %ds",
-                    acct.display_name, CLIENT_ERROR_COOLDOWN_SECONDS,
+                    "Account %s unusable (4xx, empty-200, or too slow), cooldown %.0fs",
+                    acct.display_name, sideline,
                 )
             else:
                 acct.daily_errors += 1

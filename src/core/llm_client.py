@@ -15,8 +15,8 @@ from typing import Any
 import httpx
 import tenacity
 
-from src.core.llm_router import LLMAccount, LLMRouter
-from src.core.model_profiles import get_profile
+from src.core.llm_router import SLOW_SLOT_COOLDOWN_SECONDS, LLMAccount, LLMRouter
+from src.core.model_profiles import get_profile, wall_clock_ceiling
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,16 @@ class LLMAllThrottled(RuntimeError):
     callers like run_pass_c wait for the soonest refill and retry. Distinct from
     the generic "exhausted after real attempts" RuntimeError, which signals actual
     request failures. Subclasses RuntimeError so existing catchers keep working.
+    """
+
+
+class LLMWallClockExceeded(RuntimeError):
+    """One request outran its profile's end-to-end ceiling.
+
+    NOT a subclass of httpx.TimeoutException, deliberately: _send_request's tenacity
+    policy retries timeouts, and re-sending a prompt to a slot that is already too slow
+    would multiply the wait it was raised to prevent. call_llm sidelines the slot and
+    rotates instead. Subclasses RuntimeError so unaware catchers stay safe.
     """
 
 
@@ -109,6 +119,42 @@ def _parse_retry_after(response: httpx.Response) -> float | None:
     return None
 
 
+def _post_within(send, body: dict, ceiling: float, acct: LLMAccount) -> httpx.Response:
+    """Run one blocking POST, giving up on it after `ceiling` seconds.
+
+    httpx has no total-request timeout — its timeout is per read — so the deadline is
+    enforced from the outside: the request runs on a daemon thread and the caller stops
+    waiting when the ceiling passes. The abandoned thread cannot be cancelled (no
+    interruptible I/O primitive here), but it is a daemon, so it neither blocks process
+    exit nor outlives the run; its socket closes when the provider finally answers.
+    Abandoning a request wastes one already-spent bucket token, which is exactly the
+    trade the ceiling exists to make.
+
+    Enforced per HTTP attempt, so a tenacity retry gets a fresh ceiling: retries only
+    fire on connection errors, where the previous attempt sent nothing at all.
+    """
+    outcome: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            outcome["response"] = send(body)
+        except BaseException as exc:  # re-raised on the calling thread below
+            outcome["error"] = exc
+
+    worker = threading.Thread(
+        target=_run, daemon=True, name=f"llm-post-{acct.provider}-{acct.account_id}"
+    )
+    worker.start()
+    worker.join(ceiling)
+    if worker.is_alive():
+        raise LLMWallClockExceeded(
+            f"{acct.display_name} exceeded its {ceiling:.0f}s wall-clock ceiling"
+        )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["response"]
+
+
 @tenacity.retry(
     retry=tenacity.retry_if_exception_type(
         (httpx.ConnectError, httpx.TimeoutException)
@@ -156,13 +202,16 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
         payload["response_format"] = {"type": "json_object"}
     payload.update(profile.payload_extras)
 
-    def _post(body: dict) -> httpx.Response:
+    def _send(body: dict) -> httpx.Response:
         return httpx.post(
             PROVIDER_ENDPOINTS[acct.provider],
             headers=headers,
             json=body,
             timeout=profile.request_timeout,
         )
+
+    def _post(body: dict) -> httpx.Response:
+        return _post_within(_send, body, wall_clock_ceiling(profile, max_tokens), acct)
 
     response = _post(payload)
 
@@ -287,6 +336,23 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
                 "content": content,
                 "finish_reason": finish_reason,
             }
+
+        except LLMWallClockExceeded as e:
+            # hard_error with the long cooldown: a slot that blew the ceiling once will
+            # blow it on the next chunk too, and Pass C is sequential — re-probing it
+            # every two minutes would spend most of what the ceiling just saved. The
+            # sideline lasts the rest of this run only; routers are rebuilt per run, so
+            # a transient upstream stall never demotes the slot beyond it.
+            router.report_failure(acct, hard_error=True,
+                                  cooldown=SLOW_SLOT_COOLDOWN_SECONDS)
+            last_error = e
+            logger.warning(
+                "LLM %s too slow (>%.0fs wall clock for a %d-token budget), "
+                "sidelining and rotating...",
+                acct.display_name,
+                wall_clock_ceiling(get_profile(acct.provider, acct.model), max_tokens),
+                max_tokens,
+            )
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code

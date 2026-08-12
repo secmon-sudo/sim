@@ -19,7 +19,7 @@
   "classification": {
     "deterministic_prescreen_enabled": true,
     "deterministic_skip_floor": 15,
-    "llm_batch_size": 6
+    "llm_batch_size": 4
   },
   "dedup": {
     "maturation_window_hours": 2,

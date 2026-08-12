@@ -26,6 +26,12 @@ Checklist for adding a NEW model slot:
      Raised again to 180s on 2026-08-10 when the SITREP budget went 4K → 6K tokens:
      a budget the timeout won't let the model spend is not a budget, it is a
      ReadTimeout with extra steps.
+  5. wall_clock_timeout — how long ONE request may take end to end. Distinct from
+     request_timeout, which httpx applies BETWEEN chunks: OpenRouter drips keepalive
+     bytes while an upstream generates, so the 30s read timeout never fires no matter
+     how slow the upstream is (2026-08-12: nemotron batches of 44-108s under a 30s
+     read timeout, Pass C 322s → 1240s across three runs with no error logged).
+     A read timeout bounds silence; only this bounds slowness.
 """
 
 from dataclasses import dataclass, field
@@ -35,6 +41,23 @@ GROQ_MAX_REQUEST_TOKENS = 8000
 # Cerebras free tier caps tokens at 30K/minute — a single request above that can
 # never fit its window, so treat it as the per-request ceiling too.
 CEREBRAS_MAX_REQUEST_TOKENS = 30000
+
+# Wall-clock ceiling for a single request, enforced by llm_client on top of the httpx
+# read timeout (see checklist item 5). A classification batch that outruns this is not
+# a slow success worth waiting for — Pass C is sequential, so every extra second is a
+# second of run duration, and the cascade's next slot answers the same prompt in ~10s.
+# Sized off measured behavior: healthy nemotron batches ran ~30s, the degraded ones
+# 44-108s (2026-08-12). Raise it if healthy slots start tripping; do not raise it to
+# accommodate a slot that has simply gone slow — that is what the failover is for.
+DEFAULT_WALL_CLOCK_SECONDS = 60.0
+# mistral-large legitimately spends minutes on a 6K-token SITREP (request_timeout=180),
+# and no other slot in the quality cascade writes prose as well, so its ceiling is set
+# to outlast a full-length generation rather than to police it.
+MISTRAL_WALL_CLOCK_SECONDS = 300.0
+
+# One full classification batch's completion budget (450 * 4 + 512) — the size the
+# ceilings above are calibrated on. See wall_clock_ceiling().
+WALL_CLOCK_REFERENCE_TOKENS = 2312
 
 # OpenRouter free slots that DO accept response_format. The blanket "OpenRouter free
 # 400s on response_format" rule (2026-07-08) was true then but is no longer: both slots
@@ -65,6 +88,10 @@ class ModelProfile:
     # completion well under 30s; mistral-large does not (ReadTimeout storm,
     # 2026-07-17) — and each timeout retry restarts the generation from scratch.
     request_timeout: float = 30.0
+    # Floor for the end-to-end ceiling enforced by llm_client (see wall_clock_ceiling).
+    # Bounds SLOWNESS, which request_timeout cannot: a keepalive-dripping endpoint
+    # resets the read clock forever. Exceeding it sidelines the slot and rotates.
+    wall_clock_timeout: float = DEFAULT_WALL_CLOCK_SECONDS
 
 
 def get_profile(provider: str, model: str) -> ModelProfile:
@@ -101,4 +128,23 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         payload_extras=extras,
         max_request_tokens=max_request,
         request_timeout=180.0 if provider == "mistral" else 30.0,
+        wall_clock_timeout=(
+            MISTRAL_WALL_CLOCK_SECONDS if provider == "mistral"
+            else DEFAULT_WALL_CLOCK_SECONDS
+        ),
     )
+
+
+def wall_clock_ceiling(profile: ModelProfile, max_tokens: int) -> float:
+    """End-to-end ceiling for one request that asked for `max_tokens` of completion.
+
+    The profile's value is calibrated on a classification batch. A caller asking for a
+    much larger completion — the 6K-token SITREP narrative — is not slow, it is doing
+    more work, and policing it with the classification ceiling would sideline every slot
+    capable of writing it: the quality cascade falls through to the main cascade, whose
+    Groq slots the size guard already skips at that budget, leaving nothing. So the
+    ceiling scales with the budget the caller asked for, and never drops below the
+    slot's own floor.
+    """
+    scaled = DEFAULT_WALL_CLOCK_SECONDS * max(1.0, max_tokens / WALL_CLOCK_REFERENCE_TOKENS)
+    return max(profile.wall_clock_timeout, scaled)

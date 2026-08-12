@@ -371,3 +371,37 @@ def test_african_terrorism_outside_africa_is_demoted_to_terrorism():
 
     assert parsed["event_type"] == GEO_SCOPED_FALLBACK
     assert GEO_SCOPED_EVENT_TYPE not in captured["params"]
+
+
+# ── Batch payload must fit the failover slots (2026-08-12) ─────────────────
+# When the OpenRouter primary trips the wall-clock ceiling, work rotates to the Groq
+# slots — but llm_client's size guard silently skips any slot whose per-request ceiling
+# the payload exceeds. Sized at the truncation limit (the worst case a batch can reach,
+# not the average it usually does), 6 reports estimate ~8270 against Groq's 8000: the
+# failover target could vanish exactly when it is needed. This pins the arithmetic.
+
+def _est_tokens(n: int) -> int:
+    """Mirror call_llm's estimate for a full batch of n maximally-truncated reports."""
+    events = [
+        {
+            "source_title": "T" * pc.BATCH_TITLE_CHARS,
+            "source_domain": "example.com",
+            "canonical_text": "x" * pc.BATCH_TEXT_CHARS,
+        }
+        for _ in range(n)
+    ]
+    system = pc.CLASSIFICATION_SYSTEM_PROMPT + pc.BATCH_SYSTEM_SUFFIX
+    max_tokens = 450 * n + 512
+    return (len(system) + len(pc._batch_prompt(events))) // 4 + max_tokens
+
+
+def test_full_batch_fits_groq_per_request_ceiling():
+    from src.core.model_profiles import GROQ_MAX_REQUEST_TOKENS
+    assert _est_tokens(pc.BATCH_CLASSIFY_SIZE) < GROQ_MAX_REQUEST_TOKENS
+
+
+def test_batch_size_is_what_makes_it_fit():
+    # Guards against the fix being undone by config: the previous size does NOT fit,
+    # so this is a property of the batch size, not a coincidence of the prompt.
+    from src.core.model_profiles import GROQ_MAX_REQUEST_TOKENS
+    assert _est_tokens(6) > GROQ_MAX_REQUEST_TOKENS

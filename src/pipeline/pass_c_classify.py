@@ -79,9 +79,17 @@ PRESCREEN_SKIP_FLOOR = _CLASSIFICATION.get("deterministic_skip_floor", 15)
 # 8K TPM window. 1 disables batching (classic per-event path).
 #
 # The prompt grew ~320 tokens on 2026-08-11 with the report_kind field, which is the
-# largest single item of headroom spent so far — a full batch now runs near 6K of the
-# 8K window. Anything else added here should come with the same arithmetic.
-BATCH_CLASSIFY_SIZE = int(_CLASSIFICATION.get("llm_batch_size", 6))
+# largest single item of headroom spent so far. Anything else added here should come
+# with the same arithmetic.
+#
+# Lowered 6 → 4 on 2026-08-12. Real batches of 6 peaked at ~7400 tokens (telemetry,
+# 7 days) but a batch of 6 whose reports all hit the truncation limit estimates ~8270 —
+# past Groq's 8K ceiling, where llm_client's size guard silently drops the slot. Those
+# slots are exactly where the wall-clock ceiling (model_profiles item 5) sends work when
+# the OpenRouter primary goes slow, and a failover target the payload might not fit is
+# not a failover target. A batch of 4 tops out at ~6595, at the cost of ~50% more calls —
+# which the free tier's RPM/RPD can absorb but its per-request window cannot.
+BATCH_CLASSIFY_SIZE = int(_CLASSIFICATION.get("llm_batch_size", 4))
 # Per-report truncation inside a batch prompt (chars). Tighter than the single-event
 # path's 3000 so the whole batch fits the TPM window; headlines carry most signal.
 BATCH_TEXT_CHARS = 1200
@@ -1141,7 +1149,7 @@ PASS_C_PACING_TOTAL_BUDGET = 180.0
 
 # Abort the pass after this many whole-batch parse failures in a row: a model that
 # systematically returns unparseable output would otherwise burn ~90s per chunk until
-# the workflow's 30-minute timeout kills the run before Pass D/E and alerting.
+# the workflow timeout (55 min) kills the run before Pass D/E and alerting.
 PASS_C_MAX_CONSECUTIVE_PARSE_ERRORS = 3
 
 
