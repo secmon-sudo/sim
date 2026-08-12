@@ -258,6 +258,28 @@ def _matches_tier(rule: dict, sev, conf, anc: str, time_: str, located: bool) ->
     return True
 
 
+def _tier_from_signals(sev, conf, anc: str, time_: str, located: bool) -> str | None:
+    """The tier ladder plus the severity floor, over already-extracted signals.
+
+    Separated from evaluate_alert_tier_verbose so the date-provenance gate can ask the
+    counterfactual — "would this event have paged if its date had been verified?" — with
+    the same code that produced the real answer rather than a second copy of the rules.
+    """
+    tier = None
+    for name in TIER_ORDER:
+        if _matches_tier(TIER_RULES[name], sev, conf, anc, time_, located):
+            tier = name
+            break
+
+    # Severity floor — see SEVERITY_ALERT_FLOOR. Applied after the ladder so it can
+    # only ever raise a tier to ALERT, never lower one or manufacture a CRITICAL.
+    if (sev >= SEVERITY_ALERT_FLOOR
+            and time_ in FRESH_TIME_CERTAINTY
+            and tier_rank(tier) < tier_rank("ALERT")):
+        tier = "ALERT"
+    return tier
+
+
 def evaluate_alert_tier(event: dict) -> str | None:
     """
     Evaluate which alert tier an event qualifies for.
@@ -291,6 +313,7 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     # test that builds an event dict by hand, must keep behaving as before. A gate that
     # fails closed on a missing key would silence alerts on a query someone forgot to
     # update — the same fail-open direction as REPORT_KIND_NOT_NEWS.
+    raw_time = time_
     unverified_fresh = not event.get("date_verified", True) and time_ in FRESH_TIME_CERTAINTY
     if unverified_fresh:
         time_ = "unknown"
@@ -301,24 +324,16 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     if event.get("event_type") in ADVISORY_EVENT_TYPES:
         return ("ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"), None
 
-    tier = None
-    for name in TIER_ORDER:
-        if _matches_tier(TIER_RULES[name], sev, conf, anc, time_, located):
-            tier = name
-            break
-
-    # Severity floor — see SEVERITY_ALERT_FLOOR. Applied after the ladder so it can
-    # only ever raise a tier to ALERT, never lower one or manufacture a CRITICAL.
-    if (sev >= SEVERITY_ALERT_FLOOR
-            and time_ in FRESH_TIME_CERTAINTY
-            and tier_rank(tier) < tier_rank("ALERT")):
-        tier = "ALERT"
+    tier = _tier_from_signals(sev, conf, anc, time_, located)
 
     # Date-provenance attribution. Reported here rather than at the substitution above
     # because the downgrade only COSTS an event its page when freshness was the evidence
-    # carrying it: an event that qualifies on location and severity is unaffected, and
-    # recording a veto there would overstate the gate the way the old tier telemetry did.
-    if tier is None and unverified_fresh:
+    # carrying it. The counterfactual is the whole point: on the first production run
+    # (2026-08-12) a naive `tier is None and unverified_fresh` credited this gate with a
+    # severity-35 curfew story that never cleared WATCH's severity bar in the first place —
+    # exactly the overstatement the veto reasons exist to avoid.
+    if tier is None and unverified_fresh \
+            and _tier_from_signals(sev, conf, anc, raw_time, located) is not None:
         logger.info("Alert withheld — %s date is an unverified aggregator stamp: %.80s",
                     event.get("time_certainty"), event.get("source_title") or "")
         return None, "date_unverified"

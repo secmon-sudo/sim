@@ -70,6 +70,17 @@ class TestTheGateStaysNarrow:
         ev.pop("date_verified")
         assert evaluate_alert_tier(ev) == "ALERT"
 
+    def test_event_that_would_never_have_paged_is_not_attributed_to_this_gate(self):
+        # First production run (2026-08-12): a severity-35 curfew-relaxation story was
+        # counted as a date_unverified veto, though WATCH's severity bar alone would have
+        # withheld it. A veto reason that fires on events the gate did not change makes
+        # the telemetry useless for tuning it.
+        ev = _event(severity_score=35, system_confidence=0.43,
+                    anchor_name_norm=None, latitude=None, date_verified=False)
+        tier, veto = evaluate_alert_tier_verbose(ev)
+        assert tier is None
+        assert veto is None
+
     def test_already_unknown_time_is_not_attributed_to_this_gate(self):
         # Nothing was downgraded: the event never claimed freshness, so whatever
         # withheld its page, it was not date provenance.

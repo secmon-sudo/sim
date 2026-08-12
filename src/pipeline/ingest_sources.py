@@ -543,6 +543,13 @@ _PUBLISHED_META_KEYS = {
     "parsely-pub-date", "sailthru.date",
 }
 
+# The same declaration under a house prefix: Hankyoreh serves `h:published_time` and
+# nothing else machine-readable, which cost a severity-100 Zaporizhzhia strike its page
+# on 2026-08-12 — the date was right there, under a key the set above did not list.
+# Matching the suffix is still a metadata match: the publisher is naming the field, not
+# us inferring one from page text, so this does not reopen the htmldate hole.
+_NAMESPACED_PUBLISHED_KEY_SUFFIX = ":published_time"
+
 
 def _parse_iso_like(value: str) -> datetime | None:
     """Parse the date formats publishers actually emit, as aware UTC."""
@@ -595,7 +602,11 @@ def extract_published_date(html: str) -> datetime | None:
 
     for tag in _META_TAG_RE.findall(html):
         key = _META_KEY_RE.search(tag)
-        if not key or key.group(1).strip().lower() not in _PUBLISHED_META_KEYS:
+        if not key:
+            continue
+        name = key.group(1).strip().lower()
+        if name not in _PUBLISHED_META_KEYS \
+                and not name.endswith(_NAMESPACED_PUBLISHED_KEY_SUFFIX):
             continue
         content = _META_CONTENT_RE.search(tag)
         if content:

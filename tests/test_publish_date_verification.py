@@ -49,6 +49,20 @@ class TestExtractPublishedDate:
     def test_empty_html_returns_none(self):
         assert extract_published_date("") is None
 
+    def test_publisher_namespaced_published_time(self):
+        # Hankyoreh declares the date only as `h:published_time`. Missing it made a
+        # severity-100 Zaporizhzhia strike look like an unverifiable aggregator stamp
+        # and the date gate withheld its page (2026-08-12).
+        html = '<meta name="h:published_time" content="2026-08-12T17:26:00+09:00"/>'
+        assert extract_published_date(html) == datetime(2026, 8, 12, 8, 26,
+                                                        tzinfo=timezone.utc)
+
+    def test_namespaced_suffix_does_not_match_other_fields(self):
+        # The suffix rule must not turn every namespaced meta tag into a date source.
+        html = ('<meta name="h:modify_date" content="2026-08-12T17:26:00+09:00"/>'
+                '<meta name="h:section" content="International"/>')
+        assert extract_published_date(html) is None
+
     def test_unparseable_date_does_not_raise(self):
         html = '<meta property="article:published_time" content="not a date"/>'
         assert extract_published_date(html) is None
