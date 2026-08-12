@@ -72,14 +72,38 @@ logger = logging.getLogger("sim.orchestrator")
 # on a near-empty ingest window. A new run exits early if the last SUCCESSFUL
 # run is fresher than this spacing; a failed last run never blocks (the second
 # trigger then acts as a free retry). PIPELINE_FORCE_RUN=1 bypasses the guard.
-MIN_RUN_SPACING_MINUTES = 90
+#
+# Spacing is measured from the previous run's START, not its completion. Measuring
+# from completion made the guard eat legitimate next-slot runs: a 30-min run plus
+# GitHub's cron drift (slots observed landing 40+ min late) leaves the next 2-hourly
+# trigger less than 90 min after the previous COMPLETION, so it was absorbed as if it
+# were a duplicate. Replaying 14 days of triggers (2026-07-29..08-12) showed the cost:
+# 8.9 runs/day against a designed 12, and 41 inter-run gaps over the dead-man switch's
+# 3h threshold — the pipeline was quietly running at three quarters of its cadence.
+#
+# Same replay, start-based, picking the threshold:
+#     90 min -> 10.9 runs/day, 17 gaps > 3h
+#     60 min -> 12.4 runs/day, 12 gaps > 3h
+#     45 min ->  13.9 runs/day, 8 gaps > 3h   <- chosen
+# 45 buys the quietest dead-man at the cost of ~16% more runs than the 2-hourly design
+# calls for, i.e. more LLM quota spent on partly-empty ingest windows; that trade was
+# made deliberately. The 8 surviving gaps are real trigger droughts (GitHub firing
+# nothing at all, e.g. the 7.5h hole on 2026-08-06), which is what the dead-man is for.
+# Genuine double-triggers arrive 2-5 min apart, so 45 min still absorbs all of them.
+MIN_RUN_SPACING_MINUTES = 45
 
 
 def _last_successful_run_age_minutes(db_conn) -> float | None:
-    """Minutes since the newest successful pipeline_run telemetry row, or None."""
+    """Minutes since the newest successful run STARTED, or None.
+
+    Falls back to the telemetry row's own timestamp (i.e. run completion) for rows
+    written before `started_at` was recorded.
+    """
     try:
         row = db_conn.execute(
-            """SELECT EXTRACT(EPOCH FROM (NOW() - timestamp)) / 60.0
+            """SELECT EXTRACT(EPOCH FROM (NOW() - COALESCE(
+                          (value_json ->> 'started_at')::timestamptz,
+                          timestamp AT TIME ZONE 'UTC'))) / 60.0
                FROM system_telemetry
                WHERE event_type = 'pipeline_run'
                  AND value_json ->> 'success' = 'true'
@@ -162,13 +186,13 @@ def run_pipeline():
             age_min = _last_successful_run_age_minutes(db_conn)
             if age_min is not None and age_min < MIN_RUN_SPACING_MINUTES:
                 logger.info(
-                    "Skipping run %s: last successful run was %.0f min ago "
+                    "Skipping run %s: last successful run started %.0f min ago "
                     "(< %d min spacing) — duplicate trigger absorbed",
                     run_id, age_min, MIN_RUN_SPACING_MINUTES,
                 )
                 results["success"] = True
                 results["skipped"] = True
-                results["skip_reason"] = f"last successful run {age_min:.0f} min ago"
+                results["skip_reason"] = f"last successful run started {age_min:.0f} min ago"
                 return results
 
         router = build_llm_router()
