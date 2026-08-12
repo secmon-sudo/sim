@@ -8,9 +8,15 @@
 -- daily report as a same-day event. Heuristic date extraction is not a fix — htmldate
 -- and trafilatura both read that page as 2026-08-12, picking up sidebar links.
 --
--- So the date is kept, and its provenance is recorded alongside it. FALSE means "this
--- timestamp is the aggregator's, not the publisher's": such an event may still be
--- ingested, classified, clustered and reported, but it may not claim to be fresh.
+-- So the date is kept, and its provenance is recorded alongside it. FALSE is a POSITIVE
+-- finding: we read the publisher's page and it declares no date of its own, leaving the
+-- aggregator's stamp standing alone. Such an event may still be ingested, classified,
+-- clustered and reported, but it may not claim to be fresh.
+--
+-- An item we never fetched, or whose fetch failed, stays TRUE. That is not optimism, it
+-- is the absence of a finding: a transient 403 says nothing about a publisher's metadata,
+-- and treating it as a verdict cost a live Libya Observer report its page on 2026-08-12
+-- while the page had declared its date all along (retry read it fine minutes later).
 --
 -- DEFAULT FALSE governs anything inserted without an opinion: Pass A always states the
 -- flag explicitly, so a row that arrives silent is a row written by code that does not
@@ -28,6 +34,8 @@ UPDATE events SET date_verified = TRUE
  WHERE ingested_at < TIMESTAMP '2026-08-12 08:00:00' AND date_verified = FALSE;
 
 COMMENT ON COLUMN events.date_verified IS
-    'TRUE when published_at came from the publisher (page metadata, URL path, or the '
-    'publisher''s own feed); FALSE when it is an aggregator crawl stamp we could not '
-    'confirm. Unverified dates cannot satisfy the alert gates freshness requirement.';
+    'FALSE only when the publisher''s page was READ and declared no date of its own, '
+    'leaving an aggregator crawl stamp standing alone; such a date cannot satisfy the '
+    'alert gates freshness requirement. TRUE covers both a publisher-declared date and '
+    'the cases where no reading happened (fetch failed or was never attempted) — an '
+    'absent finding must not act as a verdict.';

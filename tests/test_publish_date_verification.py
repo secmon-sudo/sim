@@ -68,6 +68,51 @@ class TestExtractPublishedDate:
         assert extract_published_date(html) is None
 
 
+class TestFetchOkSeparatesSilenceFromFailure:
+    """"The page declares no date" and "we never read the page" are different findings.
+
+    Both leave published_at=None. Conflating them made a transient 403 a verdict about a
+    publisher's metadata, and on 2026-08-12 that cost a live Libya Observer report its
+    alert — its page declared 2026-08-12T10:16 and a retry minutes later read it fine.
+    """
+
+    @staticmethod
+    def _fetch(monkeypatch, *, raises=None, html=""):
+        from src.pipeline import ingest_sources as ing
+        monkeypatch.setattr(ing, "resolve_url", lambda u, timeout=None: u, raising=False)
+        monkeypatch.setattr("src.services.google_news_resolver.resolve_url",
+                            lambda u, timeout=None: u)
+
+        class _Resp:
+            text = html
+            def raise_for_status(self):
+                return None
+
+        def _get(url, headers=None, timeout=None, follow_redirects=None):
+            if raises:
+                raise raises
+            return _Resp()
+
+        monkeypatch.setattr(ing.httpx, "get", _get)
+        return ing.fetch_article("https://example.com/story")
+
+    def test_failed_fetch_reports_fetch_ok_false(self, monkeypatch):
+        import httpx
+        result = self._fetch(monkeypatch, raises=httpx.ConnectError("boom"))
+        assert result["fetch_ok"] is False
+        assert result["published_at"] is None
+
+    def test_successful_fetch_without_a_date_reports_fetch_ok_true(self, monkeypatch):
+        # This is the real finding: the publisher was read and named no date.
+        result = self._fetch(monkeypatch, html="<html><body>no dates here</body></html>")
+        assert result["fetch_ok"] is True
+        assert result["published_at"] is None
+
+    def test_empty_url_is_not_a_reading(self, monkeypatch):
+        from src.pipeline.ingest_sources import fetch_article
+        assert fetch_article("")["fetch_ok"] is False
+
+
 class TestReprintGate:
     """The age comparison Pass A applies to the page-declared date."""
 

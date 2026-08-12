@@ -294,6 +294,11 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "publish_dates_verified": 0,
         "republished_filtered": 0,
         "unverified_aggregator_inserts": 0,
+        # Subset of the line above: aggregator items whose page we never managed to
+        # read. They keep a verified-by-default date because a failed request says
+        # nothing about the publisher — this counter is how the failure rate stays
+        # visible instead of hiding inside the exposure number.
+        "article_fetch_failed": 0,
     }
     now_utc = datetime.now(timezone.utc)
 
@@ -452,9 +457,14 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # page. Read BEFORE the fetch below, which rewrites `url` to the resolved
         # publisher address and would erase the evidence of where the item came from.
         from_aggregator = "news.google.com" in url
-        # Provenance of pub_dt (migration 021): a publisher's own date starts out
-        # verified, an aggregator's stamp has to earn it from the page or the URL path.
-        date_verified = not from_aggregator
+        # Provenance of pub_dt (migration 021). FALSE is a POSITIVE finding — "we read
+        # the publisher's page and it declares no date of its own" — not the absence of
+        # one. So it starts TRUE and is only cleared below, after a successful fetch
+        # comes back without a date: an item we never fetched, or whose fetch failed,
+        # has told us nothing about its publisher and must not be penalised for it
+        # (measured 2026-08-12, a live Libya Observer report lost its page to a
+        # transient fetch failure while its page declared the date all along).
+        date_verified = True
 
         # Fetch the article itself: resolves the Google News handle to the
         # publisher's URL, and returns the page's own date and body in ONE round
@@ -490,7 +500,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     continue
                 stats["publish_dates_verified"] += 1
                 pub_dt = page_dt
-                date_verified = True
             elif from_aggregator:
                 # Publisher blocked the fetch and left no date in the path, so
                 # this row keeps Google's crawl stamp. Counted, not dropped:
@@ -498,6 +507,17 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 # real coverage than the reprints it would catch. This number is
                 # the size of the remaining exposure — watch it.
                 stats["unverified_aggregator_inserts"] += 1
+                if article["fetch_ok"]:
+                    # We DID read the page and it named no date — the one case where
+                    # Google's stamp stands alone and the freshness gates must not
+                    # treat it as evidence.
+                    date_verified = False
+                else:
+                    # Never read it. Split out from the exposure count above because
+                    # the two need different fixes: a dateless publisher is permanent,
+                    # a failed fetch is a retry away, and only the rate of the second
+                    # tells us whether the fetch layer is degrading.
+                    stats["article_fetch_failed"] += 1
 
             full_text = article["text"]
             if full_text:

@@ -684,15 +684,22 @@ def extract_date_from_url(url: str) -> datetime | None:
 def fetch_article(url: str, timeout: float = 20.0) -> dict:
     """Fetch one article: resolve aggregator redirects, extract text and date.
 
-    Returns {"url", "text", "published_at"} — `url` is the publisher's URL when
-    the Google News handle could be resolved (otherwise the input unchanged),
-    `published_at` is the page's own declared date or None.
+    Returns {"url", "text", "published_at", "fetch_ok"} — `url` is the publisher's
+    URL when the Google News handle could be resolved (otherwise the input
+    unchanged), `published_at` is the page's own declared date or None.
+
+    `fetch_ok` separates "the publisher's page declares no date" from "we never got
+    to read the publisher's page". Both produce published_at=None, and treating them
+    alike cost a live Libya Observer report its page on 2026-08-12: the page declares
+    2026-08-12T10:16 and a retry minutes later read it fine, but the fetch inside that
+    run failed and the event was recorded as having an unconfirmable date. A transient
+    403 is not evidence about a publisher's metadata.
 
     One HTTP round trip serves both consumers: Pass A needs the body for the
     classifier and the date to reject reprints, and fetching twice would double
     the per-run network budget for no gain.
     """
-    result = {"url": url, "text": "", "published_at": None}
+    result = {"url": url, "text": "", "published_at": None, "fetch_ok": False}
     if not url:
         return result
 
@@ -714,6 +721,7 @@ def fetch_article(url: str, timeout: float = 20.0) -> dict:
     except Exception as exc:
         logger.debug("Article fetch failed for %s: %s", result["url"][:80], str(exc))
         return result
+    result["fetch_ok"] = True
 
     # The page's own declaration beats the path: it carries a time of day, and a
     # path date can be the slug's creation day rather than publication.
