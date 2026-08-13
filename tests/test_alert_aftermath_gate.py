@@ -63,6 +63,27 @@ AFTERMATH = [
     ("In-N-Out reopens after horrific shooting left 3 dead", "resolution"),
     ("IDF to demolish home of terrorist who killed 18-year-old Yehuda Sherman in March",
      "resolution"),
+    # Forensic procedure. This one paged as ALERT on 2026-08-13 (run 20260813T035854):
+    # the classifier called it new_incident because it reasoned about the shooting
+    # rather than the article, and no title pattern covered the shape.
+    ("Autopsy conducted on Rawalpindi shooting suspect", "post_mortem"),
+    ("Post-mortem confirms cause of death of Kabul blast victim", "post_mortem"),
+    # Revised counts — the most repetitive shape on the alert path over the 14 days to
+    # 2026-08-13. The Swat police station bombing paged four separate times as its
+    # toll was updated, each from a different publisher.
+    ("Death Toll Rises to 17 in Pakistans Swat Police Station Suicide Attack", "toll_revision"),
+    ("Ballistic missile strike on Kyiv: Nine killed, injury toll rises to 33", "toll_revision"),
+    ("Massive Russian attack: 16 dead in Kyiv region, injury toll climbs to 36",
+     "toll_revision"),
+    ("Russia's war casualty toll in Ukraine up by 1,240 over past day", "toll_revision"),
+    ("Thailand school shooting toll rises to nine after 12-year-old dies, police say",
+     "toll_revision"),
+    ("Body recovered from rubble after Kramatorsk airstrike, 27 injured", "remains_recovery"),
+    ("Remains of two crew members identified after helicopter crash", "remains_recovery"),
+    ("Funeral prayers held for 10 police personnel martyred in Hangu terrorist attack",
+     "burial"),
+    ("Secret funeral reportedly held in Moscow for unnamed major general", "burial"),
+    ("Soldiers killed in Donetsk laid to rest in Lviv", "burial"),
 ]
 
 # Real headlines the loose first draft wrongly matched. Every one is breaking news.
@@ -96,6 +117,19 @@ REAL_NEWS = [
     # "charges" as a demolition term, not a court filing.
     "Troops planted explosive charges under the bridge before withdrawing",
     "Shaped charges used in attack on Kerch bridge, investigators say",
+    # A funeral can itself be the target. Suppressing these would be the exact
+    # inversion of what the gate is for, so the burial pattern refuses any headline
+    # where an attack verb reaches the gathering.
+    "Strike on funeral procession kills 12 in Gaza",
+    "Bomb blast at funeral in Kabul kills 20",
+    "Drone attack hits mourners at burial, 8 dead",
+    "Gunmen target funeral of slain tribal elder in Peshawar",
+    # A body FOUND is a fresh discovery; only the recovery verbs are aftermath.
+    "Body found in river near airport perimeter",
+    # No verb to revise the count — this is the first report, not an update.
+    "Death toll from the blast unclear as rescuers dig through rubble",
+    # "toll" that has nothing to do with casualties.
+    "Toll road closed after drone attack near Rostov",
 ]
 
 

@@ -302,14 +302,19 @@ Extract the following fields:
       charges, trials, sentences, funerals, compensation, demolitions, repairs,
       reopenings, released footage or police briefings, revised death tolls, "one week
       later" / anniversary pieces, recovery and rescue-completed stories.
+      Forensic and mortuary procedure belongs here too: autopsies and post-mortems,
+      bodies recovered from rubble, remains identified or repatriated, burials. The
+      procedure is evidence that the incident is already over and already reported.
     - "roundup": covers several separate incidents at once, or is a running live blog /
       daily war summary / timeline ("Day 1,625", "live updates", "key moments").
     - "commentary": analysis, opinion, explainer, or pure reaction — condemnations,
       statements, warnings, diplomatic responses — with no new physical event.
     Judge the ARTICLE, not the subject: "Police release video of the mass shooting" is
-    followup even though a mass shooting is severe. If a report describes a fresh
-    incident AND adds later detail, it is new_incident. When genuinely unsure, answer
-    new_incident.
+    followup even though a mass shooting is severe, and "Autopsy conducted on the
+    shooting suspect" is followup because the news is the autopsy, not the shooting.
+    Asking "did something new physically happen today?" is the test — an autopsy, an
+    arrest or a funeral is not that. If a report describes a fresh incident AND adds
+    later detail, it is new_incident. When genuinely unsure, answer new_incident.
 
 WHEN TO USE event_type "noise" (relevance < 30):
 - Flight simulators, plane spotting, aviation photography, model aircraft
@@ -414,9 +419,58 @@ def _within_sane_bounds(parsed) -> bool:
     return True
 
 
-def _parse_occurred_at(raw: str | None):
+# How far a year-repaired timestamp may sit from the article's own publication date
+# before the repair is refused. Deliberately tight: at this distance the model is
+# echoing the date it read in the article, which is the only case the repair is for.
+STALE_YEAR_TOLERANCE_DAYS = 2
+
+
+def _repair_stale_year(parsed, published_at):
+    """Rescue a timestamp whose day is right and whose YEAR is the model's own.
+
+    Models anchor absolute dates to their training cutoff: measured 2026-08-13 over the
+    current classification corpus, 110 occurred_at estimates fell outside the sane
+    window and 67 of them (61%) were correct to within two days once the year was
+    replaced with the article's — "2024-08-12" for a piece published 2026-08-12, on
+    events as real as the Novorossiysk state-of-emergency CRITICAL. Discarding those
+    threw away a usable incident time and fell back to publication time, which is a
+    different quantity and the one Pass D's fallback exists to avoid.
+
+    Only the article's own date can separate this from a genuine retrospective, so a
+    repair is attempted solely against `published_at` and only within
+    STALE_YEAR_TOLERANCE_DAYS of it. A real anniversary piece ("2023-08-06" in a story
+    published 2026-08-13) lands a week out and stays discarded.
+
+    Returns the repaired datetime, or None when no repair is warranted.
+    """
+    if published_at is None:
+        return None
+    if published_at.tzinfo is not None:
+        published_at = published_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+    best = None
+    # Both neighbouring years, so a repair still works across a New Year boundary —
+    # "2024-12-31" in a piece published 2026-01-02 belongs to 2025, not 2026.
+    for year in (published_at.year, published_at.year - 1):
+        try:
+            candidate = parsed.replace(year=year)
+        except ValueError:
+            continue  # 29 Feb into a common year
+        if abs(candidate - published_at) > timedelta(days=STALE_YEAR_TOLERANCE_DAYS):
+            continue
+        if not _within_sane_bounds(candidate):
+            continue
+        if best is None or abs(candidate - published_at) < abs(best - published_at):
+            best = candidate
+    return best
+
+
+def _parse_occurred_at(raw: str | None, published_at=None):
     """Safely parse LLM's occurred_at ISO 8601 string into a naive datetime.
     Returns None if the value is missing, empty, unparseable, or outside sane bounds.
+
+    `published_at` is optional and only enables the stale-year repair below; callers
+    that omit it keep the original discard-on-out-of-bounds behaviour.
     """
     if not raw or not isinstance(raw, str):
         return None
@@ -447,6 +501,11 @@ def _parse_occurred_at(raw: str | None):
             return None
 
     if not _within_sane_bounds(parsed):
+        repaired = _repair_stale_year(parsed, published_at)
+        if repaired is not None:
+            logger.info("Repaired stale-year occurred_at estimate: %s → %s",
+                        raw[:40], repaired.isoformat())
+            return repaired
         logger.info("Discarded out-of-bounds occurred_at estimate: %s", raw[:40])
         return None
     return parsed
@@ -848,8 +907,9 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
         event_type = GEO_SCOPED_FALLBACK
         parsed["event_type"] = event_type
 
-    # Parse occurred_at from LLM output into a timestamp
-    occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"))
+    # Parse occurred_at from LLM output into a timestamp. The article's own date is
+    # passed in so a stale-year estimate can be repaired rather than discarded.
+    occurred_at_est = _parse_occurred_at(parsed.get("occurred_at"), event.get("published_at"))
 
     # Update event with classification — psycopg 3 writes dicts to JSONB natively
     db_conn.execute(

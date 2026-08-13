@@ -201,6 +201,38 @@ _AFTERMATH_PATTERNS = (
     # The news is that it ENDED — a rescue completed, a hostage freed, a site reopened.
     ("resolution",
      re.compile(r"(safely rescued|released hostage|freed after|reopens? after|to demolish)", re.I)),
+    # Forensic/mortuary procedure. An autopsy is proof the incident is over and was
+    # already reported; measured 2026-08-13, "Autopsy conducted on Rawalpindi shooting
+    # suspect" paged as ALERT because the classifier called it new_incident (it reasoned
+    # about the shooting, not the article) and no title pattern covered the shape.
+    ("post_mortem",
+     re.compile(r"\b(autops(y|ies)|post-?mortem)\b", re.I)),
+    # A revised count re-reports an incident that already paged. Measured over 14 days
+    # this was the single most repetitive shape on the alert path: the Swat police
+    # station bombing paged four separate times as its toll was updated.
+    # The count carries words between it and its verb often enough to matter ("casualty
+    # toll in Ukraine up by 1,240 over past day", a daily statistics bulletin), so a few
+    # intervening tokens are allowed. The death/casualty/injury prefix is what keeps the
+    # window safe — it is required, so "toll roads" and the like cannot reach the verb.
+    ("toll_revision",
+     re.compile(r"\b(death|casualty|injury)\s+toll\b(\s+\S+){0,3}\s+"
+                r"(rises?|climbs?|reaches|jumps?|updated|revised|up\s+(to|by))\b"
+                r"|\btoll\s+(rises?|climbs?|jumps?)\s+to\b", re.I)),
+    # Recovery of the dead — "Body recovered from rubble after Kramatorsk airstrike".
+    # The verb is required: "body found in river" is a fresh discovery, not aftermath.
+    ("remains_recovery",
+     re.compile(r"\b(bodies|body|remains)\b(\s+of)?(\s+\S+){0,5}\s+"
+                r"\b(recovered|repatriated|identified|exhumed|handed over)\b", re.I)),
+    # Burials. Guarded, because a funeral is itself a target in this corpus: "Strike on
+    # funeral procession kills 12" is an incident, and suppressing it would be the exact
+    # inversion of what this gate is for. Only the unattacked funeral matches — the
+    # lookahead drops any headline where an attack verb reaches the gathering. Measured
+    # over 14 days: 4 funeral-shaped alerts, all aftermath, none an attack on mourners.
+    ("burial",
+     re.compile(r"^(?!.*\b(attack|strike|bomb\w*|shell\w*|blast|fire|shooting|hits?|"
+                r"targets?|struck|kill\w*)\b(\s+\S+){0,3}\s+(on|at|of)?\s*"
+                r"(the\s+)?(funeral|mourners|procession)\b)"
+                r".*\b(funerals?|mourners|laid to rest|buried in|burial (of|for))\b", re.I)),
 )
 
 

@@ -162,7 +162,7 @@ def get_events_for_classification(db_conn, limit: int = 50) -> list[dict]:
     try:
         rows = db_conn.execute(
             """SELECT id, canonical_text, source_url, source_domain,
-                      anchor_name_raw, country_iso, source_title
+                      anchor_name_raw, country_iso, source_title, published_at
                FROM events
                WHERE status = 'deduped'
                  AND classification_lock = FALSE
@@ -181,6 +181,10 @@ def get_events_for_classification(db_conn, limit: int = 50) -> list[dict]:
                 "anchor_name_raw": row[4],
                 "country_iso": row[5],
                 "source_title": row[6],
+                # Carried for _parse_occurred_at's year repair: the article's own
+                # date is the only reference that can tell a stale-year timestamp
+                # from a genuinely old incident.
+                "published_at": row[7],
             }
             for row in rows
         ]
