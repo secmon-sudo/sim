@@ -860,6 +860,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # An aggregator crawl stamp cannot stand in for a publication date, so it
             # cannot satisfy the freshness gates either — see evaluate_alert_tier_verbose.
             "date_verified": event["date_verified"],
+            # The publisher's own date, which stands in for freshness when the classifier
+            # could not date the incident (time_certainty 'unknown', 80% of the corpus).
+            # Read together with date_verified above: a crawl stamp is not evidence.
+            "published_at": row[11],
         }
         alert_tier, alert_veto = evaluate_alert_tier_verbose(alert_data)
 
@@ -975,6 +979,11 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "confidence": system_conf,
             "alert_tier": effective_tier,
             "alert_veto": alert_veto,
+            # Set by the gate when the publisher's date, standing in for an 'unknown'
+            # time_certainty, is what earned this event its tier. Counted so the
+            # relaxation is measurable from the start — the gate it loosens spent weeks
+            # withholding pages with no counter at all.
+            "derived_fresh": bool(alert_data.get("_derived_fresh_granted")),
             "dispatch_result": dispatch_result,
             "anchor_norm": anchor["norm"],
             "storyline_id": storyline_id,
@@ -1007,6 +1016,10 @@ def run_pass_d(db_conn) -> dict:
         # indistinguishable from an event that never qualified, so neither gate could be
         # tuned on anything but log-reading.
         "alert_vetoes": {},
+        # Tiers that exist only because the publisher's own date stood in for an
+        # 'unknown' time_certainty. The counterpart to alert_vetoes: this relaxation
+        # recovers ~8 pages/day by measurement, and this is how that stays honest.
+        "alert_grants": {},
     }
 
     try:
@@ -1074,6 +1087,11 @@ def run_pass_d(db_conn) -> dict:
                 veto = result.get("alert_veto")
                 if veto:
                     stats["alert_vetoes"][veto] = stats["alert_vetoes"].get(veto, 0) + 1
+                if result.get("derived_fresh"):
+                    # Bucketed by the tier it actually reached, so the count answers the
+                    # question that matters: what did the publisher's date let through?
+                    key = result.get("alert_tier") or "untiered"
+                    stats["alert_grants"][key] = stats["alert_grants"].get(key, 0) + 1
             else:
                 stats["events_failed"] += 1
 

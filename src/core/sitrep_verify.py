@@ -91,36 +91,42 @@ STATE_MEDIA_HOME_ISO = {
     "saba.ye": "YE",
 }
 
-# Known second-level public suffixes so registrable_domain("news.gov.uk") returns
-# "gov.uk"-anchored hosts correctly. Not a full PSL — covers the feeds SIM ingests.
-_SECOND_LEVEL_SUFFIXES = {
-    "co.uk", "gov.uk", "ac.uk", "org.uk",
-    "com.tr", "gov.tr", "org.tr", "net.tr",
-    "com.au", "gov.au", "co.il", "gov.il",
-    "co.jp", "go.jp", "com.br", "gov.br",
-    "co.in", "gov.in", "com.pk", "gov.pk",
-    "gov.jo", "gov.sa", "gov.ae", "net.kw",
-    "gov.ua", "com.ua", "gov.za", "co.za",
-}
-
 
 def registrable_domain(domain_or_url: str) -> str:
-    """Reduce a hostname or URL to its registrable domain (heuristic eTLD+1)."""
+    """Reduce a hostname or URL to its registrable domain (eTLD+1).
+
+    The suffix decision is delegated to ingest's extract_domain(), i.e. to tldextract
+    and the real public suffix list. It used to be a hand-maintained set of 28
+    second-level suffixes, which silently ate the publisher's name on every ccTLD not on
+    the list: nst.com.my -> "com.my", abc.net.au -> "net.au", nhk.or.jp -> "or.jp", and
+    mk.co.kr / asiae.co.kr / koreatimes.co.kr all -> "co.kr". Measured 2026-08-13, 202
+    events across 65 domains over 7 days.
+
+    That was not cosmetic. Three decisions read this function:
+      * label_cluster() counts len(set(domains)) for "Onaylandı (Çoklu kaynak)" — three
+        distinct Korean outlets collapsed to one, publishing a two-source cluster as
+        "Tek kaynak";
+      * _record_corroboration() treats an equal registrable domain as an outlet
+        republishing itself and records nothing, which suppresses system_confidence —
+        the number the ALERT (0.50) and CRITICAL (0.62) gates read;
+      * state_media_home_iso()/is_official_domain() inherit the same collapse.
+
+    Imported lazily, mirroring airspace.py: it keeps src.core importable without
+    src.pipeline (ingest_filters loads keywords.json/settings.json at import) and there
+    is exactly one eTLD+1 implementation in the codebase, so the report layer and the
+    ingest layer cannot disagree about what one publisher is.
+    """
     if not domain_or_url:
         return ""
     host = domain_or_url.strip().lower()
     if "//" in host:
         host = urlparse(host).netloc or host
+    # Kept: tldextract reads hostnames, not userinfo/port syntax.
     host = host.split("@")[-1].split(":")[0].strip(".")
-    if host.startswith("www."):
-        host = host[4:]
-    parts = host.split(".")
-    if len(parts) <= 2:
-        return host
-    last_two = ".".join(parts[-2:])
-    if last_two in _SECOND_LEVEL_SUFFIXES:
-        return ".".join(parts[-3:])
-    return last_two
+    if not host:
+        return ""
+    from src.pipeline.ingest_filters import extract_domain
+    return extract_domain(host) or host
 
 
 def state_media_home_iso(domain: str) -> str | None:

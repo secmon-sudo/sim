@@ -24,9 +24,38 @@ class TestRegistrableDomain:
         assert registrable_domain("https://edition.cnn.com/2026/07/16/x") == "cnn.com"
 
     def test_second_level_public_suffixes(self):
-        assert registrable_domain("www.gov.uk") == "gov.uk"
+        # gov.uk and service.gov.uk are themselves public suffixes, so the eTLD+1 keeps
+        # the label in front of them. The old hand-rolled version returned "gov.uk" here
+        # by treating the suffix as the whole domain; both answers satisfy every consumer
+        # (is_official_domain sees the "gov" label either way), and this one is what the
+        # public suffix list actually says.
+        assert registrable_domain("www.gov.uk") == "www.gov.uk"
         assert registrable_domain("assets.publishing.service.gov.uk") == "service.gov.uk"
         assert registrable_domain("haber.aa.com.tr") == "aa.com.tr"
+
+    def test_cctld_publishers_keep_their_name(self):
+        """The hand-maintained suffix set covered 28 entries, so every ccTLD outside it
+        lost the publisher's name to the bare suffix — measured 2026-08-13, 202 events
+        across 65 domains in 7 days. label_cluster() counts distinct registrable domains,
+        so three Korean outlets collapsing to "co.kr" published a three-source cluster as
+        "Doğrulanmamış (Tek kaynak)"."""
+        assert registrable_domain("nst.com.my") == "nst.com.my"
+        assert registrable_domain("abc.net.au") == "abc.net.au"
+        assert registrable_domain("nhk.or.jp") == "nhk.or.jp"
+        assert registrable_domain("thefinancialexpress.com.bd") == "thefinancialexpress.com.bd"
+        assert registrable_domain("kenyans.co.ke") == "kenyans.co.ke"
+        assert registrable_domain("saudigazette.com.sa") == "saudigazette.com.sa"
+
+    def test_distinct_cctld_outlets_are_independent_sources(self):
+        korean = [ev("mk.co.kr"), ev("asiae.co.kr"), ev("koreatimes.co.kr")]
+        assert len({registrable_domain(e["source_domain"]) for e in korean}) == 3
+        assert label_cluster(korean) == LABEL_MULTI
+
+    def test_state_media_on_a_second_level_gov_suffix_still_resolves(self):
+        """spa.gov.sa / petra.gov.jo are matched by exact registrable domain, so the
+        suffix change must not move them."""
+        assert registrable_domain("www.spa.gov.sa") == "spa.gov.sa"
+        assert registrable_domain("petra.gov.jo") == "petra.gov.jo"
 
     def test_empty(self):
         assert registrable_domain("") == ""

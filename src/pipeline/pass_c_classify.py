@@ -138,6 +138,43 @@ HOSTILE_ACT_PATTERN = re.compile(
     r"|attacked|bombed|shelled|stormed|detonated|hijacked|opened fire|shot dead"
     # Weapon + verb — "Russian drones TARGET Naftogaz", "drones HIT Erbil".
     r"|(drones?|missiles?|rockets?|uavs?)\s+(target(ed|s)?|hit|struck|strike[sd]?)"
+    # ── Report frames ─────────────────────────────────────────────────────────
+    # The verb forms above cover "drones ATTACKED X". They miss the shapes wire copy
+    # uses just as often, because there the act is a bare NOUN carrying a preposition
+    # or a delivery verb. Measured 2026-08-13 over 7 days: 168 of 2011 prescreen-archived
+    # events match one of the four frames below (~24 extra classification calls a day).
+    #
+    # The sample that motivated them: the Novorossiysk naval-base strike was reported by
+    # five separate outlets and ALL FIVE were archived unseen ("Ukraine launched a
+    # coordinated attack on the Russian naval base…", "Ukraine Carries Out Major Strike
+    # on…", "…Hits Russia's Novorossiysk Port"). The one report that happened to use a
+    # covered phrasing paged at confidence 0.51 — and confidence is built from
+    # corroborating sources, so the four gates that read it were reading a number those
+    # five drops had suppressed. A prescreen miss is never one lost article.
+    #
+    # 1. Bare act noun + preposition: "attack ON the naval base", "attacks ON civilians".
+    #    The noun is deliberately not listed alone — "under attack from critics" is a
+    #    metaphor, and the preposition frame is what separates it from an incident.
+    r"|(attacks?|strikes?|assaults?|offensives?|raids?|bombardments?)\s+(on|against)\b"
+    # 2. Delivery verb + act: "LAUNCHED a coordinated attack", "CARRIED OUT a strike".
+    r"|(launch(ed|es|ing)?|carr(y|ies|ied)\s+out|conduct(ed|s|ing)?|mount(ed|s|ing)?|"
+    r"unleash(ed|es|ing)?)\s+(the\s+|a\s+|an\s+|its\s+|their\s+|[\w'’-]+\s+){0,3}"
+    r"(attacks?|strikes?|raids?|offensives?|assaults?|bombardments?)"
+    # 3. Armed-actor subject + kinetic verb. Subject-side rather than object-side because
+    #    the object is usually a place name no dictionary holds ("Russian Forces SEIZE
+    #    Vodyanoe"), and the armed subject is what keeps these bare verbs safe: "Boys,
+    #    ages 4 and 7 … HIT woman walking her dog" and "Trucker CAPTURES pilot's
+    #    maneuver" both carry the verb, neither has one.
+    r"|(forces|troops|army|navy|air force|militants?|gunmen|rebels?|insurgents?|"
+    r"fighters?|jets?|warplanes?|artillery|militia|units?)\s+([\w'’-]+\s+){0,2}"
+    r"(hits?|struck|strikes?|target(ed|s)?|seiz(e|ed|es)|captur(e|ed|es)|overran|"
+    r"overrun|shell(ed|s)?|storm(ed|s)?|raid(ed|s)?)"
+    # 4. Kinetic verb + military/energy asset, for the headlines whose subject is a bare
+    #    country name no subject list can hold ("Ukraine HITS Russia's Novorossiysk
+    #    PORT"). The asset object plays the role the armed subject plays in frame 3.
+    r"|(hits?|struck|targeted)\s+([\w'’-]+\s+){0,3}"
+    r"(naval base|air ?base|military base|port|refinery|depot|terminal|substation|"
+    r"power (plant|station|grid)|pipeline|airport|barracks|checkpoint|convoy|warehouse)"
     # Ordnance found rather than delivered — the Leipzig airport class.
     r"|explosive (device|drone|belt)"
     # Airspace incursion, the aviation-adjacent signal this pipeline exists to catch.
@@ -608,7 +645,31 @@ def validate_and_parse(content: str) -> dict:
     return parsed
 
 def update_domain_penalty(db_conn, domain: str, is_noise: int):
-    """Update penalty stats for a domain in the database."""
+    """Record one CLAIM this domain made, and whether the claim held up.
+
+    penalty_score is read as credibility — fetch_penalized_domains() bars a domain from
+    label_cluster()'s independence count and the official-source check, and
+    check_domain_penalty() drops its items at ingest. So the denominator has to be the
+    claims a domain made, not everything it published.
+
+    It used to be everything it published, and the two are completely different
+    measurements. Bloomberg publishes finance, CNBC publishes markets: most of what they
+    give us is correctly archived as off-topic, which drove them to penalty_score >= 0.5
+    and disqualified them as corroborating sources. Measured 2026-08-13: of the 1679
+    domains at >= 0.5, the list included reuters.com, bloomberg.com, cnbc.com, ft.com,
+    thetimes.com, washingtonpost.com, economist.com, politico.eu, nhk.or.jp and
+    aa.com.tr — i.e. the signal was ranking outlets by how much non-security news they
+    write, and the SITREP was treating that as unreliability.
+
+    So callers must invoke this ONLY for items that claimed a security event:
+      is_noise=1  the headline claimed a hostile act and the classifier found no
+                  incident behind it — the clickbait class, the one thing this score
+                  should be measuring;
+      is_noise=0  the claim held up and the event was classified.
+    An article that never claimed anything is not an observation about the domain's
+    credibility and must not touch either counter — incrementing total_events alone
+    would be just as wrong in the other direction, diluting real offenders toward 0.
+    """
     if not domain or domain == "unknown":
         return
     try:
@@ -642,9 +703,18 @@ def _try_prescreen_archive(db_conn, event: dict, det: dict) -> bool:
     if not PRESCREEN_ENABLED or _is_travel_advisory(event) or det["score"] >= PRESCREEN_SKIP_FLOOR:
         return False
     event_id = event["id"]
-    source_domain = event.get('source_domain', 'unknown') or 'unknown'
-    with db_conn.transaction():  # penalty + archive land together (conn is autocommit)
-        update_domain_penalty(db_conn, source_domain, 1)
+    # Deliberately NO domain penalty here. Reaching this line means the article carried
+    # no security vocabulary at all — an off-topic subject, not a false claim — so it
+    # says nothing about whether this outlet can be believed (see update_domain_penalty).
+    # Charging it was also self-reinforcing: every headline the prescreen's vocabulary
+    # could not read punished the outlet that reported it, and the penalty then withheld
+    # that outlet's corroboration. Measured 2026-08-13, that mis-charged 1538 archives
+    # across 426 domains, refunded in db/maintenance/2026-08-13_refund_*.sql.
+    #
+    # The clickbait shape the score DOES want ("Iran Launches Missile Attack On Bahrain"
+    # with nothing in the body) cannot land here: a hostile-act headline scores at or
+    # above the floor, so it is judged on the LLM path where the charge is made.
+    with db_conn.transaction():
         db_conn.execute(
             """UPDATE events
                SET event_type = 'unclassified',
@@ -813,8 +883,17 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     # The original LLM classification is preserved in llm_parsed_output for auditing
     if relevance < 30 or (event_type == "noise" and relevance < 40):
         archive_type = FALLBACK_EVENT_TYPE  # FK-safe fallback
+        # The headline asserted a hostile act and the classifier, having read the body,
+        # found no incident behind it. That gap IS the clickbait class, and it is the only
+        # archive that says anything about whether this outlet can be believed — an
+        # off-topic subject (a finance column, a film release) is charged nothing, because
+        # penalty_score is read as credibility, not as topicality. See
+        # update_domain_penalty. Computed here rather than after the write below because
+        # the charge belongs inside the same transaction as the archive.
+        claimed_hostile_act = bool(HOSTILE_ACT_PATTERN.search(event.get("source_title") or ""))
         with db_conn.transaction():  # penalty + archive land together (conn is autocommit)
-            update_domain_penalty(db_conn, source_domain, 1)
+            if claimed_hostile_act:
+                update_domain_penalty(db_conn, source_domain, 1)
             db_conn.execute(
                 """UPDATE events
                    SET event_type = %s,
@@ -842,8 +921,10 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
         # Flagged AFTER the row is written so this private marker never lands in the
         # stored llm_parsed_output. Counted by the callers into
         # pass_c.high_signal_archived — the measurement that replaced the old
-        # false-negative override (see the note above).
-        if HOSTILE_ACT_PATTERN.search(event.get("source_title") or ""):
+        # false-negative override (see the note above). Same condition the penalty above
+        # charges on: this counter and that charge are now two readings of one signal, so
+        # a rise in high_signal_archived is also the domain-penalty inflow.
+        if claimed_hostile_act:
             logger.info("Event %s archived despite a hostile-act headline: %.90s",
                         event_id[:8], event.get("source_title") or "")
             parsed["_high_signal_archived"] = True

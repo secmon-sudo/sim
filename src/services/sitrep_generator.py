@@ -251,10 +251,27 @@ def fetch_aviation_spillover_events(db_conn, country_iso: str, country_name: str
 
 
 def fetch_penalized_domains(db_conn, min_penalty: float = 0.5) -> List[str]:
+    """Domains disqualified from the corroboration count and the official-source check.
+
+    `min_events` mirrors check_domain_penalty()'s own floor, and it has to: the two
+    consumers of domain_penalties were reading the same column with different standards
+    of evidence. Ingest ignores any domain with fewer than 5 observations — one archive
+    out of one appearance is a penalty_score of 1.0 and means nothing — while this query
+    took every row at face value. Measured 2026-08-13: 1679 domains sat at >= 0.5, of
+    which 1312 had fewer than 5 observations and 770 were a single archive on a single
+    appearance. Each of those was permanently barred from counting as an independent
+    source, which is how a cluster with two real outlets gets labelled "Tek kaynak".
+
+    That mattered more than a slow-decaying number should because a prescreen archive
+    charges the domain (see _try_prescreen_archive) — so every headline the prescreen
+    could not parse was also disqualifying the outlet that reported it.
+    """
+    min_events = 5
     try:
         rows = db_conn.execute(
-            "SELECT domain FROM domain_penalties WHERE penalty_score >= %s",
-            (min_penalty,),
+            "SELECT domain FROM domain_penalties"
+            " WHERE penalty_score >= %s AND total_events >= %s",
+            (min_penalty, min_events),
         ).fetchall()
         return [r[0] for r in rows]
     except Exception:

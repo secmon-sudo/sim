@@ -10,6 +10,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.core.geo import geo_key
@@ -259,6 +260,32 @@ def aftermath_kind(title: str | None) -> str | None:
     return None
 
 
+def _published_within_a_day(published_at) -> bool:
+    """True when the article's own publication timestamp is inside the last 24 hours.
+
+    Tolerant about the input because this is read straight off the DB row: a naive
+    timestamp (the column is `timestamp without time zone`, UTC by convention) is read as
+    UTC, and anything unparseable answers False — this promotes an event's tier, so an
+    unreadable date must not.
+
+    A future timestamp is accepted as fresh: Pass A stores day-precision dates as the
+    END of the day they name (see extract_date_from_url), so a story published this
+    morning legitimately carries a stamp a few hours ahead of now.
+    """
+    if published_at is None:
+        return False
+    if isinstance(published_at, str):
+        try:
+            published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if not isinstance(published_at, datetime):
+        return False
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at >= datetime.now(timezone.utc) - timedelta(days=1)
+
+
 def is_located(event: dict) -> bool:
     """True when the event resolved to a real place.
 
@@ -350,6 +377,41 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     if unverified_fresh:
         time_ = "unknown"
 
+    # ...and the mirror image of that gate. time_certainty is the CLASSIFIER's estimate of
+    # when the incident happened, and it answers "unknown" for 80% of the corpus (4913 of
+    # 6164 scored events over the 7 days to 2026-08-13). Because both fresh paths — the
+    # ladder's require_location_or_fresh and SEVERITY_ALERT_FLOOR — depend on it, that one
+    # LLM field is the dominant alert gate: over those 7 days it alone withheld 855
+    # severity>=90 new_incident events across 641 distinct storylines, more than the 836
+    # events that reached a tier at all. And it did so invisibly, since "never qualified"
+    # records no veto reason.
+    #
+    # But the pipeline holds freshness evidence of its own that is stronger than the
+    # classifier's guess: a publication date the PUBLISHER declared (date_verified, see
+    # migration 021) timestamped within the last day. Where that exists, "we do not know
+    # when it happened" is not the honest reading — we know the publisher put it out today.
+    # Deliberately narrow, and measured rather than assumed: over the same 7 days this
+    # recovers 66 events / 56 storylines, ~8 pages a day on ~100, and the pages it
+    # recovers are the class the corpus was losing — the Zawiya refinery and substation
+    # drone strikes (severity 100), "Ukraine Drone Hits Logistics Hub", the Kurdish
+    # administration bombing — every one of which reached the SITREP while never paging.
+    #
+    # What makes it safe to relax now is that freshness is no longer the only thing
+    # standing between a page and a retrospective: report_kind and _AFTERMATH_PATTERNS
+    # judge whether the ARTICLE reports something happening now, which is the job
+    # time_certainty was being made to do by proxy. The derived value is "previous_day"
+    # rather than "same_day" because publication date is day-precision evidence.
+    #
+    # It can lift an event to ALERT/WATCH but not to CRITICAL in practice: CRITICAL also
+    # needs confidence >= 0.62 and a resolved location, and 0 of the 66 recovered events
+    # satisfied both (measured, not argued — which is why no special case is written for
+    # it here).
+    derived_fresh = False
+    if time_ == "unknown" and event.get("date_verified", True) \
+            and _published_within_a_day(event.get("published_at")):
+        time_ = "previous_day"
+        derived_fresh = True
+
     # Travel advisory path — country-level official warning, no airport anchor and its
     # "time" is the standing advisory date, so bypass the anchor/time gates and key on
     # severity only (already pre-filtered to Level 3-4 / "do not travel" upstream).
@@ -396,6 +458,18 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
             logger.info("Alert suppressed as %s article (would have been %s): %.80s",
                         report_kind, tier, event.get("source_title") or "")
             return None, f"report_kind_{report_kind}"
+
+    # Attribution for the derived-freshness path, on the same counterfactual footing as
+    # the date_unverified gate above: credited only when it actually CHANGED the outcome,
+    # never merely because the substitution happened. The private marker is how Pass D
+    # counts it into telemetry (alert_grants) — this gate exists because the opposite
+    # path, freshness silently withholding a page, was invisible for weeks, and a
+    # relaxation that cannot be measured is the same mistake facing the other way.
+    if derived_fresh and tier is not None \
+            and _tier_from_signals(sev, conf, anc, "unknown", located) is None:
+        logger.info("Alert granted on publisher date (%s, time_certainty unknown): %.80s",
+                    tier, event.get("source_title") or "")
+        event["_derived_fresh_granted"] = True
 
     return tier, None
 
