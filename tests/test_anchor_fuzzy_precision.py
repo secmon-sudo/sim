@@ -67,15 +67,29 @@ class TestSimilarityFloor:
         db = FuzzyDB([("VAR", 0.250), ("CMB", 0.158)])
         assert normalize_anchor("Varanasi airport", db) == (None, 0.0)
 
+    def test_rejects_shared_suffix_match(self):
+        """Rochester→Manchester: 0.400, on the strength of a shared "chester" alone.
+
+        Plain similarity() cannot reject this without also rejecting the correct
+        Catania→Catania-Fontanarossa, which scores an identical 0.400. That is why
+        the query uses strict_word_similarity, where the two separate.
+        """
+        assert normalize_anchor("Rochester Airport", FuzzyDB([("MAN", 0.400)])) == (None, 0.0)
+
     def test_accepts_above_floor(self):
-        """Leipzig→Leipzig/Halle scored 0.571 and is correct."""
-        norm, conf = normalize_anchor("Leipzig Airport", FuzzyDB([("LEJ", 0.571), ("HLG6", 0.083)]))
-        assert norm == "LEJ"
+        """Sana'a→SAH scored 0.571 and is correct — the lowest measured true match."""
+        norm, conf = normalize_anchor("Sanaa airport", FuzzyDB([("SAH", 0.571), ("SCL", 0.2)]))
+        assert norm == "SAH"
         assert conf >= 0.5
 
     def test_floor_sits_between_measured_right_and_wrong(self):
-        """Correct matches measured >=0.400, wrong ones <=0.300."""
-        assert 0.300 < FUZZY_MIN_SIMILARITY < 0.400
+        """Over 90 days: true matches >=0.571, false ones <=0.400."""
+        assert 0.400 < FUZZY_MIN_SIMILARITY < 0.571
+
+    def test_query_uses_word_boundary_metric(self):
+        db = FuzzyDB([("SAH", 0.9)])
+        normalize_anchor("Sanaa airport", db)
+        assert "strict_word_similarity" in db.fuzzy_sql
 
 
 class TestAmbiguityGuard:
@@ -93,17 +107,21 @@ class TestAmbiguityGuard:
 
 
 class TestHotelRowsExcluded:
-    """85 of 429 anchor_master rows are hotels with country_iso='XX'.
+    """130 of 429 anchor_master rows are hotels and lounges, not airports.
 
     They are carried for proximity lookups and can never be an event's location, but
     they sit on city names: "Kabul" matched KABUL STAR HOTEL at 0.353 and the event
     paged with country XX. Excluded from the fuzzy path only.
+
+    Filtering on country_iso='XX' is NOT enough — 45 of them carry a real-looking but
+    wrong country ("Hilton Hotel Dushanbe" is filed under FI). The synthetic 4-char
+    code (HKB0, HHL5) is the reliable discriminator; all 299 real airports are 3-letter.
     """
 
-    def test_fuzzy_query_excludes_placeholder_country(self):
+    def test_fuzzy_query_matches_only_three_letter_iata_codes(self):
         db = FuzzyDB([("EBL", 1.0), ("ECN", 0.2)])
         normalize_anchor("Erbil airport", db)
-        assert "country_iso <> 'XX'" in db.fuzzy_sql
+        assert "^[A-Z]{3}$" in db.fuzzy_sql
 
 
 class TestConfidenceBand:

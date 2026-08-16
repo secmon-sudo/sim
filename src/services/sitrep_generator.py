@@ -241,7 +241,14 @@ def fetch_aviation_spillover_events(db_conn, country_iso: str, country_name: str
         + " AND country_iso IS DISTINCT FROM %s"
         + f" AND ({mention_sql})"
         + f" AND {_AVIATION_NOUN_SQL}"
-        + " ORDER BY severity_score DESC NULLS LAST LIMIT 60",
+        # LIMIT on a saturated key selects an arbitrary subset. severity_score ties at
+        # 100 for 64% of the scored corpus (1411 of ~2200 over the 7 days to
+        # 2026-08-16), so "ORDER BY severity_score DESC LIMIT 60" was really "any 60 of
+        # the ties, in whatever order the plan happened to produce" — the same failure
+        # that kept the narrator at 0 generated for two weeks. Recency is the tie-break
+        # that actually distinguishes them, and it is stable across runs.
+        + " ORDER BY severity_score DESC NULLS LAST,"
+        + f" {_EVENT_TIME_SQL} DESC NULLS LAST, id LIMIT 60",
         (window_start, window_end, country_iso.upper(), *mention_params),
     ).fetchall()
     return [

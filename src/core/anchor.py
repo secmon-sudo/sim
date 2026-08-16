@@ -36,17 +36,25 @@ _BOILERPLATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Minimum similarity between BOILERPLATE-STRIPPED names. Calibrated 2026-08-16
-# against the 30-day corpus of anchored events: every correct match scored >=0.400
-# (Catania 0.400, Leipzig 0.571, and the exact-core hits at 1.000) and every wrong
-# match scored <=0.300 (Bandar Abbas→Bandaranaike 0.300, Ankara→Asmara 0.273,
-# Varanasi→Varna 0.250, Pittsburgh→Pisa 0.143). 0.35 sits in that gap.
+# Minimum strict_word_similarity between BOILERPLATE-STRIPPED names.
 #
-# One correct match falls below it: "Tan Son Nhat" → SGN scores 0.200 because the
-# stored canonical_name is mojibake ("Tân S?n Nh?t"). Losing an anchor is safe —
-# the event falls through to the city gazetteer in Pass D — whereas keeping a
-# wrong one relabels the event's country. The asymmetry is the whole point.
-FUZZY_MIN_SIMILARITY = 0.35
+# Plain similarity() is a ratio over the whole trigram set, so a shared SUFFIX scores
+# as highly as a shared name: "rochester" vs "manchester" scores 0.400 on the strength
+# of "chester" alone — exactly the same as the correct "catania" vs "catania
+# fontanarossa". No threshold can separate those two, and Rochester Airport (US) was
+# filed under Manchester (GB) five times because of it.
+#
+# strict_word_similarity asks a different question — "does the query match a WORD of
+# the candidate?" — which is the question that actually matters here. Measured over the
+# 90-day corpus it separates cleanly, with a wide gap and no overlap:
+#
+#   correct: sana'a 0.571, catania 1.000, leipzig 1.000, heathrow 1.000, narita 1.000
+#   wrong:   rochester/manchester 0.400, bandar abbas 0.300, ankara 0.273,
+#            varanasi/varna 0.250, orsk 0.182, pittsburgh/pisa 0.143
+#
+# It also keeps matches a prefix rule would lose: "heathrow" -> "london heathrow" is
+# 1.000 here despite sharing no leading characters.
+FUZZY_MIN_SIMILARITY = 0.50
 
 # Reject when the runner-up is nearly as good as the winner. The Shastri tie above
 # is the failure this prevents: with two candidates that close, ORDER BY picks one
@@ -108,23 +116,30 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
             # this matched an arbitrary row; there is no location here to resolve.
             return None, 0.0
 
-        # country_iso='XX' is the hotel half of the gazetteer: 85 of 429 rows are
-        # hotels (KABUL STAR HOTEL, SHERATON AIRPORT, Cosmos Pulkovo Airport) carried
-        # for proximity lookups, with synthetic codes and no real country. They can
-        # never BE an event's location, but they hijack city names through the fuzzy
-        # path — "Kabul" matched KABUL STAR HOTEL at 0.353 and paged with country XX.
+        # 130 of the 429 rows are hotels and lounges (KABUL STAR HOTEL, Hilton Hotel
+        # Dushanbe, TBS CIP LOUNGE) carried for proximity lookups under synthetic
+        # 4-character codes: HKB0, HHL5, HCS3. They can never BE an event's location,
+        # but they sit on city names and hijack them through the fuzzy path — "Kabul"
+        # matched KABUL STAR HOTEL at 0.353 and the event paged with country XX.
+        #
+        # The code SHAPE is the discriminator, not country_iso. An earlier version of
+        # this filter excluded country_iso='XX' and let 45 of them through, because
+        # many carry a real-looking country that is simply wrong: "Hilton Hotel
+        # Dushanbe" is filed under FI, "Garden Inn Hilton Kuwait" under KR. All 299
+        # genuine airports have a 3-letter IATA code and none of them is 'XX', so this
+        # test is strictly stronger and loses nothing.
         # Excluded from fuzzy only; an explicit code or alias hit still resolves them.
         rows = db_conn.execute(
             """SELECT iata_code,
-                      similarity(
-                        btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g')),
-                        %s
+                      strict_word_similarity(
+                        %s,
+                        btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g'))
                       ) AS sim
                FROM anchor_master
                WHERE btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g')) <> ''
-                 AND country_iso <> 'XX'
+                 AND iata_code ~ '^[A-Z]{3}$'
                ORDER BY sim DESC LIMIT 2""",
-            (_BOILERPLATE_SQL, core, _BOILERPLATE_SQL),
+            (core, _BOILERPLATE_SQL, _BOILERPLATE_SQL),
         ).fetchall()
 
         if rows:

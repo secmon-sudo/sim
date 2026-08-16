@@ -1,0 +1,50 @@
+name: SIM Severity Replay
+
+# Read-only measurement, manually triggered: recompute severity under a proposed
+# catalog rescale and report the delta, including how many alerts would stop paging.
+#
+# It runs here rather than locally because the two inputs that dominate the score are
+# not recoverable from the stored rows — severity is persisted post-clip, and
+# anchor_data["confidence"] is never persisted at all. An aggregate-based
+# reconstruction reproduced only 52% of stored severities, which is nowhere near
+# enough to decide an alert-volume change on. The script reports its own fidelity
+# first and the number is only trustworthy when that reads ~100%.
+#
+# See scripts/replay_severity.py for the measurements that motivated this.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Window to replay, in days"
+        required: true
+        default: "14"
+      base_cap:
+        description: "Proposed ceiling for event_type_catalog.severity_base"
+        required: true
+        default: "75"
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Replay severity
+        run: >-
+          python -m scripts.replay_severity
+          --days "${{ inputs.days }}"
+          --base-cap "${{ inputs.base_cap }}"
