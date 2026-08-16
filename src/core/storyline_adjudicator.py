@@ -25,7 +25,7 @@ import json
 import logging
 import re
 
-from src.core.geo import geo_key
+from src.core.geo import geo_key, trusted_anchor
 from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.storyline import lexical_kinship
 
@@ -51,7 +51,7 @@ def _event_geo(ev: dict) -> str | None:
     location-less event is routed to the country-level fallback rather than being matched
     against every other unresolved-location event as if they shared a real place.
     """
-    g = ev.get("anchor_name_norm") or geo_key(
+    g = trusted_anchor(ev) or geo_key(
         ev.get("anchor_name_raw"), ev.get("country_iso")
     )
     if g and g.strip().upper() in _DEGENERATE_GEO:

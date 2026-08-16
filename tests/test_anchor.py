@@ -56,3 +56,6 @@ class MockDB:
 class MockCursor:
     def fetchone(self):
         return None
+
+    def fetchall(self):
+        return []

@@ -20,6 +20,24 @@ from src.pipeline.pass_d_score import (
 
 logger = logging.getLogger(__name__)
 
+
+def _sibling_anchor_texts(db_conn, storyline_id) -> list[str]:
+    """Raw location texts from the other reports of the same storyline."""
+    if not storyline_id:
+        return []
+    try:
+        rows = db_conn.execute(
+            """SELECT anchor_name_raw
+               FROM events
+               WHERE storyline_id = %s AND anchor_name_raw IS NOT NULL""",
+            (str(storyline_id),),
+        ).fetchall()
+    except Exception:
+        logger.exception("Sibling anchor lookup failed for storyline %s", storyline_id)
+        return []
+    return [r[0] for r in rows if r and r[0]]
+
+
 def reconcile_single_event(db_conn, event_id: str) -> bool:
     """
     Reconcile a single scored event.
@@ -55,22 +73,31 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         # upgrade would re-promote a roundup that Pass D correctly refused to page.
         source_title = row[11]
 
-        # 1. Gather all text from storyline siblings
-        concatenated_text = raw_anchor or ""
-        if storyline_id:
-            siblings = db_conn.execute(
-                """SELECT anchor_name_raw, canonical_text
-                   FROM events
-                   WHERE storyline_id = %s AND anchor_name_raw IS NOT NULL""",
-                (str(storyline_id),),
-            ).fetchall()
-            for sib in siblings:
-                if sib[0]:
-                    concatenated_text += f" {sib[0]}"
+        # 1. Gather each sibling's location text as a SEPARATE candidate.
+        #
+        # This used to concatenate them into one string and normalize that. It could
+        # never upgrade anything: trigram similarity is a ratio over the whole string,
+        # so every sibling appended drove the score DOWN, and the exact and alias paths
+        # need a 3-4 letter code or a whole-string alias hit that a concatenation is
+        # incapable of producing. anchor_upgrades was 0 on every run ever recorded —
+        # not because nothing needed upgrading, but because the mechanism was
+        # arithmetically incapable of firing. Scoring candidates one at a time is what
+        # "enriched by siblings" was supposed to mean: a sibling that names the airport
+        # plainly can now resolve an event whose own text was vague.
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for text in [raw_anchor] + _sibling_anchor_texts(db_conn, storyline_id):
+            if text and text.strip() and text.strip().lower() not in seen:
+                seen.add(text.strip().lower())
+                candidates.append(text.strip())
 
-        # 2. Re-evaluate anchor with enriched text
-        if concatenated_text.strip():
-            new_norm, new_conf = normalize_anchor(concatenated_text.strip(), db_conn)
+        # 2. Re-evaluate the anchor, keeping the most confident single candidate.
+        if candidates:
+            new_norm, new_conf = None, 0.0
+            for candidate in candidates:
+                cand_norm, cand_conf = normalize_anchor(candidate, db_conn)
+                if cand_norm and cand_conf > new_conf:
+                    new_norm, new_conf = cand_norm, cand_conf
             new_level = get_anchor_confidence_level(new_conf)
 
             # Check if this is an upgrade

@@ -13,6 +13,52 @@ import re
 logger = logging.getLogger(__name__)
 
 
+# Words that appear in most airport names and therefore carry no discriminating
+# signal. Comparing full names lets this boilerplate dominate the trigram score:
+# measured 2026-08-16, "Lal Bahadur Shastri International Airport" scored 0.543
+# against BOTH "Sharjah International Airport" and "Bahrain International Airport"
+# — an exact tie broken by LIMIT 1 — while every one of the top 8 candidates was
+# the wrong country. "International Airport" alone is worth ~0.5, so the old
+# 0.5 threshold meant "contains the word Airport".
+#
+# Worse, the boilerplate actively inverted correct matches: it penalised the
+# longer right answer and rewarded a same-shaped wrong one. "Narita Airport"
+# resolved to ASF Narimanovo (Russia) even though NRT Narita International
+# Airport was in the table all along. Stripping these words first makes NRT score
+# 1.000. Same for Erbil→EBL, Dubai→DXB, Denver→DEN.
+_BOILERPLATE_SQL = (
+    r"\m(international|intl|airport|airfield|air ?base|airbase|"
+    r"regional|municipal|the)\M"
+)
+_BOILERPLATE_RE = re.compile(
+    r"\b(?:international|intl|airport|airfield|air\s?base|airbase|"
+    r"regional|municipal|the)\b",
+    re.IGNORECASE,
+)
+
+# Minimum similarity between BOILERPLATE-STRIPPED names. Calibrated 2026-08-16
+# against the 30-day corpus of anchored events: every correct match scored >=0.400
+# (Catania 0.400, Leipzig 0.571, and the exact-core hits at 1.000) and every wrong
+# match scored <=0.300 (Bandar Abbas→Bandaranaike 0.300, Ankara→Asmara 0.273,
+# Varanasi→Varna 0.250, Pittsburgh→Pisa 0.143). 0.35 sits in that gap.
+#
+# One correct match falls below it: "Tan Son Nhat" → SGN scores 0.200 because the
+# stored canonical_name is mojibake ("Tân S?n Nh?t"). Losing an anchor is safe —
+# the event falls through to the city gazetteer in Pass D — whereas keeping a
+# wrong one relabels the event's country. The asymmetry is the whole point.
+FUZZY_MIN_SIMILARITY = 0.35
+
+# Reject when the runner-up is nearly as good as the winner. The Shastri tie above
+# is the failure this prevents: with two candidates that close, ORDER BY picks one
+# arbitrarily and the result is a coin flip presented as a resolved location.
+FUZZY_AMBIGUITY_RATIO = 0.90
+
+
+def _core_name(text: str) -> str:
+    """Drop boilerplate airport words, leaving the discriminating part of the name."""
+    return " ".join(_BOILERPLATE_RE.sub(" ", text).split()).strip()
+
+
 def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
     """
     Normalize raw location text to IATA/ICAO code.
@@ -20,7 +66,14 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
     Returns:
         (normalized_id, confidence)
         normalized_id: IATA code (preferred), ICAO, or None
-        confidence: 1.0 (exact match), 0.8 (alias), 0.6 (fuzzy), 0.0 (not found)
+        confidence: 1.0 (exact match), 0.8 (alias), 0.50-0.60 (fuzzy), 0.0 (not found)
+
+    A fuzzy hit is never returned below MEDIUM confidence. Callers may therefore
+    treat "anchor_name_norm is set" as "the location is trustworthy enough to key
+    on" — which build_geo_suppression_key and the storyline adjudicator both do.
+    Before this, 42 of 92 LOW-confidence anchors over 30 days put the event in the
+    wrong country (46%), 22 of them paged, and none of the 128 MEDIUM/HIGH anchors
+    was wrong even once. LOW simply carried no information.
     """
     # Input guard: reject non-string, empty, or excessively long input
     if not isinstance(raw_text, str) or len(raw_text) > 200:
@@ -48,21 +101,61 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
         if row:
             return row[0], 0.8
 
-        # 3. Trigram fuzzy match (pg_trgm)
-        row = db_conn.execute(
-            """SELECT iata_code, similarity(canonical_name, %s) AS sim
+        # 3. Trigram fuzzy match (pg_trgm) on boilerplate-stripped names.
+        core = _core_name(raw_text)
+        if not core:
+            # Nothing left but boilerplate ("Airport", "the airfield"). Previously
+            # this matched an arbitrary row; there is no location here to resolve.
+            return None, 0.0
+
+        # country_iso='XX' is the hotel half of the gazetteer: 85 of 429 rows are
+        # hotels (KABUL STAR HOTEL, SHERATON AIRPORT, Cosmos Pulkovo Airport) carried
+        # for proximity lookups, with synthetic codes and no real country. They can
+        # never BE an event's location, but they hijack city names through the fuzzy
+        # path — "Kabul" matched KABUL STAR HOTEL at 0.353 and paged with country XX.
+        # Excluded from fuzzy only; an explicit code or alias hit still resolves them.
+        rows = db_conn.execute(
+            """SELECT iata_code,
+                      similarity(
+                        btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g')),
+                        %s
+                      ) AS sim
                FROM anchor_master
-               WHERE similarity(canonical_name, %s) > 0.5
-               ORDER BY sim DESC LIMIT 1""",
-            (raw_text, raw_text),
-        ).fetchone()
-        if row:
-            return row[0], round(row[1] * 0.6, 2)
+               WHERE btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g')) <> ''
+                 AND country_iso <> 'XX'
+               ORDER BY sim DESC LIMIT 2""",
+            (_BOILERPLATE_SQL, core, _BOILERPLATE_SQL),
+        ).fetchall()
+
+        if rows:
+            best_code, best_sim = rows[0][0], float(rows[0][1] or 0.0)
+            if best_sim >= FUZZY_MIN_SIMILARITY:
+                runner_up = float(rows[1][1] or 0.0) if len(rows) > 1 else 0.0
+                if runner_up / best_sim > FUZZY_AMBIGUITY_RATIO:
+                    logger.info(
+                        "Anchor ambiguous, rejected: %.60s (%s %.3f vs %s %.3f)",
+                        raw_text, best_code, best_sim, rows[1][0], runner_up,
+                    )
+                    return None, 0.0
+                return best_code, _fuzzy_confidence(best_sim)
 
     except Exception:
         logger.exception("Anchor normalization error for: %s", raw_text[:50])
 
     return None, 0.0
+
+
+def _fuzzy_confidence(sim: float) -> float:
+    """Map an accepted stripped-name similarity onto the MEDIUM confidence band.
+
+    Deliberately spans only 0.50-0.60. The floor keeps every accepted fuzzy hit at
+    MEDIUM, so a set anchor is always a trusted anchor. The ceiling preserves the
+    existing severity behaviour: compute_severity awards PROXIMITY_BONUS at
+    confidence >= 0.6, which under the old sim*0.6 mapping required a perfect
+    score, so only a near-exact core match earns it here too.
+    """
+    span = (sim - FUZZY_MIN_SIMILARITY) / (1.0 - FUZZY_MIN_SIMILARITY)
+    return round(0.50 + span * 0.10, 2)
 
 
 def get_anchor_confidence_level(confidence: float) -> str:

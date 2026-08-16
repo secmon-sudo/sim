@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.core.geo import geo_key
+from src.core.geo import geo_key, trusted_anchor
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +499,7 @@ def build_suppression_key(event: dict) -> str:
         return f"no_storyline|{event.get('id') or id(event)}"
     return "|".join([
         str(storyline_id),
-        event.get("anchor_name_norm") or "UNKNOWN",
+        trusted_anchor(event) or "UNKNOWN",
     ])
 
 
@@ -521,7 +521,7 @@ def build_geo_suppression_key(event: dict) -> str | None:
     of one incident routinely differ by a bucket, and a net with a hole that shape
     catches nothing.
     """
-    loc = event.get("anchor_name_norm") or geo_key(
+    loc = trusted_anchor(event) or geo_key(
         event.get("anchor_name_raw"), event.get("country_iso")
     )
     if not loc or loc == "UNKNOWN":
@@ -561,7 +561,7 @@ def recent_paged_alerts(db_conn, country_iso: str | None, exclude_event_id: str 
                           MAX(array_position(ARRAY['WATCH','ALERT','CRITICAL'],
                                              s.alert_tier))] AS alert_tier,
                       e.source_title, e.storyline_hint,
-                      e.anchor_name_raw, e.anchor_name_norm,
+                      e.anchor_name_raw, e.anchor_name_norm, e.anchor_confidence,
                       MAX(s.expires_at) AS last_expiry
                FROM alert_suppression s
                JOIN events e ON e.id = s.event_id
@@ -569,7 +569,7 @@ def recent_paged_alerts(db_conn, country_iso: str | None, exclude_event_id: str 
                  AND (%s::text IS NULL OR e.country_iso = %s)
                  AND (%s::uuid IS NULL OR e.id <> %s::uuid)
                GROUP BY e.id, e.source_title, e.storyline_hint,
-                        e.anchor_name_raw, e.anchor_name_norm
+                        e.anchor_name_raw, e.anchor_name_norm, e.anchor_confidence
                ORDER BY last_expiry DESC
                LIMIT %s""",
             (country_iso, country_iso, exclude_event_id, exclude_event_id, limit),
@@ -585,6 +585,7 @@ def recent_paged_alerts(db_conn, country_iso: str | None, exclude_event_id: str 
             "storyline_hint": r[3],
             "anchor_name_raw": r[4],
             "anchor_name_norm": r[5],
+            "anchor_confidence": r[6],
         }
         for r in rows
         # A claim whose tier never resolved carries no rank to compare against, so it

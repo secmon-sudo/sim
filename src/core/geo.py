@@ -364,6 +364,39 @@ def _clean(text: str) -> str:
     return " ".join(text.split())
 
 
+_ANCHOR_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+
+
+def trusted_anchor(event: dict) -> str | None:
+    """The event's IATA anchor, but only when it is confident enough to key on.
+
+    Every consumer that builds a location key prefers the precise anchor over the
+    coarse geo_key. That preference is only sound if a set anchor means a resolved
+    place. A LOW-confidence anchor does not: measured 2026-08-16 over 30 days, 46%
+    of them named the wrong country, and because two reports of one incident fuzzy-
+    matched to DIFFERENT wrong airports they produced different suppression keys and
+    both paged. The Varanasi airport shooting went out twice — once keyed VAR
+    (Varna, Bulgaria), once geofp|AE|SHJ (Sharjah, UAE) — where geo_key on the raw
+    text would have collapsed them. A bad anchor is worse than no anchor.
+
+    normalize_anchor no longer emits LOW-confidence hits, so this is a guard rather
+    than a live path for new events; it still matters for rows written before that
+    change, which stay in the linking pool and the suppression window.
+
+    Absent field reads as trusted, the same fail-open direction the date_verified gate
+    uses: a query that forgets to select anchor_confidence must not silently strip the
+    anchor off every event in the linking pool. Callers that want the guard to bite
+    have to supply the column.
+    """
+    norm = event.get("anchor_name_norm")
+    if not norm:
+        return None
+    level = (event.get("anchor_confidence") or "MEDIUM").upper()
+    if _ANCHOR_RANK.get(level, _ANCHOR_RANK["MEDIUM"]) < _ANCHOR_RANK["MEDIUM"]:
+        return None
+    return norm
+
+
 def geo_key(text: str | None, country_iso: str | None = None) -> str | None:
     """Return a coarse, paraphrase-stable location key, or None if unusable.
 

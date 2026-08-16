@@ -403,7 +403,23 @@ def resolve_anchor_for_event(db_conn, event: dict) -> dict:
                 czib = row[0] or False
                 lat = row[1]
                 lon = row[2]
-                country = row[3] or country
+                # The anchor's country overwrites the classifier's. That is right when
+                # the anchor is real — anchor_master is curated, the LLM is not — but
+                # it is how a bad fuzzy match used to launder itself into the record:
+                # the classifier correctly said IN for the Varanasi airport shooting,
+                # a 0.55 trigram hit on "Varna Airport" replaced it with BG, and the
+                # event then paged as a Bulgarian alert and landed in the wrong
+                # country's SITREP. normalize_anchor now rejects matches that weak;
+                # this logs the disagreements that survive so the next bad pattern is
+                # visible in the data instead of only in the output.
+                anchor_country = row[3]
+                if anchor_country and country and anchor_country != country:
+                    logger.warning(
+                        "Anchor country overrides classifier: %s (%s) %s→%s [%.60s]",
+                        norm, get_anchor_confidence_level(conf), country,
+                        anchor_country, raw_anchor,
+                    )
+                country = anchor_country or country
         except Exception:
             pass
 
@@ -700,11 +716,12 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
     try:
         rows = db_conn.execute(
             """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est,
-                      anchor_name_norm, anchor_name_raw
+                      anchor_name_norm, anchor_name_raw, anchor_confidence
                FROM (
                    SELECT DISTINCT ON (storyline_id)
                           id, storyline_id, storyline_hint, country_iso,
-                          occurred_at_est, anchor_name_norm, anchor_name_raw
+                          occurred_at_est, anchor_name_norm, anchor_name_raw,
+                          anchor_confidence
                    FROM events
                    WHERE status IN ('scored', 'reconciled')
                      AND storyline_hint IS NOT NULL
@@ -725,6 +742,7 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
                 "occurred_at_est": r[4],
                 "anchor_name_norm": r[5],
                 "anchor_name_raw": r[6],
+                "anchor_confidence": r[7],
             }
             for r in rows
         ]
