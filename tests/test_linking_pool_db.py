@@ -54,6 +54,11 @@ def conn():
                    occurred_at_est TIMESTAMPTZ,
                    anchor_name_norm VARCHAR(16),
                    anchor_name_raw TEXT,
+                   -- The pool query selects this so trusted_anchor can reject a
+                   -- LOW-confidence anchor as a location key. Omitting it here made
+                   -- the query fail against a real Postgres while every mocked test
+                   -- still passed.
+                   anchor_confidence VARCHAR(10),
                    status VARCHAR(20)
                )"""
         )
@@ -137,6 +142,11 @@ class TestLinkingPool:
     def test_shape_matches_what_linking_reads(self, conn):
         _add(conn, str(uuid.uuid4()), "kyiv missile strike", hours_ago=1)
         row = _fetch_recent_events_for_linking(conn)[0]
+        # anchor_confidence joined this set on 2026-08-16: should_link_storyline reaches
+        # the anchor through trusted_anchor now, which cannot tell a resolved airport
+        # from a bad fuzzy guess without it. A pool row missing the column reads as
+        # trusted (fail-open), so leaving it out degraded linking silently.
         assert set(row) == {"id", "storyline_id", "storyline_hint", "country_iso",
-                            "occurred_at_est", "anchor_name_norm", "anchor_name_raw"}
+                            "occurred_at_est", "anchor_name_norm", "anchor_name_raw",
+                            "anchor_confidence"}
         assert row["country_iso"] == "RU"

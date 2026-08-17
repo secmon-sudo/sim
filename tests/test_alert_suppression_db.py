@@ -150,7 +150,10 @@ def conn_with_events(conn):
                source_title TEXT,
                storyline_hint TEXT,
                anchor_name_raw TEXT,
-               anchor_name_norm VARCHAR(16)
+               anchor_name_norm VARCHAR(16),
+               -- recent_paged_alerts selects and groups by this; see the note in
+               -- test_linking_pool_db for why its absence only showed up in CI.
+               anchor_confidence VARCHAR(10)
            )"""
     )
     conn.commit()
