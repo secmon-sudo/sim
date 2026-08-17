@@ -22,6 +22,10 @@ on:
         description: "Proposed ceiling for event_type_catalog.severity_base"
         required: true
         default: "75"
+      rescue:
+        description: "Report lost alerts with >= N corroborating domains (0=off)"
+        required: true
+        default: "2"
       mode:
         description: "cap = min(base,cap); compress = keep type ordering"
         required: true
@@ -64,6 +68,7 @@ jobs:
           --days "${{ inputs.days }}"
           --base-cap "${{ inputs.base_cap }}"
           --mode "${{ inputs.mode }}"
+          --rescue-corroboration "${{ inputs.rescue }}"
           2>&1 | tee severity-replay.txt
 
       - name: Upload result

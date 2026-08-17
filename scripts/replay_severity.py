@@ -114,7 +114,9 @@ def load_events(conn, days: int) -> list[dict]:
                   e.time_certainty, e.date_verified, e.alert_tier, e.source_title,
                   e.llm_parsed_output, COALESCE(a.czib_flag, false),
                   e.anchor_name_raw, e.storyline_hint,
-                  (e.status IN ('scored', 'reconciled')) AS scored_by_pass_d
+                  (e.status IN ('scored', 'reconciled')) AS scored_by_pass_d,
+                  jsonb_array_length(
+                    COALESCE(e.corroborating_sources, '[]'::jsonb)) AS corroboration
            FROM events e
            LEFT JOIN anchor_master a ON a.iata_code = e.anchor_name_norm
            WHERE e.ingested_at > NOW() - (%s * INTERVAL '1 day')
@@ -144,6 +146,7 @@ def load_events(conn, days: int) -> list[dict]:
             "anchor_name_raw": r[13],
             "storyline_hint": r[14],
             "scored_by_pass_d": r[15],
+            "corroboration": r[16] or 0,
         })
     return out
 
@@ -194,6 +197,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--base-cap", type=int, default=DEFAULT_BASE_CAP)
+    ap.add_argument("--rescue-corroboration", type=int, default=0, metavar="N",
+                    help="Report how many events that lose their tier carry at "
+                         "least N independent corroborating domains. 0 = off.")
     ap.add_argument("--mode", choices=("cap", "compress"), default="cap",
                     help="cap: min(base, cap). compress: squeeze bases above "
                          f"{COMPRESS_KNEE} into the room under cap, keeping order.")
@@ -268,6 +274,29 @@ def main() -> None:
         print(f"{tier:9s} {tier_now[tier]:6d} -> {tier_new[tier]:6d}")
 
     print(f"\nlost a tier: {len(lost)}   gained a tier: {len(gained)}")
+
+    # Corroboration as a possible rescue path. The events a rescale silences are
+    # exactly those that only ever paged through SEVERITY_ALERT_FLOOR, and their
+    # confidence sits at 0.17-0.39 — below the ladder's floor and, as measured on
+    # 2026-08-11, unable to separate real incidents from junk anyway. Independent
+    # corroboration is the one signal that did separate them by hand: of a 14-event
+    # sample, all three with >= 2 corroborating domains were real (Novorossiysk state
+    # of emergency, the mass drone attack on Moscow, the Libya car bomb) and none of
+    # the junk had any. High precision, low recall — so it is worth measuring as a
+    # rescue, not as a replacement.
+    if args.rescue_corroboration:
+        n = args.rescue_corroboration
+        rescued = [e for e in lost if e["corroboration"] >= n]
+        print(f"\nof the {len(lost)} silenced, {len(rescued)} carry >= {n} "
+              f"corroborating domains and could be rescued:")
+        for e in rescued[:20]:
+            print(f"  corrob={e['corroboration']} sev={e['stored_severity']} "
+                  f"conf={e['system_confidence']:.2f} {(e['source_title'] or '')[:70]}")
+        still = [e for e in lost if e["corroboration"] < n]
+        print(f"\nstill silenced ({len(still)}):")
+        for e in still[:25]:
+            print(f"  corrob={e['corroboration']} sev={e['stored_severity']} "
+                  f"conf={e['system_confidence']:.2f} {(e['source_title'] or '')[:70]}")
     print("\nsample of alerts that would STOP paging:")
     for e in lost[:15]:
         print(f"  [{e['stored_tier']}] sev={e['stored_severity']} "
