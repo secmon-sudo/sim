@@ -45,7 +45,8 @@
     }
   },
   "cold_storage": {
-    "archive_null_occurred_after_days": 60
+    "archive_null_occurred_after_days": 60,
+    "archived_retention_days": 30
   },
   "storyline": {
     "jaccard_threshold": 0.4,

@@ -106,7 +106,14 @@ class TestJsonlAndHash:
 
 
 class TestArchiveDeletionSafety:
-    """No delete without a successful archive upload."""
+    """No delete without a successful archive upload.
+
+    "No delete" means no ARCHIVE delete. Pass F also purges aged status='archived'
+    noise (purge_expired_archived), which is unconditional by design — it has nothing
+    to do with whether an export succeeded, and skipping it on failed runs would tie
+    retention to the health of Telegram. The assertions below therefore look for the
+    archive statement specifically instead of the word DELETE.
+    """
 
     @staticmethod
     def _db():
@@ -119,6 +126,12 @@ class TestArchiveDeletionSafety:
     def _executed_sql(db):
         return " ".join(str(c.args[0]) for c in db.execute.call_args_list if c.args)
 
+    @staticmethod
+    def _archive_delete_ran(db) -> bool:
+        """True if the exported-events delete ran (as opposed to the retention purge)."""
+        return any("DELETE FROM events WHERE id = ANY" in str(c.args[0])
+                   for c in db.execute.call_args_list if c.args)
+
     def test_telegram_failure_leaves_events_in_place(self):
         db = self._db()
         with patch("src.pipeline.pass_f_archive.get_archivable_events",
@@ -128,7 +141,7 @@ class TestArchiveDeletionSafety:
             stats = run_pass_f(db)
         assert stats["error"] == "Telegram upload failed"
         assert stats["events_archived"] == 0
-        assert "DELETE" not in self._executed_sql(db).upper()
+        assert not self._archive_delete_ran(db)
 
     def test_telegram_not_ok_response_leaves_events_in_place(self):
         db = self._db()
@@ -139,7 +152,7 @@ class TestArchiveDeletionSafety:
                    return_value={"ok": False, "description": "chat not found"}):
             stats = run_pass_f(db)
         assert stats["events_archived"] == 0
-        assert "DELETE" not in self._executed_sql(db).upper()
+        assert not self._archive_delete_ran(db)
 
     def test_successful_upload_deletes_and_records_manifest(self):
         db = self._db()

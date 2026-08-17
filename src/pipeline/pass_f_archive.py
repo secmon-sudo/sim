@@ -29,6 +29,7 @@ def _is_retryable_http_error(exception) -> bool:
     return False
 
 ARCHIVE_DAYS_THRESHOLD = 90
+
 BATCH_SIZE = 500
 
 # Column set shared by the cold-storage archive and the per-run snapshot export.
@@ -69,6 +70,20 @@ with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
     _SETTINGS = json.load(f)
 
 _ARCHIVE_NULL_AFTER_DAYS = _SETTINGS.get("cold_storage", {}).get("archive_null_occurred_after_days", 14)
+
+# Retention for status='archived' rows — the noise the classifier rejected and the
+# prescreen's zero-signal drops. Nothing removed them before: get_archivable_events
+# reads status='reconciled' only, so they were neither exported to cold storage nor
+# deleted, and they were 26,484 of 55,226 rows (48%) on 2026-08-17 with the database
+# at 367 MB of the 500 MB free tier and growing 4.4 MB/day — about 31 days of runway.
+#
+# 30 days is set against the widest consumer that reads archived rows, which is the
+# weekly forecast at 7 days (weekly_forecast fetches on occurred_at_est with no status
+# filter). Pass A's content dedup looks back max_article_age_days=2 and the SITREP
+# window is 24 hours; storyline linking excludes archived entirely. Four times the
+# margin of the widest reader, and it survives two missed weekly runs.
+ARCHIVED_RETENTION_DAYS = _SETTINGS.get("cold_storage", {}).get(
+    "archived_retention_days", 30)
 
 
 def get_archivable_events(db_conn) -> list[dict]:
@@ -203,6 +218,53 @@ def upload_to_telegram(content: bytes, filename: str) -> dict | None:
         return None
 
 
+def purge_expired_archived(db_conn) -> int:
+    """Delete archived noise older than ARCHIVED_RETENTION_DAYS. Returns rows removed.
+
+    Deliberately narrow on three axes:
+
+      * status='archived' only. 'reconciled' rows are the corpus and leave through
+        the cold-storage export on their own schedule.
+      * alert_tier IS NULL. An archived row that once paged is the only surviving
+        record that the card was sent, and the alert telemetry counts it.
+      * ingested_at, not occurred_at_est. The latter is the classifier's estimate and
+        is wrong often enough — measured 60% fabricated on 2026-08-13 — that ageing on
+        it would delete rows that arrived yesterday.
+
+    Batched so one run can never hold a long write lock on events; the remainder is
+    picked up by the next run, which is the point of doing this every pass rather than
+    as an occasional cleanup.
+    """
+    if not ARCHIVED_RETENTION_DAYS:
+        return 0
+    try:
+        result = db_conn.execute(
+            """DELETE FROM events
+                WHERE id IN (
+                    SELECT id FROM events
+                     WHERE status = 'archived'
+                       AND alert_tier IS NULL
+                       AND ingested_at < NOW() - (%s * INTERVAL '1 day')
+                     LIMIT %s
+                )""",
+            (ARCHIVED_RETENTION_DAYS, BATCH_SIZE),
+        )
+        removed = result.rowcount or 0
+        db_conn.commit()
+        if removed:
+            logger.info("Pass F: purged %d archived events older than %d days",
+                        removed, ARCHIVED_RETENTION_DAYS)
+        return removed
+    except Exception:
+        try:
+            db_conn.rollback()
+        except Exception:
+            pass
+        # Retention is housekeeping — it must never be the reason a run reports failure.
+        logger.exception("Archived-event purge failed")
+        return 0
+
+
 def run_pass_f(db_conn) -> dict:
     """
     Execute Pass F: Cold Storage & Archive
@@ -214,10 +276,16 @@ def run_pass_f(db_conn) -> dict:
     """
     stats = {
         "events_archived": 0,
+        "archived_purged": 0,
         "manifest_hash": None,
         "telegram_message_id": None,
         "error": None
     }
+
+    # 0. Retention, BEFORE the early return below. The purge has nothing to do with
+    #    whether there is anything to export, and putting it after that return would
+    #    skip it on exactly the quiet runs where it is cheapest to do.
+    stats["archived_purged"] = purge_expired_archived(db_conn)
 
     # 1. Select
     events = get_archivable_events(db_conn)
