@@ -33,6 +33,7 @@ from src.pipeline.ingest_filters import (  # noqa: F401
     compute_url_hash,
     extract_domain,
     find_content_duplicate,
+    is_content_farm,
     is_noise,
     normalize_title,
     priority_score,
@@ -282,6 +283,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "items_fetched": 0,
         "age_filtered": 0,
         "noise_filtered": 0,
+        "content_farm_filtered": 0,
         "duplicates_skipped": 0,
         "content_duplicates_skipped": 0,
         "domain_penalized": 0,
@@ -425,6 +427,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             domain = item["domain"]
         else:
             domain = extract_domain(url)
+        # Scraped-content farms, rejected before any scoring can see them. Placed
+        # after domain extraction because the check reads the domain, and before the
+        # penalty gate because penalty_score is earned over time while this content
+        # is never admissible at all.
+        if is_content_farm(item.get("title"), url, domain):
+            stats["content_farm_filtered"] += 1
+            logger.info("Content farm rejected: %s | %.80s", domain, item.get("title") or "")
+            continue
+
         penalty = check_domain_penalty(db_conn, domain)
         if penalty > 0.8:
             stats["domain_penalized"] += 1

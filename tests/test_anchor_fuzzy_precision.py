@@ -61,6 +61,26 @@ class TestBoilerplateStripping:
         assert normalize_anchor("Airport", db) == (None, 0.0)
 
 
+class TestAdministrativeStopwords:
+    """"capital"/"city" are descriptors, not names — same class as "international".
+
+    Live regression 2026-08-17: with them left in, "Russian capital" matched "Beijing
+    Capital International Airport" on the shared word "capital" at exactly the 0.50
+    floor, and three Moscow drone events paged as CN/Beijing.
+    """
+
+    def test_capital_is_stripped(self):
+        assert _core_name("Russian capital") == "Russian"
+        assert _core_name("Beijing Capital International Airport") == "Beijing"
+
+    def test_city_is_stripped(self):
+        assert _core_name("Kuwait City Airport") == "Kuwait"
+
+    def test_real_names_survive(self):
+        assert _core_name("Sana'a International Airport") == "Sana'a"
+        assert _core_name("Catania–Fontanarossa Airport") == "Catania–Fontanarossa"
+
+
 class TestSimilarityFloor:
     def test_rejects_below_floor(self):
         """Varanasi→Varna scored 0.250 on stripped names. It must not resolve."""

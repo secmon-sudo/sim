@@ -38,6 +38,18 @@ def _sibling_anchor_texts(db_conn, storyline_id) -> list[str]:
     return [r[0] for r in rows if r and r[0]]
 
 
+def _anchor_country(db_conn, iata_code: str) -> str | None:
+    """country_iso for a resolved anchor, or None when it cannot be read."""
+    try:
+        row = db_conn.execute(
+            "SELECT country_iso FROM anchor_master WHERE iata_code = %s", (iata_code,)
+        ).fetchone()
+    except Exception:
+        logger.exception("Anchor country lookup failed for %s", iata_code)
+        return None
+    return row[0] if row and row[0] else None
+
+
 def reconcile_single_event(db_conn, event_id: str) -> bool:
     """
     Reconcile a single scored event.
@@ -91,13 +103,31 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 seen.add(text.strip().lower())
                 candidates.append(text.strip())
 
-        # 2. Re-evaluate the anchor, keeping the most confident single candidate.
+        # 2. Re-evaluate the anchor, keeping the most confident single candidate whose
+        #    country does not contradict this event's own.
+        #
+        # Scoring siblings separately means one bad resolution can be adopted by every
+        # member of the storyline, which is strictly worse than the concatenation it
+        # replaced: that could only fail to upgrade, this can actively mislabel.
+        # Observed 2026-08-17 — a sibling reading "Russian capital" resolved to PEK
+        # (Beijing) and three Moscow events inherited CN, each of them already paging.
+        # The stopword fix removes that particular match, but the amplification is the
+        # structural risk, so the country the classifier extracted acts as a veto.
+        own_iso = (llm_parsed.get("country_iso") or llm_parsed.get("country") or "")
+        own_iso = own_iso.strip().upper()[:2]
         if candidates:
             new_norm, new_conf = None, 0.0
             for candidate in candidates:
                 cand_norm, cand_conf = normalize_anchor(candidate, db_conn)
-                if cand_norm and cand_conf > new_conf:
-                    new_norm, new_conf = cand_norm, cand_conf
+                if not cand_norm or cand_conf <= new_conf:
+                    continue
+                if own_iso and _anchor_country(db_conn, cand_norm) not in (None, own_iso):
+                    logger.info(
+                        "Pass E rejected sibling anchor %s for event %s: country "
+                        "disagrees with classifier (%s)", cand_norm, event_id[:8], own_iso,
+                    )
+                    continue
+                new_norm, new_conf = cand_norm, cand_conf
             new_level = get_anchor_confidence_level(new_conf)
 
             # Check if this is an upgrade

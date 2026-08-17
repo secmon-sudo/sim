@@ -117,6 +117,50 @@ _RETROSPECTIVE_PATTERN = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Content-farm rejection
+# ---------------------------------------------------------------------------
+#
+# Measured 2026-08-17: mshale.com produced 136 of 138 events carrying the signature
+# below, and ALL 20 of its alerts. It republishes scraped YouTube and TV titles as
+# news, so its "reporting" included fabricated attacks that paged at severity 100 —
+# "Iran Missile Strikes Rock Dubai, Abu Dhabi Airports After Khamenei's Death" and
+# "One Killed And 63 Injured In Kuwait Airport Drone Attack", neither of which
+# happened. For a security product that is the worst possible output, and the volume
+# was accelerating (70 events in the final 7 days).
+#
+# The domain list alone would not be worth writing — the next farm has a different
+# name. The signature is what generalises, and it is specific enough to be safe:
+# a trailing 9-12 character YouTube-style id in parentheses, or the publisher's own
+# name appended as a suffix, combined with an unrelated trending token. Scanned over
+# 60 days, no legitimate source in the corpus matches it.
+_CONTENT_FARM_DOMAINS = {"mshale.com"}
+
+# "... Some Trending Phrase (dQw4w9WgXcQ) - Mshale" / "... (1HA4RMekh7) - mshale.com"
+_SCRAPED_VIDEO_TITLE_RE = re.compile(
+    r"\([A-Za-z0-9_\-]{9,12}\)\s*[-–—]\s*[\w.\- ]{2,30}$"
+)
+# Random-hash article paths: /bd22c76b/dfce4942-Ff1aw6k0wM
+_HASH_PATH_RE = re.compile(r"/[0-9a-f]{8}/[0-9a-f]{8}[A-Za-z0-9_\-]*/?$")
+
+
+def is_content_farm(title: str | None, url: str | None = None,
+                    domain: str | None = None) -> bool:
+    """True when the item comes from a scraped-content farm rather than a publisher.
+
+    Checked at ingest, before any keyword or severity logic runs: this content must
+    never reach the classifier, because its headlines are shaped exactly like real
+    breaking-news wire copy and score accordingly.
+    """
+    if domain and domain.lower().lstrip("www.") in _CONTENT_FARM_DOMAINS:
+        return True
+    if title and _SCRAPED_VIDEO_TITLE_RE.search(title.strip()):
+        return True
+    if url and _HASH_PATH_RE.search(url.split("?")[0]):
+        return True
+    return False
+
+
 def is_noise(text: str) -> bool:
     """Check if text matches known noise patterns using word boundaries.
 

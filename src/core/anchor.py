@@ -26,13 +26,20 @@ logger = logging.getLogger(__name__)
 # resolved to ASF Narimanovo (Russia) even though NRT Narita International
 # Airport was in the table all along. Stripping these words first makes NRT score
 # 1.000. Same for Erbil→EBL, Dubai→DXB, Denver→DEN.
+# "capital" and "city" are here for the same reason as "international": they are
+# administrative descriptors, not names. Measured 2026-08-17 on live output, leaving
+# them in let strict_word_similarity match "Russian capital" against "Beijing Capital
+# International Airport" on the shared word "capital" alone — score 0.50, exactly at
+# the acceptance floor — and three Moscow drone events paged as CN/Beijing. Stripping
+# them takes that pair to 0.0 while Sana'a (0.571), Catania (1.0) and Kyiv (1.0) are
+# untouched.
 _BOILERPLATE_SQL = (
     r"\m(international|intl|airport|airfield|air ?base|airbase|"
-    r"regional|municipal|the)\M"
+    r"regional|municipal|the|capital|city)\M"
 )
 _BOILERPLATE_RE = re.compile(
     r"\b(?:international|intl|airport|airfield|air\s?base|airbase|"
-    r"regional|municipal|the)\b",
+    r"regional|municipal|the|capital|city)\b",
     re.IGNORECASE,
 )
 
