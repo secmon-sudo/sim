@@ -37,6 +37,7 @@ import argparse
 import json
 from collections import Counter
 
+from src.core import alerts
 from src.core.alerts import evaluate_alert_tier
 from src.pipeline.pass_d_score import (
     MAX_SEVERITY,
@@ -152,7 +153,7 @@ def load_events(conn, days: int) -> list[dict]:
                   e.anchor_name_norm, e.anchor_confidence, e.latitude,
                   e.time_certainty, e.date_verified, e.alert_tier, e.source_title,
                   e.llm_parsed_output, COALESCE(a.czib_flag, false),
-                  e.anchor_name_raw, e.storyline_hint,
+                  e.anchor_name_raw, e.storyline_hint, e.published_at,
                   (e.status IN ('scored', 'reconciled')) AS scored_by_pass_d,
                   jsonb_array_length(
                     COALESCE(e.corroborating_sources, '[]'::jsonb)) AS corroboration
@@ -184,8 +185,13 @@ def load_events(conn, days: int) -> list[dict]:
             # Both feed compute_aviation_bonus's keyword blob.
             "anchor_name_raw": r[13],
             "storyline_hint": r[14],
-            "scored_by_pass_d": r[15],
-            "corroboration": r[16] or 0,
+            "published_at": r[15],
+            "scored_by_pass_d": r[16],
+            "corroboration": r[17] or 0,
+            # The classifier's read of the ARTICLE. Without it every replayed event
+            # looked like new_incident to the report_kind gate, so the replay measured
+            # a tier ladder with one of its two article-shape gates switched off.
+            "report_kind": parsed.get("report_kind"),
         })
     return out
 
@@ -218,7 +224,21 @@ def score(ev: dict, conn) -> int:
     return sev
 
 
-def tier_for(ev: dict, severity: int) -> str | None:
+def tier_for(ev: dict, severity: int, alert_floor: int | None = None) -> str | None:
+    """The tier this event would carry at `severity`, optionally under a new floor.
+
+    The floor is patched on the module rather than threaded through evaluate_alert_tier
+    because production reads it as a module global; overriding it here measures the same
+    code path the pipeline runs, which is the whole point of replaying rather than
+    reimplementing.
+    """
+    if alert_floor is not None and alert_floor != alerts.SEVERITY_ALERT_FLOOR:
+        original = alerts.SEVERITY_ALERT_FLOOR
+        alerts.SEVERITY_ALERT_FLOOR = alert_floor
+        try:
+            return tier_for(ev, severity)
+        finally:
+            alerts.SEVERITY_ALERT_FLOOR = original
     return evaluate_alert_tier({
         "severity_score": severity,
         "system_confidence": ev["system_confidence"],
@@ -232,6 +252,12 @@ def tier_for(ev: dict, severity: int) -> str | None:
         # The corroboration floor is a real tier path now, not a report-only idea, so
         # the replay has to feed it or it would measure a gate that no longer exists.
         "corroborating_sources": [None] * ev["corroboration"],
+        # ...and the same argument for the other two paths that decide real tiers: the
+        # report_kind veto, and the publisher date that stands in for freshness when
+        # time_certainty is 'unknown' (80% of the corpus, so this is not a corner case
+        # — without it the replay silences events production actually pages).
+        "report_kind": ev["report_kind"],
+        "published_at": ev["published_at"],
     })
 
 
@@ -248,6 +274,13 @@ def main() -> None:
     ap.add_argument("--mode", choices=("cap", "compress"), default="cap",
                     help="cap: min(base, cap). compress: squeeze bases above "
                          f"{COMPRESS_KNEE} into the room under cap, keeping order.")
+    ap.add_argument("--alert-floor", type=int, default=None, metavar="N",
+                    help="Replay the PROPOSED side with this severity_alert_floor "
+                         "instead of the configured one. A compressed catalog moves "
+                         "the mass of real events below a floor that was calibrated "
+                         "against saturated scores, and the ladder cannot catch them: "
+                         "it needs confidence >= 0.50 against a measured median of "
+                         "0.45. This is how to size that gap before changing it.")
     args = ap.parse_args()
 
     # Use the pipeline's pool: it auto-switches the Supabase pooler to Transaction
@@ -288,8 +321,11 @@ def main() -> None:
     scored_pop = [e for e in events if e["scored_by_pass_d"]]
     reproduced = sum(1 for e in scored_pop if score(e, current) == e["stored_severity"])
     denom = max(len(scored_pop), 1)
+    floor_note = (f"  alert_floor: {alerts.SEVERITY_ALERT_FLOOR} -> {args.alert_floor}"
+                  if args.alert_floor is not None else
+                  f"  alert_floor: {alerts.SEVERITY_ALERT_FLOOR}")
     print(f"events replayed: {len(events)}  window: {args.days}d  "
-          f"mode: {args.mode}  cap: {args.base_cap}")
+          f"mode: {args.mode}  cap: {args.base_cap}{floor_note}")
     print(f"  of which Pass D scored: {len(scored_pop)}  "
           f"(rest were prescreen-archived at severity 0)")
     print(f"fidelity over the scored population: "
@@ -306,7 +342,8 @@ def main() -> None:
         sev_now[s_now] += 1
         sev_new[s_new] += 1
 
-        t_now, t_new = tier_for(e, s_now), tier_for(e, s_new)
+        t_now = tier_for(e, s_now)
+        t_new = tier_for(e, s_new, args.alert_floor)
         tier_now[t_now or "none"] += 1
         tier_new[t_new or "none"] += 1
         if t_now and not t_new:
@@ -350,6 +387,17 @@ def main() -> None:
     for e in lost[:15]:
         print(f"  [{e['stored_tier']}] sev={e['stored_severity']} "
               f"conf={e['system_confidence']:.2f} {(e['source_title'] or '')[:80]}")
+
+    # The other direction, and the one a floor change is judged on: a lower floor is
+    # only worth having if what it admits reads as real incidents rather than the
+    # roundups and retrospectives the floor was raised to keep out. Printed in full up
+    # to 40 because this list is meant to be read one line at a time, not summarised.
+    if gained:
+        print(f"\nalerts that would START paging ({len(gained)}):")
+        for e in gained[:40]:
+            print(f"  sev={e['stored_severity']} conf={e['system_confidence']:.2f} "
+                  f"corrob={e['corroboration']} rk={e['report_kind']} "
+                  f"{(e['source_title'] or '')[:80]}")
 
 
 if __name__ == "__main__":

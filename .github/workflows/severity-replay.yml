@@ -32,6 +32,10 @@ on:
         default: "compress"
         type: choice
         options: ["compress", "cap"]
+      alert_floor:
+        description: "Replay the proposed side with this severity_alert_floor (blank = configured)"
+        required: false
+        default: ""
 
 env:
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -69,6 +73,7 @@ jobs:
           --base-cap "${{ inputs.base_cap }}"
           --mode "${{ inputs.mode }}"
           --rescue-corroboration "${{ inputs.rescue }}"
+          ${{ inputs.alert_floor && format('--alert-floor {0}', inputs.alert_floor) || '' }}
           2>&1 | tee severity-replay.txt
 
       - name: Upload result

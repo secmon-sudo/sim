@@ -46,7 +46,8 @@
   },
   "cold_storage": {
     "archive_null_occurred_after_days": 60,
-    "archived_retention_days": 30
+    "archived_retention_days": 30,
+    "telemetry_call_retention_days": 14
   },
   "storyline": {
     "jaccard_threshold": 0.4,
@@ -153,7 +154,6 @@
       "https://www.dailymaverick.co.za/dmrss/",
       "https://thediplomat.com/feed/",
       "https://www.scmp.com/rss/4/feed",
-      "https://www.dawn.com/feeds/home",
       "https://insightcrime.org/feed/",
       "https://www.rfa.org/english/rss2.xml",
       "https://www.rferl.org/api/epiqq",

@@ -264,6 +264,101 @@ _AFTERMATH_PATTERNS = (
 _LABEL_POSITION_PATTERNS = {"desk_label", "war_diary"}
 
 
+# ── Accidental and natural-cause casualties ────────────────────────────────
+#
+# This is a security and aviation monitor, and severity reads casualty counts, so an
+# earthquake or a motorway crash scores exactly like an attack that killed the same
+# number of people: measured over the 14 days to 2026-08-17, 85 of the 187 ALERT-tier
+# mass_casualty_event rows (45%) were accidents or natural disasters — the Colombia and
+# Indonesia earthquakes, the Hungary coach crash (one incident, ~25 separate rows), the
+# Chiba floods, the Lake Kariba ferry capsize, two wildfires, a tunnel collapse.
+#
+# The classifier cannot be asked to separate them, because the taxonomy has no accident
+# type: mass_casualty_event is a cause-AGNOSTIC bucket that a suicide bombing and a bus
+# crash both land in. So the cause has to be read off the headline, and this gate is
+# built out of three positive conditions rather than the absence of a hostile signal —
+# using a recall list as a veto is the mistake that was removed from Pass C on
+# 2026-08-10.
+#
+#   1. event_type is one of the cause-agnostic casualty buckets. A hostile event that
+#      merely HAPPENS during a disaster keeps its own type, which is what protects it:
+#      "Myanmar Junta Airstrike Kills Two Displaced Brothers in Flood-Hit Ayeyarwady"
+#      matches the natural-cause pattern on "flood-hit" and is typed missile_strike.
+#   2. The headline names an accidental or natural cause.
+#   3. Neither exemption applies (aviation nexus, hostile context).
+#
+# Same contract as the aftermath gate: the page is withheld, nothing else. The event is
+# still scored, stored, clustered, counted in the geo distribution and written into the
+# SITREP — an earthquake belongs in the daily picture, it just is not a security page.
+CAUSE_AGNOSTIC_CASUALTY_TYPES = frozenset({
+    "mass_casualty_event", "civilian_casualties",
+})
+
+_ACCIDENTAL_CAUSE_PATTERNS = (
+    # Natural hazards. "flood-hit"/"flood-stricken" are deliberately included via \w*
+    # — they name the cause of the casualties in exactly the same way.
+    ("natural",
+     re.compile(r"\b(earthquakes?|quakes?|aftershocks?|tsunami|volcanic|flood\w*|"
+                r"torrential|downpours?|landslides?|mudslides?|avalanche|"
+                r"wildfire\w*|bushfire\w*|typhoons?|hurricanes?|cyclones?|monsoon)\b",
+                re.I)),
+    # Crowd crush. Its own name because a stampede is a venue-safety failure, not a
+    # weather event, and the two are worth telling apart in the logs.
+    ("crowd_crush", re.compile(r"\b(stampede|crowd crush)\b", re.I)),
+    # Surface-transport accident: a vehicle noun AND an accident verb, anywhere in the
+    # headline. Adjacency is not required because the phrasing varies far too much
+    # ("Bus Overturns on M3", "12 killed as bus ferrying 59 people crashes", "Polish
+    # coach overturned on the motorway"), and requiring both terms is what keeps it off
+    # "drone crashes into bus stop". Aircraft are deliberately absent from the vehicle
+    # list: a plane or helicopter crash is this product's subject matter, not noise.
+    ("transport_accident", (
+        re.compile(r"\b(bus(es)?|coach|truck|lorry|cars?|van|minibus|train|tram|"
+                   r"ferry|boat|vessel)\b", re.I),
+        re.compile(r"\b(crash\w*|collision|collided|overturn\w*|derail\w*|capsiz\w*|"
+                   r"plunge[sd]?|veers? off|rolls? into|accident)\b", re.I),
+    )),
+    ("structural_collapse",
+     re.compile(r"\b(tunnel|building|bridge|mine|scaffolding)\s+collapse\b", re.I)),
+    ("industrial", re.compile(r"\bgas leak\b", re.I)),
+)
+
+# Aviation is the priority domain, so an accident that touches it is the one class of
+# accident that must still page: the Chiba floods stranded 7,000 at Narita, and a tour
+# plane crash near the Nazca Lines killed 13. Read off the headline rather than the
+# classifier's aviation_impact field, which called several Colombia earthquake reports
+# "direct" with no aviation content in them at all.
+_AVIATION_NEXUS_RE = re.compile(
+    r"\b(airports?|airlines?|flights?|aircraft|planes?|airplanes?|helicopters?|"
+    r"airspace|runways?|aviation)\b", re.I)
+
+# Hostile context anywhere in the headline exempts the event, so a strike during a
+# flood keeps its page even if it was filed under a cause-agnostic type. Cheap
+# insurance: over the measured 14 days it withheld the gate from 1 of 83 headlines.
+_HOSTILE_CONTEXT_RE = re.compile(
+    r"\b(airstrikes?|strikes?|struck|attacks?|bomb\w*|shell\w*|shooting|shot|"
+    r"gunmen|gunman|missiles?|drones?|terror\w*|ambush|blast|ied|"
+    r"militants?|insurgents?|troops)\b", re.I)
+
+
+def accidental_cause_kind(title: str | None, event_type: str | None) -> str | None:
+    """Name the accidental/natural cause this headline reports, or None.
+
+    Returns the pattern name rather than a bool for the same reason aftermath_kind
+    does: a gate on the alert path that cannot be attributed cannot be tuned.
+    """
+    if event_type not in CAUSE_AGNOSTIC_CASUALTY_TYPES or not title:
+        return None
+    if _AVIATION_NEXUS_RE.search(title) or _HOSTILE_CONTEXT_RE.search(title):
+        return None
+    for name, pattern in _ACCIDENTAL_CAUSE_PATTERNS:
+        if isinstance(pattern, tuple):
+            if all(part.search(title) for part in pattern):
+                return name
+        elif pattern.search(title):
+            return name
+    return None
+
+
 def aftermath_kind(title: str | None) -> str | None:
     """Name the aftermath pattern this headline matches, or None if it reads as news.
 
@@ -511,6 +606,20 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
             logger.info("Alert suppressed as %s article (would have been %s): %.80s",
                         report_kind, tier, event.get("source_title") or "")
             return None, f"report_kind_{report_kind}"
+
+    # Cause gate — see _ACCIDENTAL_CAUSE_PATTERNS. Outside the block above because it
+    # judges the SUBJECT rather than the article, and because CRITICAL is not exempt
+    # here: the reason a roundup can carry a CRITICAL page is that the development it
+    # reports may be genuinely major, whereas a motorway crash is out of scope however
+    # many people it killed, and the aviation exemption already keeps the one class of
+    # accident this product exists to report. No CRITICAL has been observed on this
+    # path — 0 of the 85 measured accident pages — so nothing is being taken away.
+    if tier is not None:
+        cause = accidental_cause_kind(event.get("source_title"), event.get("event_type"))
+        if cause:
+            logger.info("Alert suppressed as %s casualties (would have been %s): %.80s",
+                        cause, tier, event.get("source_title") or "")
+            return None, f"accidental_{cause}"
 
     # Attribution for the derived-freshness path, on the same counterfactual footing as
     # the date_unverified gate above: credited only when it actually CHANGED the outcome,

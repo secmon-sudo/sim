@@ -85,6 +85,28 @@ _ARCHIVE_NULL_AFTER_DAYS = _SETTINGS.get("cold_storage", {}).get("archive_null_o
 ARCHIVED_RETENTION_DAYS = _SETTINGS.get("cold_storage", {}).get(
     "archived_retention_days", 30)
 
+# Retention for the per-call LLM telemetry rows. Measured 2026-08-17: system_telemetry
+# was 65 MB, the second largest table in a 367 MB database on a 500 MB tier, and 50 MB
+# of it was a single event_type — 44,680 'llm_call' rows kept since 9 May, one per LLM
+# call, growing ~1.2 MB/day. Nothing reads them: log_llm_telemetry in core.llm_client
+# is the only reference to the type in the whole repo, and it only writes.
+#
+# Every other telemetry type is an aggregate — pipeline_run, pass_a..pass_f,
+# archive_manifest, geo_distribution — and all of them together are 3 MB, so they are
+# deliberately kept forever and only this one type is aged out.
+#
+# 14 days because that is the window the model and quota investigations in this project
+# actually use ("the 14 days to <date>"), and per-call latency is only ever read while
+# chasing a live regression.
+TELEMETRY_RETENTION_DAYS = _SETTINGS.get("cold_storage", {}).get(
+    "telemetry_call_retention_days", 14)
+
+# Larger than BATCH_SIZE: this table is not on the read path of any pass and both
+# columns the delete keys on are indexed, so the lock it takes is short even at this
+# size — and the first run has ~35,000 rows of backlog to work through, which at 500 a
+# run would take a week and a half of runs.
+TELEMETRY_BATCH_SIZE = 5000
+
 
 def get_archivable_events(db_conn) -> list[dict]:
     """
@@ -265,6 +287,42 @@ def purge_expired_archived(db_conn) -> int:
         return 0
 
 
+def purge_expired_telemetry(db_conn) -> int:
+    """Delete per-call LLM telemetry older than TELEMETRY_RETENTION_DAYS.
+
+    Narrow on event_type for the reason given at TELEMETRY_RETENTION_DAYS: the
+    aggregates in this table are the run history and cost nothing to keep, while
+    'llm_call' is a write-only debug trail that is 77% of the table.
+    """
+    if not TELEMETRY_RETENTION_DAYS:
+        return 0
+    try:
+        result = db_conn.execute(
+            """DELETE FROM system_telemetry
+                WHERE id IN (
+                    SELECT id FROM system_telemetry
+                     WHERE event_type = 'llm_call'
+                       AND timestamp < NOW() - (%s * INTERVAL '1 day')
+                     LIMIT %s
+                )""",
+            (TELEMETRY_RETENTION_DAYS, TELEMETRY_BATCH_SIZE),
+        )
+        removed = result.rowcount or 0
+        db_conn.commit()
+        if removed:
+            logger.info("Pass F: purged %d llm_call telemetry rows older than %d days",
+                        removed, TELEMETRY_RETENTION_DAYS)
+        return removed
+    except Exception:
+        try:
+            db_conn.rollback()
+        except Exception:
+            pass
+        # Housekeeping, like the archived purge — never a reason to fail a run.
+        logger.exception("Telemetry purge failed")
+        return 0
+
+
 def run_pass_f(db_conn) -> dict:
     """
     Execute Pass F: Cold Storage & Archive
@@ -277,15 +335,17 @@ def run_pass_f(db_conn) -> dict:
     stats = {
         "events_archived": 0,
         "archived_purged": 0,
+        "telemetry_purged": 0,
         "manifest_hash": None,
         "telegram_message_id": None,
         "error": None
     }
 
-    # 0. Retention, BEFORE the early return below. The purge has nothing to do with
-    #    whether there is anything to export, and putting it after that return would
-    #    skip it on exactly the quiet runs where it is cheapest to do.
+    # 0. Retention, BEFORE the early return below. The purges have nothing to do with
+    #    whether there is anything to export, and putting them after that return would
+    #    skip them on exactly the quiet runs where they are cheapest to do.
     stats["archived_purged"] = purge_expired_archived(db_conn)
+    stats["telemetry_purged"] = purge_expired_telemetry(db_conn)
 
     # 1. Select
     events = get_archivable_events(db_conn)
