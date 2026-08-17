@@ -73,6 +73,14 @@ class TestCasualtyVerbRecall:
     def test_killed_with_actor(self):
         assert score("Militants killed 12 in Balochistan ambush") >= PRESCREEN_FLOOR
 
+    def test_scare_quoted_actor(self):
+        """News.com.au headline that survived the first version of this frame.
+
+        The closing quote sits between the noun and the verb, so a bare \\s+ after
+        the subject missed it — 1 of the 12 genuinely-archived events replayed.
+        """
+        assert score("Moment ‘Ukrainian drone’ kills kids on beach") >= PRESCREEN_FLOOR
+
 
 class TestPluralAttackPhrases:
     """`drone strikes?` carried the plural; the three neighbouring phrases did not."""

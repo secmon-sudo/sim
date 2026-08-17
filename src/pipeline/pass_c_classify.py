@@ -158,9 +158,13 @@ HOSTILE_ACT_PATTERN = re.compile(
     # jobs"). Checked against the control set that motivated the anchoring: "the film
     # bombed at the box office", "workers prepare for strike", "stocks attack record
     # highs" and "transporters end strike" all stay unmatched.
+    # The ['’"]? after the subject is not decoration. Wire copy scare-quotes the
+    # attributed actor — "Moment 'Ukrainian drone' kills kids on beach" (News.com.au)
+    # — and the closing quote sits between the noun and the verb, so a bare \s+ misses
+    # it. That was the 1 of 12 genuinely-archived events this frame failed to recover.
     r"|(drones?|missiles?|rockets?|uavs?|strikes?|shelling|bombardment|troops|forces|"
     r"militants?|gunmen|rebels?|insurgents?|terrorists?|jets?|warplanes?|raids?)"
-    r"\s+([\w'’-]+\s+){0,3}(kills?|killed|injur(e|es|ed)|wounds?|wounded)"
+    r"['’\"]?\s+([\w'’-]+\s+){0,3}(kills?|killed|injur(e|es|ed)|wounds?|wounded)"
     r"|(kills?|killed|injur(e|es|ed)|wounded)\s+([\w'’-]+\s+){0,2}"
     r"(civilians?|people|residents?|children|women|worshippers|passengers|pilgrims)"
     # "NATO jet DOWNS drone", "air defences DOWNED 12 drones".
