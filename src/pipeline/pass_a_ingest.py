@@ -130,14 +130,30 @@ def _record_corroboration(db_conn, event_id, event_domain: str,
                           dup_domain: str, dup_url: str, dup_title: str) -> bool:
     """Append a dropped duplicate's source to the surviving event's
     corroborating_sources. Same-registrable-domain duplicates are NOT recorded —
-    an outlet republishing itself proves nothing. Idempotent per domain."""
+    an outlet republishing itself proves nothing. Idempotent per domain.
+
+    Each entry carries seen_at, the moment this pipeline observed the duplicate.
+    The count alone already proved to be the signal confidence is not: measured
+    2026-08-17, every silenced event carrying >= 2 independent domains was real
+    (the mass drone attack on Moscow, the Benghazi car bombing) and every piece of
+    junk carried zero, which is why CORROBORATION_ALERT_MIN exists. The timestamp
+    turns that count into a rate — how fast a story spread across independent
+    outlets — which is strictly more information for the same write.
+
+    It is OBSERVATION time, not publication time, and the two are far apart here:
+    the median gap between a publisher's own date and our ingest is 228 minutes.
+    So seen_at measures how quickly SIM saw the spread, bounded below by the run
+    cadence — useful for ranking within a window, not for claiming a story broke
+    at a particular minute.
+    """
     from src.core.sitrep_verify import registrable_domain
     if event_id is None or not dup_domain:
         return False
     if registrable_domain(dup_domain) == registrable_domain(event_domain or ""):
         return False
     entry = json.dumps([{"domain": dup_domain, "url": dup_url[:500],
-                         "title": (dup_title or "")[:200]}])
+                         "title": (dup_title or "")[:200],
+                         "seen_at": datetime.now(timezone.utc).isoformat()}])
     probe = json.dumps([{"domain": dup_domain}])
     try:
         with db_conn.transaction():

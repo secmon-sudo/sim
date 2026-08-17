@@ -301,7 +301,7 @@ Extract the following fields:
    bomb_threat, active_shooter, hijacking, runway_incursion,
    emergency_landing, bird_strike, engine_failure, fire_on_board, depressurization,
    unruly_passenger, drone_incursion, drone_attack_critical_infra, drone_airport_attack,
-   laser_attack, suspicious_package, evacuation,
+   laser_attack, suspicious_package, evacuation, airspace_closure,
    security_incident, aviation_personnel_attack, pilot_attacked, cabin_crew_attacked, ground_staff_attacked,
    geopolitical_conflict, military_action, missile_strike, war_escalation, ceasefire_violation, civilian_casualties,
    political_event, civil_unrest, protest, mass_demonstration, riot, general_strike, coup_attempt,
@@ -311,6 +311,15 @@ Extract the following fields:
    travel_advisory, travel_ban, embassy_closure,
    other_aviation_related,
    noise
+
+   USE airspace_closure when airspace or an airport is CLOSED, SUSPENDED, RESTRICTED
+   or flights are HALTED/DIVERTED/REROUTED — this is the single most operationally
+   actionable aviation event, so do not fall back to other_aviation_related for it.
+   Set sub_type to "planned" when the closure is scheduled and benign (air show,
+   flypast, national day parade, military exercise, VIP movement, maintenance) and to
+   "incident" when it follows a drone sighting, strike, attack, accident, volcanic ash,
+   security threat or conflict. If the article does not say which, use "incident" —
+   an unexplained closure is the case worth looking at.
 
 2. sub_type: More specific classification if applicable, or null
 3. anchor_name: Airport, military base, port, hotel, resort, or location name mentioned (raw text). If none, null.

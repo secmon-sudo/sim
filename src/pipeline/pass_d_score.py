@@ -68,6 +68,14 @@ SAFETY_EVENT_TYPES = {
 }
 SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
 
+# A scheduled airspace closure is an aviation NOTICE, not an aviation incident.
+# The two are written in the same words — "CAAM announces temporary airspace closure
+# for National Day flypast" reads exactly like a closure after a drone sighting — so
+# the classifier is asked to set sub_type, and the score is capped here when it says
+# the closure was planned. Without the cap, adding airspace_closure at a base that
+# makes real closures page would page every air show in the corpus.
+PLANNED_CLOSURE_SEVERITY_CAP = _SCORING.get("planned_closure_severity_cap", 40)
+
 # Generic "umbrella" event types the LLM reaches for on any geopolitics/policy-flavoured
 # story. Used by the incident gate: an umbrella label with no located anchor and no
 # casualties is commentary/analysis, not an actionable incident, and is capped so a
@@ -239,6 +247,24 @@ def apply_safety_downrank(event_type: str, severity: int, llm_parsed: dict | Non
     if SAFETY_LIFT_ON_MASS_CASUALTY and compute_casualty_bonus(llm_parsed or {}) > 0:
         return severity, True
     return min(severity, SAFETY_SEVERITY_CAP), True
+
+
+def apply_planned_closure_downrank(event_type: str, severity: int,
+                                   llm_parsed: dict | None) -> int:
+    """Cap a scheduled airspace closure below the alert floor.
+
+    Only airspace_closure carries this: it is the one type whose benign and serious
+    forms are reported in identical language. sub_type is the classifier's read of
+    which it is, and the prompt defaults it to "incident" when the article does not
+    say — an unexplained closure is the case worth surfacing, so the cap applies only
+    to a positive "planned".
+    """
+    if event_type != "airspace_closure":
+        return severity
+    sub_type = ((llm_parsed or {}).get("sub_type") or "").strip().lower()
+    if sub_type == "planned":
+        return min(severity, PLANNED_CLOSURE_SEVERITY_CAP)
+    return severity
 
 
 def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_parsed: dict | None = None) -> int:
@@ -784,6 +810,8 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         #    so aviation-threatening events rank ahead of equivalent generic ones.
         severity = compute_severity(event["event_type"], anchor, db_conn, llm_parsed)
         severity = min(severity + compute_aviation_bonus(event, anchor), MAX_SEVERITY)
+        severity = apply_planned_closure_downrank(
+            event["event_type"], severity, llm_parsed)
         # De-prioritize accidental safety events (kept for coverage, tagged is_safety).
         severity, is_safety = apply_safety_downrank(event["event_type"], severity, llm_parsed)
 

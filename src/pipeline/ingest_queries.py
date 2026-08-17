@@ -127,6 +127,19 @@ def build_search_queries(db_conn=None) -> list[dict]:
         '"airport worker killed"',
         '"check-in agent attacked"',
         '"air traffic controller threat"',
+        # Airspace closure — the most operationally actionable aviation event and
+        # the one the catalog had no code for until 2026-08-17. Phrased as closure
+        # + cause rather than bare "airspace closed", because the bare form is
+        # dominated by scheduled flypasts and air shows; the classifier still
+        # separates planned from incident, but there is no reason to spend ingest
+        # budget collecting parades.
+        '"airspace closed" drone',
+        '"airspace closure" attack OR strike OR drone OR incursion',
+        '"closed its airspace"',
+        '"airport closed" security OR attack OR drone OR explosion',
+        '"suspends flights" airport',
+        '"flights diverted" security OR drone OR attack',
+        '"NOTAM" closure OR restriction',
     ]
     for q in tier1:
         _add(q)
