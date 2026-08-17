@@ -51,6 +51,32 @@ from src.services.supabase_client import close_pool, get_connection, put_connect
 # actually move the score, which is what the formula was always documented to do.
 DEFAULT_BASE_CAP = 75
 
+# Where the compression starts. Bases at or below this are already low enough to
+# leave the bonuses room and are passed through untouched.
+COMPRESS_KNEE = 60
+
+
+def rescale(base: int, cap: int, mode: str) -> int:
+    """Apply the proposed catalog transform to one severity_base.
+
+    'cap' is the blunt version: min(base, cap). It restores headroom but flattens
+    every type above the cap onto one value — measured 2026-08-17, that took the
+    corpus from 21 distinct severities to 15, because missile_strike (100),
+    terrorism (95), civilian_casualties (92), war_escalation (90), vehicle_ramming
+    (88) and five more all collapse to 75. Evidence regains its say and the TYPE
+    ordering loses its own, which is only half the fix.
+
+    'compress' keeps the order: below the knee nothing moves, above it the range is
+    squeezed into what is left under the cap. missile_strike stays the most severe
+    label, it just no longer starts at the ceiling.
+    """
+    if mode == "cap":
+        return min(base, cap)
+    if base <= COMPRESS_KNEE:
+        return base
+    span = max(MAX_SEVERITY - COMPRESS_KNEE, 1)
+    return COMPRESS_KNEE + round((base - COMPRESS_KNEE) * (cap - COMPRESS_KNEE) / span)
+
 
 class _CatalogConn:
     """Serves a rescaled severity_base to compute_severity, delegating nothing else.
@@ -87,7 +113,9 @@ def load_events(conn, days: int) -> list[dict]:
                   e.anchor_name_norm, e.anchor_confidence, e.latitude,
                   e.time_certainty, e.date_verified, e.alert_tier, e.source_title,
                   e.llm_parsed_output, COALESCE(a.czib_flag, false),
-                  e.anchor_name_raw, e.storyline_hint
+                  e.anchor_name_raw, e.storyline_hint,
+                  (e.llm_parsed_output ->> 'archived_reason'
+                     IS DISTINCT FROM 'deterministic_prescreen') AS scored_by_pass_d
            FROM events e
            LEFT JOIN anchor_master a ON a.iata_code = e.anchor_name_norm
            WHERE e.ingested_at > NOW() - (%s * INTERVAL '1 day')
@@ -116,6 +144,7 @@ def load_events(conn, days: int) -> list[dict]:
             # Both feed compute_aviation_bonus's keyword blob.
             "anchor_name_raw": r[13],
             "storyline_hint": r[14],
+            "scored_by_pass_d": r[15],
         })
     return out
 
@@ -166,6 +195,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--base-cap", type=int, default=DEFAULT_BASE_CAP)
+    ap.add_argument("--mode", choices=("cap", "compress"), default="cap",
+                    help="cap: min(base, cap). compress: squeeze bases above "
+                         f"{COMPRESS_KNEE} into the room under cap, keeping order.")
     args = ap.parse_args()
 
     # Use the pipeline's pool: it auto-switches the Supabase pooler to Transaction
@@ -179,15 +211,30 @@ def main() -> None:
         close_pool()
 
     current = _CatalogConn(catalog)
-    proposed = _CatalogConn({k: min(v, args.base_cap) for k, v in catalog.items()})
+    proposed = _CatalogConn(
+        {k: rescale(v, args.base_cap, args.mode) for k, v in catalog.items()})
 
     # Fidelity check first: if replaying the CURRENT catalog does not reproduce the
     # stored severities, the proposed numbers mean nothing. Report it rather than
     # quietly presenting a delta built on a broken reconstruction.
-    reproduced = sum(1 for e in events if score(e, current) == e["stored_severity"])
-    print(f"events replayed: {len(events)}  window: {args.days}d  base cap: {args.base_cap}")
-    print(f"fidelity (current catalog reproduces stored severity): "
-          f"{reproduced}/{len(events)} ({100 * reproduced / max(len(events), 1):.1f}%)\n")
+    #
+    # Measure it ONLY over events Pass D actually scored. The rest — 4085 of 12734 on
+    # the 14 days to 2026-08-17 — were archived by the deterministic prescreen, which
+    # stores severity 0 without ever calling compute_severity. Scoring those here from
+    # their event_type guarantees a mismatch that says nothing about the replay, and
+    # it dragged the first run's headline figure to 51.3% when the honest number over
+    # the scored population was 99.5%. They still belong in the delta: every one of
+    # them is an unclassified/other_aviation base of 20, which no cap at or above 20
+    # moves and no tier admits, so they contribute identically to both sides.
+    scored_pop = [e for e in events if e["scored_by_pass_d"]]
+    reproduced = sum(1 for e in scored_pop if score(e, current) == e["stored_severity"])
+    denom = max(len(scored_pop), 1)
+    print(f"events replayed: {len(events)}  window: {args.days}d  "
+          f"mode: {args.mode}  cap: {args.base_cap}")
+    print(f"  of which Pass D scored: {len(scored_pop)}  "
+          f"(rest were prescreen-archived at severity 0)")
+    print(f"fidelity over the scored population: "
+          f"{reproduced}/{len(scored_pop)} ({100 * reproduced / denom:.1f}%)\n")
 
     sev_now = Counter()
     sev_new = Counter()

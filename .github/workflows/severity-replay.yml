@@ -43,8 +43,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Tee to a file as well as the log. Workflow logs need a GitHub token to
+      # read, so a measurement that only ever reaches stdout cannot be collected
+      # without one — the first run of this workflow produced its numbers and
+      # nobody could retrieve them. The artifact is downloadable from the run page
+      # and via nightly.link, which is how the rest of this repo's output is read.
       - name: Replay severity
+        # shell: bash is load-bearing. The default runner shell is `bash -e`
+        # WITHOUT pipefail, so `python ... | tee` would report tee's exit code
+        # and a crashed replay would show up as a green step with an empty file.
+        shell: bash
         run: >-
           python -m scripts.replay_severity
           --days "${{ inputs.days }}"
           --base-cap "${{ inputs.base_cap }}"
+          2>&1 | tee severity-replay.txt
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: severity-replay-${{ inputs.days }}d-cap${{ inputs.base_cap }}
+          path: severity-replay.txt
+          retention-days: 30
