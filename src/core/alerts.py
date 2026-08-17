@@ -273,9 +273,9 @@ _LABEL_POSITION_PATTERNS = {"desk_label", "war_diary"}
 # Indonesia earthquakes, the Hungary coach crash (one incident, ~25 separate rows), the
 # Chiba floods, the Lake Kariba ferry capsize, two wildfires, a tunnel collapse.
 #
-# The classifier cannot be asked to separate them, because the taxonomy has no accident
-# type: mass_casualty_event is a cause-AGNOSTIC bucket that a suicide bombing and a bus
-# crash both land in. So the cause has to be read off the headline, and this gate is
+# The classifier cannot be asked to separate them, because the taxonomy offers no
+# accident type — mass_casualty_event is a cause-AGNOSTIC bucket that a suicide bombing
+# and a bus crash both land in. So the cause has to be read off the headline, and it is
 # built out of three positive conditions rather than the absence of a hostile signal —
 # using a recall list as a veto is the mistake that was removed from Pass C on
 # 2026-08-10.

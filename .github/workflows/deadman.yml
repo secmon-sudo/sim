@@ -24,11 +24,20 @@ env:
   TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
   DEADMAN_MAX_AGE_HOURS:   '3'
+  # Age of the newest workflow_dispatch-triggered pipeline run that still counts as a
+  # live cron-job.org backstop. 0 disables the check — set that, rather than deleting
+  # code, if the external cron is ever retired on purpose.
+  DEADMAN_DISPATCH_MAX_AGE_HOURS: '6'
+  # Only for the API rate limit; the repo is public and the check works without it.
+  GITHUB_TOKEN:            ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   deadman:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read      # Reads the pipeline's run history for the dispatch check.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
