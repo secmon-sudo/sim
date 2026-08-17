@@ -767,7 +767,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             """SELECT id, event_type, anchor_name_raw, country_iso,
                       llm_parsed_output, storyline_hint, occurred_at_est,
                       source_title, source_url, ingested_at, source_domain,
-                      published_at, date_verified
+                      published_at, date_verified, corroborating_sources
                FROM events WHERE id = %s AND status = 'classified'""",
             (event_id,),
         ).fetchone()
@@ -811,6 +811,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # stamp (migration 021). The alert gate refuses to read the latter as
             # freshness, and the notifier labels it instead of presenting it as fact.
             "date_verified": bool(row[12]),
+            # Independent publishers that reported the same incident. Pass A records
+            # these when it drops a content-duplicate, so the count is the evidence
+            # the dropped duplicates represent — the alert gate reads it as a floor.
+            "corroborating_sources": row[13],
         }
 
         # 1. Resolve anchor
@@ -882,6 +886,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             # could not date the incident (time_certainty 'unknown', 80% of the corpus).
             # Read together with date_verified above: a crawl stamp is not evidence.
             "published_at": row[11],
+            # Independent corroboration as a path to ALERT — see
+            # CORROBORATION_ALERT_MIN. Without this line the gate reads every event as
+            # uncorroborated and the floor can never fire.
+            "corroborating_sources": event.get("corroborating_sources"),
         }
         alert_tier, alert_veto = evaluate_alert_tier_verbose(alert_data)
 

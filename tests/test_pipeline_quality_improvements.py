@@ -250,6 +250,7 @@ def test_score_single_event_quiet_hours(mock_send_tg, mock_resolve_anchor):
         "reuters.com", # source_domain
         datetime.now(timezone.utc) - timedelta(hours=2), # published_at
         True, # date_verified — publisher's own feed, so freshness may be claimed
+        None,  # corroborating_sources — uncorroborated, so the floor stays out of it
     )
     
     # New-activity query returns a single row (country_cnt, location_cnt); 0/0 means

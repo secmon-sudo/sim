@@ -61,6 +61,28 @@ ADVISORY_ALERT_SEVERITY_MIN = _SETTINGS.get("alert", {}).get(
 # and confidence.
 SEVERITY_ALERT_FLOOR = _SETTINGS.get("alert", {}).get("severity_alert_floor", 90)
 
+# Independent-corroboration path to ALERT.
+#
+# The ladder's confidence floor is 0.50 and system_confidence has a measured median of
+# 0.45, so almost every real incident depends on SEVERITY_ALERT_FLOOR to page at all.
+# Once severity stops saturating, that crutch goes away and the decision falls back on
+# confidence — which was measured on 2026-08-11 to be unable to separate a real
+# incident from a roundup. Corroboration is the signal that did separate them.
+#
+# Measured on the 6 days to 2026-08-17 (the window where report_kind has full
+# coverage), replaying a compressed severity catalog silences 25 tiered events. Of the
+# three carrying >= 2 independent domains, two are among the most significant in the
+# whole set — "Ukraine targets Moscow in mass drone attack as Russia bombards Kyiv"
+# and the Benghazi car bombing that killed Libya's military intelligence chief — while
+# every piece of junk in the silenced set (the interim-bail hearing, the caucus-coup
+# column, the Gaza damage statistic) carries zero.
+#
+# corroborating_sources is already same-registrable-domain deduplicated when Pass A
+# writes it, so the count is publishers, not URLs. Two is deliberately low: this is a
+# floor for events that ALREADY cleared severity and freshness, not a way in for
+# anything else. Like SEVERITY_ALERT_FLOOR it can only raise a tier to ALERT.
+CORROBORATION_ALERT_MIN = _SETTINGS.get("alert", {}).get("corroboration_alert_min", 2)
+
 # A time_certainty that pins the event to roughly "now" — the only values that make
 # an event newsworthy as a page rather than as background.
 FRESH_TIME_CERTAINTY = ["same_day", "previous_day"]
@@ -317,12 +339,31 @@ def _matches_tier(rule: dict, sev, conf, anc: str, time_: str, located: bool) ->
     return True
 
 
-def _tier_from_signals(sev, conf, anc: str, time_: str, located: bool) -> str | None:
-    """The tier ladder plus the severity floor, over already-extracted signals.
+def corroboration_count(event: dict) -> int:
+    """Independent publishers that reported the same incident.
+
+    Pass A drops same-registrable-domain duplicates before appending, so each entry is
+    a distinct outlet rather than a distinct URL.
+    """
+    sources = event.get("corroborating_sources")
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except (TypeError, ValueError):
+            return 0
+    return len(sources) if isinstance(sources, list) else 0
+
+
+def _tier_from_signals(sev, conf, anc: str, time_: str, located: bool,
+                       corroboration: int = 0) -> str | None:
+    """The tier ladder plus the two floors, over already-extracted signals.
 
     Separated from evaluate_alert_tier_verbose so the date-provenance gate can ask the
     counterfactual — "would this event have paged if its date had been verified?" — with
     the same code that produced the real answer rather than a second copy of the rules.
+
+    corroboration defaults to 0 so the counterfactual callers, and every test that
+    builds signals by hand, keep asking the question they were asking before.
     """
     tier = None
     for name in TIER_ORDER:
@@ -333,6 +374,17 @@ def _tier_from_signals(sev, conf, anc: str, time_: str, located: bool) -> str | 
     # Severity floor — see SEVERITY_ALERT_FLOOR. Applied after the ladder so it can
     # only ever raise a tier to ALERT, never lower one or manufacture a CRITICAL.
     if (sev >= SEVERITY_ALERT_FLOOR
+            and time_ in FRESH_TIME_CERTAINTY
+            and tier_rank(tier) < tier_rank("ALERT")):
+        tier = "ALERT"
+
+    # Corroboration floor — see CORROBORATION_ALERT_MIN. Same shape and the same
+    # ceiling as the severity floor: it needs the event to be fresh, it cannot reach
+    # CRITICAL, and it only ever raises. It carries its own severity bar so it stays a
+    # floor for events that were already close, not a second way in from nothing:
+    # WATCH's severity_min is what "worth showing at all" already means here.
+    if (corroboration >= CORROBORATION_ALERT_MIN
+            and sev >= TIER_RULES["WATCH"]["severity_min"]
             and time_ in FRESH_TIME_CERTAINTY
             and tier_rank(tier) < tier_rank("ALERT")):
         tier = "ALERT"
@@ -418,7 +470,8 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     if event.get("event_type") in ADVISORY_EVENT_TYPES:
         return ("ALERT" if sev >= ADVISORY_ALERT_SEVERITY_MIN else "WATCH"), None
 
-    tier = _tier_from_signals(sev, conf, anc, time_, located)
+    tier = _tier_from_signals(sev, conf, anc, time_, located,
+                              corroboration_count(event))
 
     # Date-provenance attribution. Reported here rather than at the substitution above
     # because the downgrade only COSTS an event its page when freshness was the evidence

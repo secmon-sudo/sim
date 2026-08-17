@@ -190,6 +190,9 @@ def tier_for(ev: dict, severity: int) -> str | None:
         "anchor_name_norm": ev["anchor_name_norm"],
         "latitude": ev["latitude"],
         "source_title": ev["source_title"],
+        # The corroboration floor is a real tier path now, not a report-only idea, so
+        # the replay has to feed it or it would measure a gate that no longer exists.
+        "corroborating_sources": [None] * ev["corroboration"],
     })
 
 
