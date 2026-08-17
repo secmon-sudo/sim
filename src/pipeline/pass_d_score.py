@@ -384,26 +384,47 @@ def resolve_anchor_for_event(db_conn, event: dict) -> dict:
                 (norm,),
             ).fetchone()
             if row:
-                czib = row[0] or False
-                lat = row[1]
-                lon = row[2]
-                # The anchor's country overwrites the classifier's. That is right when
-                # the anchor is real — anchor_master is curated, the LLM is not — but
-                # it is how a bad fuzzy match used to launder itself into the record:
-                # the classifier correctly said IN for the Varanasi airport shooting,
-                # a 0.55 trigram hit on "Varna Airport" replaced it with BG, and the
-                # event then paged as a Bulgarian alert and landed in the wrong
-                # country's SITREP. normalize_anchor now rejects matches that weak;
-                # this logs the disagreements that survive so the next bad pattern is
-                # visible in the data instead of only in the output.
+                # The classifier's country vetoes a contradicting anchor, the same rule
+                # Pass E applies to sibling anchors (see pass_e_reconcile). anchor_master
+                # is curated and the LLM is not, so the anchor's country used to simply
+                # overwrite the classifier's — and that is how a bad fuzzy match laundered
+                # itself into the record: the classifier correctly said IN for the Varanasi
+                # airport shooting, a 0.55 trigram hit on "Varna Airport" replaced it with
+                # BG, and the event paged as a Bulgarian alert in the wrong country's
+                # SITREP. Tightening normalize_anchor was not enough on its own — on
+                # 2026-08-17 "Danube port" in a Ukrainian strike story resolved to LNZ
+                # (Linz is genuinely a Danube port) at MEDIUM and the event was stored as
+                # Austrian. Pass E rejected the very same anchor an instant later, so the
+                # two passes disagreed and the one that writes first won.
+                #
+                # The whole resolution is dropped, not just the country: an anchor whose
+                # country is wrong is a wrong anchor, and keeping the IATA code while
+                # relabelling it would carry the bad match into the suppression key, the
+                # CZIB flag and the airspace-impact block. The event keeps the classifier's
+                # country and falls through to the city gazetteer below, which is what it
+                # would have had if the fuzzy match had never fired.
+                #
+                # Unconditional, like Pass E's veto, and that holds for HIGH-confidence
+                # exact-code hits too: all 5 disagreements in the corpus resolved on an
+                # anchor that names a real place while the event happened somewhere else.
+                # "Man shot dead near the northern Arab Israeli town of Kabul" matched KBL
+                # at HIGH and paged as Afghanistan. The one arguable case — refugees
+                # deported from Germany to Kabul — loses a location it should not have
+                # carried as an incident site either.
                 anchor_country = row[3]
                 if anchor_country and country and anchor_country != country:
                     logger.warning(
-                        "Anchor country overrides classifier: %s (%s) %s→%s [%.60s]",
-                        norm, get_anchor_confidence_level(conf), country,
-                        anchor_country, raw_anchor,
+                        "Anchor rejected, country disagrees with classifier: "
+                        "%s (%s) is %s, classifier says %s [%.60s]",
+                        norm, get_anchor_confidence_level(conf), anchor_country,
+                        country, raw_anchor,
                     )
-                country = anchor_country or country
+                    norm, conf = None, 0.0
+                else:
+                    czib = row[0] or False
+                    lat = row[1]
+                    lon = row[2]
+                    country = anchor_country or country
         except Exception:
             pass
 
