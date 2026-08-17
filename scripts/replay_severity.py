@@ -114,8 +114,7 @@ def load_events(conn, days: int) -> list[dict]:
                   e.time_certainty, e.date_verified, e.alert_tier, e.source_title,
                   e.llm_parsed_output, COALESCE(a.czib_flag, false),
                   e.anchor_name_raw, e.storyline_hint,
-                  (e.llm_parsed_output ->> 'archived_reason'
-                     IS DISTINCT FROM 'deterministic_prescreen') AS scored_by_pass_d
+                  (e.status IN ('scored', 'reconciled')) AS scored_by_pass_d
            FROM events e
            LEFT JOIN anchor_master a ON a.iata_code = e.anchor_name_norm
            WHERE e.ingested_at > NOW() - (%s * INTERVAL '1 day')
@@ -218,14 +217,19 @@ def main() -> None:
     # stored severities, the proposed numbers mean nothing. Report it rather than
     # quietly presenting a delta built on a broken reconstruction.
     #
-    # Measure it ONLY over events Pass D actually scored. The rest — 4085 of 12734 on
-    # the 14 days to 2026-08-17 — were archived by the deterministic prescreen, which
-    # stores severity 0 without ever calling compute_severity. Scoring those here from
-    # their event_type guarantees a mismatch that says nothing about the replay, and
-    # it dragged the first run's headline figure to 51.3% when the honest number over
-    # the scored population was 99.5%. They still belong in the delta: every one of
-    # them is an unclassified/other_aviation base of 20, which no cap at or above 20
-    # moves and no tier admits, so they contribute identically to both sides.
+    # Measure it ONLY over events Pass D actually scored, which is exactly
+    # status IN ('scored','reconciled'). Everything else reaches 'archived' without
+    # compute_severity ever running and is stored at severity 0, so scoring it here
+    # from its event_type guarantees a mismatch that says nothing about the replay.
+    # Measured on the 14 days to 2026-08-17: of 12758 rows, 6575 were scored (all
+    # with severity > 0) while 4086 were prescreen-archived and 2097 were archived
+    # by the classifier — 6183 guaranteed mismatches. Filtering on the prescreen
+    # flag alone caught only the first group and still reported 75.5%; the honest
+    # figure over the scored population is 99.5%.
+    #
+    # The unscored rows still belong in the DELTA: each is an unclassified or
+    # other_aviation base of 20, which no cap at or above 20 moves and no tier
+    # admits, so they contribute identically to both sides and cancel out.
     scored_pop = [e for e in events if e["scored_by_pass_d"]]
     reproduced = sum(1 for e in scored_pop if score(e, current) == e["stored_severity"])
     denom = max(len(scored_pop), 1)

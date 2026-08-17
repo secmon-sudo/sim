@@ -22,6 +22,12 @@ on:
         description: "Proposed ceiling for event_type_catalog.severity_base"
         required: true
         default: "75"
+      mode:
+        description: "cap = min(base,cap); compress = keep type ordering"
+        required: true
+        default: "compress"
+        type: choice
+        options: ["compress", "cap"]
 
 env:
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -57,12 +63,13 @@ jobs:
           python -m scripts.replay_severity
           --days "${{ inputs.days }}"
           --base-cap "${{ inputs.base_cap }}"
+          --mode "${{ inputs.mode }}"
           2>&1 | tee severity-replay.txt
 
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: severity-replay-${{ inputs.days }}d-cap${{ inputs.base_cap }}
+          name: replay-${{ inputs.mode }}-${{ inputs.base_cap }}-${{ inputs.days }}d
           path: severity-replay.txt
           retention-days: 30
