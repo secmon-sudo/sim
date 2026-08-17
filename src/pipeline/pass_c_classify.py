@@ -851,6 +851,35 @@ Text: {canonical_text[:3000]}"""
         release_lock(db_conn, event_id, worker_id, requeue=True)
 
 
+# Active event-type codes, read once per process instead of twice per event.
+#
+# The catalog is 59 rows and changes when someone edits it, not while a run is in
+# flight, but it was being probed with two single-row SELECTs for every classified
+# event — 200 round trips across the Supabase WAN on a 100-event run, to answer a
+# question whose whole answer set fits in a few hundred bytes.
+_ACTIVE_CODES: set[str] | None = None
+
+
+def _active_event_codes(db_conn) -> set[str]:
+    """The active catalog as a set, cached for the life of the process.
+
+    On a query failure it returns an empty set rather than caching it, so the next
+    event retries instead of silently rejecting every type for the rest of the run.
+    """
+    global _ACTIVE_CODES
+    if _ACTIVE_CODES is not None:
+        return _ACTIVE_CODES
+    try:
+        rows = db_conn.execute(
+            "SELECT code FROM event_type_catalog WHERE active = TRUE"
+        ).fetchall()
+    except Exception:
+        logger.exception("Active event-type catalog lookup failed")
+        return set()
+    _ACTIVE_CODES = {r[0] for r in rows}
+    return _ACTIVE_CODES
+
+
 def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict,
                               parsed: dict, result: dict, worker_id: uuid.UUID,
                               log_telemetry: bool = True) -> dict | None:
@@ -976,23 +1005,16 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
     # Tier 3: Relevant (40+) → proceed normally with classification
     update_domain_penalty(db_conn, source_domain, 0)
 
-    # Validate event_type against active catalog
-    active_check = db_conn.execute(
-        "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
-        (event_type,),
-    ).fetchone()
-    if not active_check:
+    # Validate event_type and sub_type against the active catalog. An empty set means
+    # the lookup failed, and rejecting every type on a transient DB error would rewrite
+    # a whole run as unclassified — so treat it as "cannot check" and keep the label.
+    active_codes = _active_event_codes(db_conn)
+    if active_codes and event_type not in active_codes:
         event_type = FALLBACK_EVENT_TYPE
 
-    # Validate sub_type against active catalog
     sub_type = parsed.get("sub_type")
-    if sub_type:
-        sub_check = db_conn.execute(
-            "SELECT code FROM event_type_catalog WHERE code = %s AND active = TRUE",
-            (sub_type,),
-        ).fetchone()
-        if not sub_check:
-            sub_type = None
+    if sub_type and active_codes and sub_type not in active_codes:
+        sub_type = None
 
     # Sanitize country_iso: must be exactly 2 uppercase ASCII letters
     raw_iso = parsed.get("country_iso") or ""

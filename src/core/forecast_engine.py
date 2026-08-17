@@ -9,6 +9,7 @@ and Watchlist / Emerging Concern classification.
 import math
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from src.core.source_credibility import get_source_credibility  # noqa: F401
 
 # Profile-based modifiers for event types
 PROFILE_MULTIPLIERS = {
@@ -61,35 +62,6 @@ DEFAULT_WEIGHTS = {
     "w_cross_domain": 0.05,
     "w_critical": 0.05
 }
-
-# Credibility mapping for domain confidence
-SOURCE_CREDIBILITY = {
-    "reuters.com": 1.0,
-    "apnews.com": 1.0,
-    "afp.com": 1.0,
-    "bbc.com": 1.0,
-    "bbc.co.uk": 1.0,
-    "nitter.net": 0.8,
-    "reddit.com": 0.5
-}
-
-
-def get_source_credibility(domain: str) -> float:
-    """Resolve credibility multiplier with sub-domain fallback."""
-    if not domain:
-        return 0.6
-    domain = domain.lower().strip()
-    if domain in SOURCE_CREDIBILITY:
-        return SOURCE_CREDIBILITY[domain]
-    
-    parts = domain.split('.')
-    if len(parts) > 2:
-        parent = ".".join(parts[-2:])
-        if parent in SOURCE_CREDIBILITY:
-            return SOURCE_CREDIBILITY[parent]
-            
-    return 0.6
-
 
 def calculate_tension_index(
     events: List[Dict[str, Any]],

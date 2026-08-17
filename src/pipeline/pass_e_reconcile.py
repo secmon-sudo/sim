@@ -50,7 +50,7 @@ def _anchor_country(db_conn, iata_code: str) -> str | None:
     return row[0] if row and row[0] else None
 
 
-def reconcile_single_event(db_conn, event_id: str) -> bool:
+def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
     """
     Reconcile a single scored event.
 
@@ -71,7 +71,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         ).fetchone()
 
         if not row:
-            return False
+            return False, False
 
         event_id = str(row[0])
         event_type = row[1]
@@ -215,7 +215,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                         "(Pass E does not dispatch)",
                         event_id[:8], current_tier or "none", new_tier,
                     )
-                return True
+                return True, True
 
         # No upgrade — just mark as reconciled
         with db_conn.transaction():
@@ -226,7 +226,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
                 (event_id,),
             )
         db_conn.commit()
-        return True
+        return True, False
 
     except Exception:
         try:
@@ -234,7 +234,7 @@ def reconcile_single_event(db_conn, event_id: str) -> bool:
         except Exception:
             pass
         logger.exception("Error reconciling event %s", event_id)
-        return False
+        return False, False
 
 
 def run_pass_e(db_conn) -> dict:
@@ -256,9 +256,16 @@ def run_pass_e(db_conn) -> dict:
         ).fetchall()
 
         for row in rows:
-            result = reconcile_single_event(db_conn, str(row[0]))
-            if result:
+            # anchor_upgrades was initialised and then never touched: the function
+            # returned a bare bool, so the counter read 0 on every run since Pass E
+            # existed. That is the same shape of blindness the upgrade path itself
+            # had — the mechanism was repaired on 2026-08-17 and would still have
+            # reported nothing.
+            ok, upgraded = reconcile_single_event(db_conn, str(row[0]))
+            if ok:
                 stats["events_reconciled"] += 1
+                if upgraded:
+                    stats["anchor_upgrades"] += 1
             else:
                 stats["events_failed"] += 1
 

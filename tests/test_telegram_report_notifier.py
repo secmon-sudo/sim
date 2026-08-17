@@ -41,7 +41,7 @@ def _send(digest):
     ok = MagicMock()
     ok.json.return_value = {"ok": True, "result": {"message_id": 5}}
     with patch("src.services.telegram_report_notifier._post_telegram", return_value=ok) as post, \
-         patch("src.services.telegram_report_notifier.httpx.post", return_value=ok):
+         patch("src.services.telegram_report_notifier.send_telegram_document", return_value=ok):
         send_digest_telegram(digest, "2026-07-22 09:59", "2026-07-23 09:59", "<html></html>")
     return post.call_args.args[1]["text"]
 
@@ -145,7 +145,7 @@ class TestDispatchRobustness:
         doc.json.return_value = {"ok": True, "result": {"message_id": 9}}
         with patch("src.services.telegram_report_notifier._post_telegram",
                    side_effect=RuntimeError("bad request")), \
-             patch("src.services.telegram_report_notifier.httpx.post",
+             patch("src.services.telegram_report_notifier.send_telegram_document",
                    return_value=doc) as post_doc:
             send_digest_telegram(_digest(), "2026-07-22", "2026-07-23", "<html></html>")
         post_doc.assert_called_once()
@@ -154,9 +154,11 @@ class TestDispatchRobustness:
         ok = MagicMock()
         ok.json.return_value = {"ok": True, "result": {"message_id": 1}}
         with patch("src.services.telegram_report_notifier._post_telegram", return_value=ok), \
-             patch("src.services.telegram_report_notifier.httpx.post", return_value=ok) as doc:
+             patch("src.services.telegram_report_notifier.send_telegram_document", return_value=ok) as doc:
             send_digest_telegram(_digest(), "2026-07-22 09:59", "2026-07-23 09:59", "<html></html>")
-        filename = doc.call_args.kwargs["files"]["document"][0]
+        # Document uploads go through the retrying helper now, which takes the
+        # filename directly instead of an httpx files= tuple.
+        filename = doc.call_args.kwargs["filename"]
         assert filename == "brifing_20260723.html"
 
     def test_empty_countries_does_not_crash(self):

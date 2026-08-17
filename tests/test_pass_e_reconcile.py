@@ -73,7 +73,11 @@ def _upgrade(row):
          patch.object(pe, "compute_severity", return_value=100), \
          patch.object(pe, "apply_safety_downrank", side_effect=lambda t, s, p: (s, False)), \
          patch.object(pe, "compute_confidence", return_value=0.7):
-        assert pe.reconcile_single_event(conn, "evt") is True
+        ok, upgraded = pe.reconcile_single_event(conn, "evt")
+        # The second element is what makes anchor_upgrades observable — it read 0
+        # on every run until 2026-08-17 because the function only returned success.
+        assert ok is True
+        assert upgraded is True
     return conn
 
 

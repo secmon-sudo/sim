@@ -150,7 +150,7 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
                       return_value={"fetched": 0, "inserted": 0, "updated": 0}), \
          patch.object(orchestrator, "run_run_snapshot", return_value={"skipped": "smoke"}), \
          patch("src.pipeline.pass_d_score.send_telegram_alert", fake_telegram), \
-         patch("src.services.telegram_report_notifier.httpx", MagicMock()), \
+         patch("src.services.telegram_report_notifier.send_telegram_document", MagicMock()), \
          patch("src.services.ops_notifier.send_ops_alert", MagicMock(return_value=True)):
         results = orchestrator.run_pipeline()
 

@@ -34,6 +34,38 @@ def _post_telegram(api_url: str, payload: dict) -> httpx.Response:
     resp.raise_for_status()
     return resp
 
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1.5, min=2, max=20),
+    retry=retry_if_exception(_is_retryable_http_error),
+    reraise=True
+)
+def send_telegram_document(api_url: str, data: dict, buffer, filename: str,
+                           content_type: str = "text/html",
+                           timeout: float = 30.0) -> httpx.Response:
+    """sendDocument with the same retry contract as _post_telegram.
+
+    The document uploads were calling httpx.post directly — the call site even said
+    so: "Using Tenacity retry wrapper in _post_telegram but for files we can do it
+    directly". A 429 or a transient 502 therefore lost the HTML report silently while
+    the summary message that preceded it went through, leaving a run that looks
+    delivered and is missing its actual deliverable.
+
+    The seek(0) is inside the retried body on purpose. httpx consumes the buffer while
+    uploading, and tenacity re-invokes with the same arguments — rewinding outside
+    would post zero bytes on the second attempt and "succeed" with an empty report
+    attached, which is worse than the failure it was meant to fix.
+    """
+    buffer.seek(0)
+    resp = httpx.post(
+        api_url, data=data,
+        files={"document": (filename, buffer, content_type)},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp
+
 TIER_EMOJIS = {
     "CRITICAL": "🔴",
     "ALERT": "🟠",

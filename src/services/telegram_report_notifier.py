@@ -16,9 +16,8 @@ import re
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
-import httpx
 from src.core.storyline import strip_date_hint
-from src.services.telegram_notifier import _post_telegram
+from src.services.telegram_notifier import _post_telegram, send_telegram_document
 
 logger = logging.getLogger(__name__)
 
@@ -325,11 +324,11 @@ def send_weekly_report_telegram(
         
         # We need a separate post call to send multipart file
         # Using Tenacity retry wrapper in _post_telegram but for files we can do it directly:
-        resp_doc = httpx.post(
+        resp_doc = send_telegram_document(
             api_url_doc,
             data={"chat_id": chat_id, "caption": f"Weekly Risk Bulletin ({week_start} / {week_end})"},
-            files={"document": (filename, file_buffer, "text/html")},
-            timeout=20.0
+            buffer=file_buffer,
+            filename=filename,
         )
         resp_doc.raise_for_status()
         logger.info("Weekly HTML report document dispatched successfully.")
@@ -454,12 +453,12 @@ def send_sitrep_telegram(
         filename = f"sitrep_{country_iso}_{date_tag}.html"
 
         api_url_doc = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-        resp_doc = httpx.post(
+        resp_doc = send_telegram_document(
             api_url_doc,
             data={"chat_id": chat_id,
                   "caption": f"SITREP {country_name} ({window_start} — {window_end} UTC)"},
-            files={"document": (filename, file_buffer, "text/html")},
-            timeout=20.0
+            buffer=file_buffer,
+            filename=filename,
         )
         resp_doc.raise_for_status()
         logger.info("SITREP document dispatched for %s.", country_iso)
@@ -547,12 +546,12 @@ def send_digest_telegram(
     try:
         file_buffer = io.BytesIO(html_doc.encode("utf-8"))
         date_tag = window_end[:10].replace("-", "")
-        resp_doc = httpx.post(
+        resp_doc = send_telegram_document(
             f"https://api.telegram.org/bot{bot_token}/sendDocument",
             data={"chat_id": chat_id,
                   "caption": f"Günlük Yönetici Brifingi ({window_start} — {window_end} UTC)"},
-            files={"document": (f"brifing_{date_tag}.html", file_buffer, "text/html")},
-            timeout=20.0,
+            buffer=file_buffer,
+            filename=f"brifing_{date_tag}.html",
         )
         resp_doc.raise_for_status()
         logger.info("Digest document dispatched.")

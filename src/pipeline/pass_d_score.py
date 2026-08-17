@@ -23,6 +23,7 @@ from src.core.alerts import (
     suppression_blocks,
     tier_rank,
 )
+from src.core.source_credibility import SOURCE_CREDIBILITY
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.geo import geo_coords
 from src.core.storyline import (
@@ -39,49 +40,6 @@ logger = logging.getLogger(__name__)
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 with open(_CONFIG_DIR / "settings.json", encoding="utf-8") as f:
     _SETTINGS = json.load(f)
-
-SOURCE_CREDIBILITY = {
-    "reuters.com": 1.0,
-    "bbc.co.uk": 0.95,
-    "defense.gov": 0.95,
-    "timesofisrael.com": 0.95,
-    "jpost.com": 0.95,
-    "haaretz.com": 0.95,
-    "ynetnews.com": 0.95,
-    "breakingdefense.com": 0.90,
-    "militarytimes.com": 0.90,
-    "warontherocks.com": 0.90,
-    "longwarjournal.org": 0.90,
-    "centcom.mil": 0.95,
-    "cnn.com": 0.90,
-    "foxnews.com": 0.90,
-    "wsj.com": 0.95,
-    "nytimes.com": 0.95,
-    "dropsitenews.com": 0.85,
-    "presstv.ir": 0.85,
-    "nitter.net": 0.80,
-    "nitter.privacydev.net": 0.80,
-    "nitter.poast.org": 0.80,
-    "reddit.com": 0.50,
-    "aljazeera.com": 0.90,
-    "crisisgroup.org": 0.92,
-    "bellingcat.com": 0.90,
-    "thecipherbrief.com": 0.88,
-    "foreignpolicy.com": 0.90,
-    "defenseone.com": 0.90,
-    "twz.com": 0.85,
-    "defensenews.com": 0.90,
-    "al-monitor.com": 0.85,
-    "themoscowtimes.com": 0.85,
-    "meduza.io": 0.85,
-    "warsawinstitute.org": 0.82,
-    "un.org": 0.95,
-    "bbc.com": 0.95,
-    "jamestown.org": 0.88,
-    "thesoufancenter.org": 0.88,
-    "ctc.westpoint.edu": 0.92,
-    "counterextremism.com": 0.85,
-}
 
 _SCORING = _SETTINGS.get("scoring", {})
 PROXIMITY_BONUS = _SCORING.get("proximity_bonus", 30)
