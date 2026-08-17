@@ -63,7 +63,7 @@
   },
   "narrative": {
     "enabled": true,
-    "min_severity": 65,
+    "min_severity": 62,
     "min_events": 2,
     "max_per_run": 10,
     "lookback_days": 14
@@ -218,7 +218,7 @@
     "max_clusters_in_prompt": 25,
     "narrative_max_tokens": 6000,
     "snippet_chars": 600,
-    "high_severity_override": 80,
+    "high_severity_override": 68,
     "aviation_selection_min": 1,
     "airspace_enabled": true,
     "airspace_radius_km": 300,

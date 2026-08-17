@@ -42,11 +42,23 @@ class TestComputeRiskLevel:
         assert compute_risk_level(95, 20, confirmed_severe=1) == RISK_HIGH
 
     def test_bands(self):
-        assert compute_risk_level(80, 1) == RISK_ELEVATED
-        assert compute_risk_level(65, 5) == RISK_ELEVATED
-        assert compute_risk_level(65, 4) == RISK_NORMAL
+        """Points re-derived 2026-08-17 with the severity catalog compression.
+
+        These were 80/65/65/59 on the saturated scale, where an event type could
+        reach the ceiling on its label alone. The bands moved with the scale, so the
+        test moved with them — same positions relative to the thresholds, mapped
+        through the same compression (80->68, 65->62, 59->59).
+        """
+        assert compute_risk_level(68, 1) == RISK_ELEVATED
+        assert compute_risk_level(62, 5) == RISK_ELEVATED
+        assert compute_risk_level(62, 4) == RISK_NORMAL
         assert compute_risk_level(59, 20) == RISK_NORMAL
         assert compute_risk_level(0, 0) == RISK_NORMAL
+
+    def test_severe_band_still_separates(self):
+        """The compression must not collapse HIGH into ELEVATED."""
+        assert compute_risk_level(71, 1) == RISK_HIGH
+        assert compute_risk_level(70, 1) == RISK_ELEVATED
 
 
 class TestBuildDigestInputs:

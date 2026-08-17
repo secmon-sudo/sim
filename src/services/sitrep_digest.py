@@ -36,7 +36,15 @@ RISK_NORMAL = "Normal"
 RISK_ORDER = {RISK_CRITICAL: 3, RISK_HIGH: 2, RISK_ELEVATED: 1, RISK_NORMAL: 0}
 
 # Severity at which a cluster counts as "severe" for risk tiering.
-SEVERE_SEVERITY = 90
+#
+# Re-derived 2026-08-17 when the severity catalog was compressed (bases above 60
+# squeezed into the room under 75, so the ceiling stopped being reachable on an event
+# type alone). These bands were calibrated against the saturated scale, where 64% of
+# scored events sat at exactly 100. Left at 90/70/60 they would have quietly demoted
+# every country a tier — the digest's risk label is the one number a reader takes at a
+# glance, and it would have said the world got calmer on the day we changed a
+# constant. The values below are the same points mapped through that compression.
+SEVERE_SEVERITY = 71
 
 # Digest section headers, in render order. The prompt emits exactly these lines.
 H_OVERVIEW = "GENEL DURUM DEĞERLENDİRMESİ"
@@ -66,9 +74,9 @@ def compute_risk_level(max_severity: int, cluster_count: int,
     """
     if confirmed_severe >= 3 or (confirmed_severe >= 2 and cluster_count >= 10):
         return RISK_CRITICAL
-    if confirmed_severe >= 1 or max_severity >= 90:
+    if confirmed_severe >= 1 or max_severity >= SEVERE_SEVERITY:
         return RISK_HIGH
-    if max_severity >= 70 or (max_severity >= 60 and cluster_count >= 5):
+    if max_severity >= 64 or (max_severity >= 60 and cluster_count >= 5):
         return RISK_ELEVATED
     return RISK_NORMAL
 
