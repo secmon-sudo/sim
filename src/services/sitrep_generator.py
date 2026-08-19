@@ -39,7 +39,16 @@ SITREP_CFG: Dict[str, Any] = _SETTINGS.get("sitrep", {})
 WINDOW_HOURS = int(SITREP_CFG.get("window_hours", 24))
 MAX_COUNTRIES_PER_RUN = int(SITREP_CFG.get("max_countries_per_run", 5))
 MIN_EVENTS_THRESHOLD = int(SITREP_CFG.get("min_events_threshold", 3))
-MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 25))
+# How many ranked clusters the narrative prompt is allowed to carry. NOT a cap on
+# the day's record — the appendix, events_json and the stat cards always hold every
+# cluster (see cap_for_prompt). Lowered 25 -> 18 on 2026-08-19 because the model
+# silently rations coverage as the payload grows rather than writing a longer report:
+# over the eight days to 19 Aug, countries under the cap were narrated near-whole,
+# while every country that hit 25 lost bullets, UA on 19 Aug worst at 9 of 25 (7.6K
+# characters against 13.1K the day before, and no truncation — the completion ended
+# on its own). Spillover is capped by the same constant and rides in the SAME prompt,
+# so the real payload was up to 2x this number.
+MAX_CLUSTERS_IN_PROMPT = int(SITREP_CFG.get("max_clusters_in_prompt", 18))
 # Completion budget for the narrative. It used to be a hard-coded 4000, which a
 # busy country blows straight through: the model spends most of its output on the
 # per-bullet citation lists (one UA bullet carried 14 URLs), so an active-conflict

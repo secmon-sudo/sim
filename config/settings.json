@@ -216,7 +216,7 @@
     "window_hours": 24,
     "max_countries_per_run": 5,
     "min_events_threshold": 3,
-    "max_clusters_in_prompt": 25,
+    "max_clusters_in_prompt": 18,
     "narrative_max_tokens": 6000,
     "snippet_chars": 600,
     "high_severity_override": 68,
