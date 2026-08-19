@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -123,16 +124,48 @@ def resolve_url(url: str, timeout: float = 6.0) -> str:
     return url
 
 
-def resolve_cluster_urls(clusters: List[Dict[str, Any]], max_resolve: int = 20) -> None:
-    """In-place: replace Google News redirect links in cluster sources."""
+# The old budget of 20 was set blind and it bound on the busiest countries, which
+# are exactly the ones a reader opens: Lebanon on 16 Aug and Ukraine on 19 Aug both
+# carried 96 sources and finished with 23 and 15 unresolved Google News links in the
+# appendix. Resolution is cheap — 5 of 5 sampled links resolved on 2026-08-19 at a
+# mean of 0.30s — so the budget, not the cost, was the constraint.
+#
+# It is raised, but NOT to unbounded, and a wall-clock deadline is added beside it:
+# per-request timeouts do not bound total time when the slow path is many requests
+# each landing just under the limit (the lesson from the Pass C wall-clock ceiling).
+# 60 links at the observed 0.30s is ~18s; the deadline is what protects the SITREP
+# step on a day when Google is slow instead.
+DEFAULT_MAX_RESOLVE = 60
+DEFAULT_RESOLVE_DEADLINE_S = 45.0
+
+
+def resolve_cluster_urls(clusters: List[Dict[str, Any]],
+                         max_resolve: int = DEFAULT_MAX_RESOLVE,
+                         deadline_seconds: float = DEFAULT_RESOLVE_DEADLINE_S) -> None:
+    """In-place: replace Google News redirect links in cluster sources.
+
+    Stops on whichever limit is reached first. Unresolved links are left as they
+    are — a Google News redirect is a poor citation, but it is a working one.
+    """
     budget = max_resolve
+    give_up_at = time.monotonic() + deadline_seconds
+    attempted = resolved = 0
     for cluster in clusters:
         for source in cluster.get("sources", []):
-            if budget <= 0:
-                return
             u = source.get("url") or ""
-            if "news.google.com" in u:
-                budget -= 1
-                source["url"] = resolve_url(u)
+            if "news.google.com" not in u:
+                continue
+            if budget <= 0 or time.monotonic() >= give_up_at:
+                logger.info(
+                    "Google News resolution stopped early (%s): %d/%d resolved",
+                    "budget" if budget <= 0 else "deadline", resolved, attempted,
+                )
+                return
+            budget -= 1
+            attempted += 1
+            source["url"] = resolve_url(u)
+            resolved += "news.google.com" not in source["url"]
+    if attempted:
+        logger.info("Google News resolution: %d/%d resolved", resolved, attempted)
 
 

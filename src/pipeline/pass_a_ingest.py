@@ -125,6 +125,28 @@ def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list
 # upgrade; beyond that more entries add bytes, not information.
 _MAX_CORROBORATING_SOURCES = 5
 
+# A cut URL is not a shorter link, it is a broken one. Google News RSS links run
+# past a thousand characters (max measured 1,054 over four days) and the old
+# blanket dup_url[:500] sliced straight through the base64 article id, so the
+# resolver could not decode it and the SITREP appendix rendered a dead citation.
+# Measured 2026-08-19: 19 of the 51 Google News URLs across four days of SITREPs
+# were mangled this way, while events.source_url — which is never sliced — held
+# all 533 of them intact.
+#
+# The ceiling stays, because corroborating_sources is inline JSONB on a table
+# already at 284 MB and an unbounded string there is a row-size risk. But over it
+# we store NO url rather than a broken one: the corroboration SIGNAL is the
+# domain (that is what CORROBORATION_ALERT_MIN counts), and every consumer of
+# these entries already skips a missing url.
+_MAX_SOURCE_URL_CHARS = 2048
+
+
+def _citable_url(url: str | None) -> str | None:
+    """The URL if it survives whole, else None — never a truncated one."""
+    url = (url or "").strip()
+    return url if url and len(url) <= _MAX_SOURCE_URL_CHARS else None
+
+
 
 def _record_corroboration(db_conn, event_id, event_domain: str,
                           dup_domain: str, dup_url: str, dup_title: str) -> bool:
@@ -151,7 +173,7 @@ def _record_corroboration(db_conn, event_id, event_domain: str,
         return False
     if registrable_domain(dup_domain) == registrable_domain(event_domain or ""):
         return False
-    entry = json.dumps([{"domain": dup_domain, "url": dup_url[:500],
+    entry = json.dumps([{"domain": dup_domain, "url": _citable_url(dup_url),
                          "title": (dup_title or "")[:200],
                          "seen_at": datetime.now(timezone.utc).isoformat()}])
     probe = json.dumps([{"domain": dup_domain}])
