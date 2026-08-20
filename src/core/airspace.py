@@ -29,6 +29,7 @@ deliberately not good enough to navigate by.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -68,6 +69,18 @@ AIRSPACE_MAX_AIRPORTS = int(_SITREP_CFG.get("airspace_max_airports", 6))
 # How many of a country's FIRs to name when an event could not be placed.
 COUNTRY_FIR_LIST_LIMIT = int(_SITREP_CFG.get("airspace_country_fir_limit", 8))
 
+# Events that are ABOUT aviation, rather than events whose geography merely bears
+# on it (see AIRSPACE_THREAT_EVENT_TYPES below, which subsumes these). Mirrors
+# pass_d_score.AVIATION_EVENT_TYPES (kept as a copy so this core module stays free
+# of a pipeline import, same reason `flight_disruption_check` is injected).
+AVIATION_SPECIFIC_EVENT_TYPES = {
+    "airspace_closure", "drone_airport_attack", "drone_incursion", "hijacking",
+    "air_traffic_controller_threat", "aviation_personnel_attack",
+    "pilot_attacked", "cabin_crew_attacked", "ground_staff_attacked",
+    "laser_attack",
+}
+
+
 # Event types whose geography plausibly bears on airspace: anything that puts
 # ordnance, drones or debris in the air, plus the aviation-specific codes. A
 # cluster outside this set still qualifies if its text trips the production
@@ -105,6 +118,10 @@ AIRSPACE_THREAT_EVENT_TYPES = {
     "vehicle_ramming",
     "bomb_threat",
 }
+# Aviation-native types belong here too — `airspace_closure` in particular, which
+# was added to the taxonomy after this set was written and until now only earned a
+# card when its free text happened to trip the flight-disruption gate.
+AIRSPACE_THREAT_EVENT_TYPES |= AVIATION_SPECIFIC_EVENT_TYPES
 # Deliberately NOT here: emergency_landing, bird_strike, engine_failure,
 # depressurization, fire_on_board, runway_incursion. Those are technical/safety
 # occurrences, which the SITREP prompt already excludes from the narrative — an
@@ -182,11 +199,25 @@ def country_airports(country_iso: str,
     ]
 
 
+# An anchor string only resolves to an airport when it SAYS it is one. Without
+# this the city half of the gazetteer matched any venue in the same city — a
+# 2026-08-20 US SITREP placed the New York Central Synagogue assault at JFK
+# because "new york" is JFK's city field, then reported the nearest commercial
+# airport as "JFK, 0 km". A bare city name belongs to the city gazetteer above,
+# which returns the city centre and an honest distance.
+_AVIATION_PLACE_RE = re.compile(
+    r"\b(airport|airports|airfield|aerodrome|airbase|air base|air force base|"
+    r"havaliman|havaalan)", re.IGNORECASE
+)
+
+
 def _airport_by_location_name(text: str,
                               country_iso: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Match an anchor string like 'Rzeszów–Jasionka Airport' to a known airport."""
     low = (text or "").strip().lower()
     if len(low) < 3:
+        return None
+    if not _AVIATION_PLACE_RE.search(low):
         return None
     iso = (country_iso or "").strip().upper()
     pool = _AIRPORTS_BY_COUNTRY.get(iso, []) if iso else AIRPORTS
@@ -236,6 +267,16 @@ def is_airspace_relevant(cluster: Dict[str, Any], flight_disruption_check=None) 
     stays identical to the one used at ingest.
     """
     if (cluster.get("event_type") or "") in AIRSPACE_THREAT_EVENT_TYPES:
+        return True
+    if flight_disruption_check is None:
+        return False
+    blob = f"{cluster.get('snippet') or ''} {cluster.get('location') or ''}"
+    return bool(flight_disruption_check(blob))
+
+
+def is_aviation_specific(cluster: Dict[str, Any], flight_disruption_check=None) -> bool:
+    """Whether the cluster is about aviation itself, not merely near it."""
+    if (cluster.get("event_type") or "") in AVIATION_SPECIFIC_EVENT_TYPES:
         return True
     if flight_disruption_check is None:
         return False
@@ -371,6 +412,22 @@ def build_airspace_assessment(clusters: List[Dict[str, Any]], country_iso: str,
         # A country-scope card adds nothing once a located event already put a
         # card on that same FIR — it would repeat the airspace with less detail.
         if assessment["scope"] == "country" and icao in seen_firs:
+            continue
+        # ...nor when it has nothing to say in the first place. An unlocatable
+        # NON-aviation event over unrestricted airspace yields "we could not place
+        # this, here are the country's FIRs" — which the narrator dutifully writes
+        # up: the 2026-08-20 US report spent a paragraph explaining that the
+        # country is run by 23 ARTCCs and the nearest airports could not be
+        # determined. Keep the card when the event is itself about aviation (an
+        # airport closure still concerns the reader) or when a restriction is
+        # actually in force over the country (Ukraine's standing CZIB is the
+        # single most useful line in that report).
+        if assessment["scope"] == "country" and not (
+            is_aviation_specific(cluster, _is_flight_disruption)
+            or any(f.get("czib_active") for f in (assessment.get("firs") or []))
+        ):
+            logger.debug("Skipping uninformative country-scope airspace card for %r",
+                         cluster.get("location"))
             continue
         # One card per place: repeated shelling of the same city is one airspace
         # picture, and five identical FIR/airport lists would bury the report.

@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from src.core.airspace import summarize_assessment
+from src.core.airspace import is_aviation_specific, summarize_assessment
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL
@@ -81,6 +81,41 @@ def compute_risk_level(max_severity: int, cluster_count: int,
     return RISK_NORMAL
 
 
+# Turkish one-liners for the fallback bullets, by cluster type. Deliberately
+# flat: the fallback exists to stop the section reading "YOK" when a closure is in
+# the record, not to compete with the narrative the model should have written.
+_AVIATION_FALLBACK_LABEL = {
+    "airspace_closure": "hava sahası/uçuş kesintisi bildirildi",
+    "drone_airport_attack": "havalimanına İHA saldırısı bildirildi",
+    "drone_incursion": "hava sahasında İHA ihlali bildirildi",
+    "hijacking": "uçak kaçırma girişimi bildirildi",
+    "aviation_personnel_attack": "havacılık personeline saldırı bildirildi",
+    "air_traffic_controller_threat": "hava trafik kontrolüne yönelik tehdit bildirildi",
+}
+_AVIATION_FALLBACK_DEFAULT = "havacılığı doğrudan etkileyen gelişme bildirildi"
+
+
+def aviation_clusters(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The country's clusters that are ABOUT aviation, by the production gate.
+
+    The digest's aviation section used to depend entirely on the model noticing a
+    closure inside 3,500 characters of country narrative. On 2026-08-20 it did not:
+    Aspen airport had suspended all flights over a wildfire, the model wrote that
+    into its US country line, and still put "YOK" under the aviation heading. This
+    list is computed from the same clusters the country report was built from, so
+    the section can be checked — and, if the model still misses it, filled.
+    """
+    from src.pipeline.ingest_filters import _is_flight_disruption
+    return [c for c in clusters if is_aviation_specific(c, _is_flight_disruption)]
+
+
+def _aviation_fallback_line(name: str, cluster: Dict[str, Any]) -> str:
+    label = _AVIATION_FALLBACK_LABEL.get(
+        cluster.get("event_type") or "", _AVIATION_FALLBACK_DEFAULT)
+    where = (cluster.get("location") or "").strip() or name
+    return f"{name}: {where} — {label} (ayrıntı ülke raporunda)."
+
+
 def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Shape completed country runs into digest input rows, highest risk first.
@@ -109,6 +144,9 @@ def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str,
             # src/core/airspace.py — fed to the model as fact and re-appended
             # after parsing so it survives a narrative that drops it.
             "airspace_summary": summarize_assessment(res.get("airspace")),
+            # Deterministic; see aviation_clusters(). Fed to the prompt as a
+            # checklist and used as the fallback when the model ignores it.
+            "aviation_candidates": aviation_clusters(clusters),
         })
     rows.sort(key=lambda r: (-RISK_ORDER[r["risk"]], -r["max_severity"]))
     return rows
@@ -136,6 +174,10 @@ _SYSTEM_PROMPT = (
     "havalimanı saldırıya uğradı veya kapandı, hangi hava sahası kime kapandı. "
     "Havayolunun ve havalimanının adını yaz. Raporlarda bu tür bir bilgi yoksa tek "
     "kelime yaz: YOK\n"
+    "Ülke bloklarında '[HAVACILIK ADAYLARI]' satırı varsa, o ülkenin gününde "
+    "havacılığı doğrudan ilgilendiren en az bir kayıt VAR demektir: bu bölüm o zaman "
+    "'YOK' OLAMAZ. Adayları ülke raporundaki anlatımdan doğrulayıp kendi cümlenle "
+    "yaz; aday listesi bir kaynak değil, kontrol listesidir.\n"
     "Ülke bloklarındaki '[HAVA SAHASI (sistem hesabı)]' satırı haber değil, sistemin "
     "olay koordinatından hesapladığı FIR/havalimanı yakınlık bilgisidir. Bu satırı "
     "buraya kopyalama — sistem onu zaten ayrıca ekliyor; yalnızca haberlerden gelen "
@@ -168,6 +210,13 @@ def run_digest_llm(router: LLMRouter, rows: List[Dict[str, Any]],
     blocks = []
     for r in rows:
         block = f"=== ÜLKE: {r['name']} ({r['iso']}) ===\n{r['report_text']}"
+        candidates = r.get("aviation_candidates") or []
+        if candidates:
+            listed = "; ".join(
+                f"{(c.get('location') or '?').strip()} ({c.get('event_type') or '?'})"
+                for c in candidates[:5]
+            )
+            block += f"\n[HAVACILIK ADAYLARI]: {listed}"
         if r.get("airspace_summary"):
             block += f"\n[HAVA SAHASI (sistem hesabı)]: {r['airspace_summary']}"
         blocks.append(block)
@@ -274,6 +323,19 @@ def build_digest(router: LLMRouter, country_results: List[Dict[str, Any]],
                 "text": "Ayrıntı için ülke raporuna bakınız.",
             })
     parsed["countries"].sort(key=lambda c: -RISK_ORDER.get(c["risk"], 0))
+
+    # The model was handed the aviation checklist and still left the section empty:
+    # fill it from the record rather than publishing "YOK" over a closure. Flat
+    # deterministic lines, so a reader can tell them from written analysis.
+    if not parsed.get("aviation"):
+        fallback = [
+            _aviation_fallback_line(r["name"], c)
+            for r in rows for c in (r.get("aviation_candidates") or [])[:3]
+        ]
+        if fallback:
+            logger.warning("Digest aviation section came back empty over %d aviation "
+                           "cluster(s); filling deterministically", len(fallback))
+            parsed["aviation"] = fallback
 
     # Deterministic airspace lines ride along in the aviation section: the HTML
     # renderer and the Telegram card already iterate that list, and appending

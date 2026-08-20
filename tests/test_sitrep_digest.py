@@ -1,7 +1,11 @@
 """Tests for the daily cross-country SITREP digest (src/services/sitrep_digest.py)."""
 
+from unittest import mock
+
 import pytest
 
+from src.core.sitrep_verify import LABEL_MULTI, LABEL_SINGLE
+from src.services import sitrep_digest
 from src.services.sitrep_digest import (
     RISK_CRITICAL,
     RISK_ELEVATED,
@@ -178,3 +182,83 @@ class TestBuildDigest:
                                 country("BH", severities=(10,))], "s", "e")
         by_iso = {c["iso"]: c["risk"] for c in d["countries"]}
         assert by_iso == {"IR": RISK_CRITICAL, "BH": RISK_NORMAL}
+
+
+class TestAviationSection:
+    """2026-08-20: Aspen airport suspended all flights over a wildfire, the US
+    country report carried it, the digest's own US line mentioned air-traffic
+    disruption — and the aviation section still said "YOK". The section is the
+    one part of this briefing its reader (an airline) is guaranteed to read.
+    """
+
+    def _row_results(self):
+        return [
+            {"country_iso": "US", "country_name": "ABD", "status": "completed",
+             "report_text": "YÖNETİCİ ÖZETİ\nAspen Havalimanı uçuşları durdurdu.",
+             "clusters": [
+                 {"location": "Aspen Airport", "event_type": "airspace_closure",
+                  "severity": 85, "snippet": "Aspen airport suspends all flights.",
+                  "verification": LABEL_MULTI},
+                 {"location": "Wilson Building", "event_type": "suspicious_package",
+                  "severity": 79, "snippet": "A package was found.",
+                  "verification": LABEL_SINGLE},
+             ]},
+            {"country_iso": "UA", "country_name": "Ukrayna", "status": "completed",
+             "report_text": "YÖNETİCİ ÖZETİ\nKiev'e füze saldırısı.",
+             "clusters": [{"location": "Kyiv", "event_type": "missile_strike",
+                           "severity": 100, "snippet": "Missiles hit Kyiv.",
+                           "verification": LABEL_MULTI}]},
+        ]
+
+    def test_aviation_clusters_picks_only_aviation(self):
+        rows = sitrep_digest.build_digest_inputs(self._row_results())
+        us = next(r for r in rows if r["iso"] == "US")
+        ua = next(r for r in rows if r["iso"] == "UA")
+        assert [c["location"] for c in us["aviation_candidates"]] == ["Aspen Airport"]
+        assert ua["aviation_candidates"] == []
+
+    def test_prompt_carries_the_checklist(self):
+        rows = sitrep_digest.build_digest_inputs(self._row_results())
+        captured = {}
+
+        def fake_call_llm(router, user_prompt, system_prompt, **kw):
+            captured["user"] = user_prompt
+            captured["system"] = system_prompt
+            return {"content": "x", "provider": "p", "model": "m"}
+
+        with mock.patch.object(sitrep_digest, "call_llm", fake_call_llm):
+            sitrep_digest.run_digest_llm(None, rows, "a", "b")
+        assert "[HAVACILIK ADAYLARI]: Aspen Airport (airspace_closure)" in captured["user"]
+        assert "'YOK' OLAMAZ" in captured["system"]
+
+    def test_empty_aviation_section_is_filled_from_the_record(self):
+        narrative = (
+            "GENEL DURUM DEĞERLENDİRMESİ\nGün yoğun geçti.\n"
+            "ÜLKE DEĞERLENDİRMELERİ\n- US | Havalimanı olayları trafiği aksattı.\n"
+            "- UA | Füze saldırıları sürdü.\n"
+            "HAVACILIK OPERASYONLARINA ETKİ\nYOK\n"
+            "KRİTİK GELİŞMELER\n- Kiev vuruldu.\n"
+            "İZLEME VE BEKLENTİLER\n- Tırmanma riski.\n"
+        )
+        with mock.patch.object(sitrep_digest, "call_llm",
+                               return_value={"content": narrative, "provider": "p",
+                                             "model": "m"}):
+            out = sitrep_digest.build_digest(None, self._row_results(), "a", "b")
+        assert out["aviation"], "aviation section must not stay empty over a closure"
+        assert any("Aspen Airport" in line for line in out["aviation"])
+
+    def test_model_written_bullets_are_left_alone(self):
+        narrative = (
+            "GENEL DURUM DEĞERLENDİRMESİ\nGün yoğun geçti.\n"
+            "ÜLKE DEĞERLENDİRMELERİ\n- US | Havalimanı olayları trafiği aksattı.\n"
+            "HAVACILIK OPERASYONLARINA ETKİ\n"
+            "- Aspen Havalimanı, orman yangını nedeniyle tüm uçuşları durdurdu.\n"
+            "KRİTİK GELİŞMELER\n- Kiev vuruldu.\n"
+            "İZLEME VE BEKLENTİLER\n- Tırmanma riski.\n"
+        )
+        with mock.patch.object(sitrep_digest, "call_llm",
+                               return_value={"content": narrative, "provider": "p",
+                                             "model": "m"}):
+            out = sitrep_digest.build_digest(None, self._row_results(), "a", "b")
+        assert out["aviation"][0].startswith("Aspen Havalimanı")
+        assert not any("ayrıntı ülke raporunda" in line for line in out["aviation"])

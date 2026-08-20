@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from src.core.airspace import compact_for_prompt
+from src.core.alerts import REPORT_KIND_NOT_NEWS, aftermath_kind
+from src.core.geo import places_disagree
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMRouter
 from src.core.sitrep_verify import (
@@ -95,6 +97,16 @@ _EVENT_COLUMNS = [
     "date_verified",
 ]
 
+# The classifier's read of what the ARTICLE is (Pass C, stored inside
+# llm_parsed_output). The alert gate has consulted it since 2026-08-11; the SITREP
+# did not, so an arrest made this week for a shooting in May arrived in the report
+# indistinguishable from a fresh incident (2026-08-20, US: two such items, one of
+# them headlining a section).
+# It lives inside a JSONB column, so the SELECT list and the column list differ by
+# this one entry; _rows_to_dicts zips the second, and both must end with it.
+_EVENT_COLUMNS_SQL = _EVENT_COLUMNS + ["llm_parsed_output->>'report_kind' AS report_kind"]
+_EVENT_COLUMNS = _EVENT_COLUMNS + ["report_kind"]
+
 # When an event has no estimated incident time, the window falls back to
 # published_at — which for a day-precision date is Pass A's END-OF-DAY sentinel
 # (23:59:59, ingest_sources.extract_date_from_url). That is a freshness
@@ -114,7 +126,7 @@ _EVENT_TIME_SQL = (
 )
 
 _EVENTS_SELECT = f"""
-    SELECT {", ".join(_EVENT_COLUMNS)}
+    SELECT {", ".join(_EVENT_COLUMNS_SQL)}
     FROM events
     WHERE severity_score IS NOT NULL
       AND status IN ('scored', 'reconciled', 'archived')
@@ -587,6 +599,26 @@ def _corroboration_weight(event: Dict[str, Any]) -> int:
     return 1 + len(event.get("corroborating_sources") or [])
 
 
+def _is_retrospective(event: Dict[str, Any]) -> bool:
+    """Whether this filing reports an EARLIER incident rather than a new one.
+
+    Same two signals the alert gate uses (src/core/alerts.py): the classifier's
+    verdict on the article, and the shape of the headline. An arrest, a verdict, a
+    funeral or a toll revision is a real thing that happened today — the SITREP is
+    the day's record and keeps it — but it is not a new incident, and a report that
+    presents it as one misstates the day.
+    """
+    if (event.get("report_kind") or "") in REPORT_KIND_NOT_NEWS:
+        return True
+    return aftermath_kind(event.get("source_title")) is not None
+
+
+def _cluster_is_retrospective(members: List[Dict[str, Any]]) -> bool:
+    """True only when EVERY member reads as a retrospective — one fresh filing in
+    the cluster means the incident itself is in the window."""
+    return bool(members) and all(_is_retrospective(e) for e in members)
+
+
 def build_sitrep_clusters(events: List[Dict[str, Any]],
                           penalized_domains: List[str]) -> List[Dict[str, Any]]:
     """
@@ -651,6 +683,28 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
                     seen_corrob_domains.add(dom)
                     corroborating.append(s)
 
+        # Corroboration is credited at ingest on text similarity, so a headline
+        # about a DIFFERENT city can be attached to this incident (2026-08-20: an
+        # apa.az filing on the Kharkiv region strike was cited under the Kyiv
+        # cluster, next to Bloomberg, and counted toward "Onaylandı (Çoklu
+        # kaynak)"). ingest_filters now vetoes that match, but rows written before
+        # the fix stay in the corroboration column for the retention window, and
+        # the reader sees this list, not the ingest decision. Second guard, same
+        # rule: only mutual, disjoint place claims drop a source.
+        cluster_place_text = " ".join(
+            [(e.get("anchor_name_raw") or "") for e in members]
+            + [(rep.get("source_title") or "")]
+        )
+        kept_corroborating = []
+        for s in corroborating:
+            if places_disagree(cluster_place_text, s.get("title")):
+                logger.info("Dropped off-place corroboration %s from cluster %r: %.80s",
+                            s.get("domain"), (rep.get("anchor_name_raw") or "?"),
+                            s.get("title") or "")
+                continue
+            kept_corroborating.append(s)
+        corroborating = kept_corroborating
+
         sources = [
             {
                 "name": registrable_domain(e.get("source_domain") or e.get("source_url") or "") or "bilinmiyor",
@@ -694,11 +748,19 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
             "latitude": located.get("latitude") if located else None,
             "longitude": located.get("longitude") if located else None,
         }
+        if _cluster_is_retrospective(members):
+            cluster["kayit_turu"] = "olay_sonrasi"
         # Severity ties at 100 across every mass-casualty cluster, so it cannot
         # decide which one leads the report either. Break the tie on the same
         # evidence the representative was chosen with.
         deaths, casualties = _casualty_magnitude(rep)
-        ranked.append(((-cluster["severity"], -deaths, -casualties,
+        # Retrospectives rank last whatever their severity: an arrest for a May
+        # shooting inherits the shooting's score, and on 2026-08-20 two of them
+        # outranked live incidents into the prompt. The prompt asks the narrator to
+        # keep them out of the headline sections; the order it reads them in has to
+        # say the same thing. They are still in the list — this is the day's record.
+        ranked.append(((cluster.get("kayit_turu") == "olay_sonrasi",
+                        -cluster["severity"], -deaths, -casualties,
                         -len(members), -len(sources)), cluster))
 
     ranked.sort(key=lambda pair: pair[0])
@@ -826,6 +888,22 @@ _SYSTEM_PROMPT = (
     "değil. Yüksek önemli olayları ayrıntılı anlat; kalan düşük önemli kümeleri raporun "
     "sonunda 'DİĞER GELİŞMELER' başlığı altında birer maddeyle özetle. Hiçbir kümeyi "
     "sessizce atlama. Dekoratif ayraç satırı ('---', '***' vb.) yazma.\n\n"
+    "OLAY-SONRASI KAYITLAR ('kayit_turu': 'olay_sonrasi'): Bu kümedeki haberler YENİ "
+    "bir olayı değil, DAHA ÖNCE olmuş bir olayın devamını anlatır (gözaltı/tutuklama, "
+    "iddianame, duruşma, cenaze, otopsi, bilanço güncellemesi, yıldönümü derlemesi). "
+    "Kuralları:\n"
+    "- Bunları günün yeni gelişmesi gibi ANLATMA; cümlede olayın kendisinin daha önce "
+    "gerçekleştiğini açıkça belirt ('Mayıs ayında işlenen cinayetle ilgili şüpheli "
+    "gözaltına alındı' gibi).\n"
+    "- Bir bölümü bunlarla AÇMA ve bunları raporun ana başlıklarına taşıma; yerleri "
+    "raporun sonundaki 'DİĞER GELİŞMELER' bölümüdür.\n"
+    "- Can kaybı rakamlarını günün bilançosuna EKLEME.\n"
+    "BÖLÜM BAŞLIKLARI VE 'event_type': 'event_type' sınıflandırma etiketidir, olayın "
+    "büyüklüğü hakkında bir iddia DEĞİLDİR — 'mass_casualty_event' etiketli bir küme tek "
+    "ölümlü bir olay olabilir. Başlıkları etikete göre değil, kümelerin GERÇEK içeriğine "
+    "göre kur: 'KÜTLESEL KAYIP', 'KATLİAM' gibi bir başlığı yalnızca veride gerçekten "
+    "çok sayıda can kaybı varsa kullan; yoksa nötr bir başlık seç ('SİLAHLI ŞİDDET "
+    "OLAYLARI', 'ADLİ GELİŞMELER').\n\n"
     "VERİ SADAKATİ VE ATIF (kritik — bu hatalar raporu geçersiz kılar):\n"
     "- CAN KAYBI KAPSAMI: Ölü/yaralı sayısını yalnızca kaynağın o rakamı bağladığı olaya "
     "yaz. Kaynak kümülatif/toplu bir bilanço veriyorsa (ör. 'ülke genelindeki saldırılarda "

@@ -32,6 +32,8 @@ from src.pipeline.ingest_filters import (  # noqa: F401
     check_content_duplicate,
     compute_url_hash,
     extract_domain,
+    is_social_platform,
+    social_publisher_domain,
     find_content_duplicate,
     is_content_farm,
     is_noise,
@@ -326,6 +328,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "content_duplicates_skipped": 0,
         "domain_penalized": 0,
         "domain_capped": 0,
+        "social_publisher_resolved": 0,
+        "social_publisher_unresolved": 0,
         "corroborations_recorded": 0,
         "events_inserted": 0,
         "full_text_attempted": 0,
@@ -465,6 +469,28 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             domain = item["domain"]
         else:
             domain = extract_domain(url)
+        # A social platform is a carrier, not a publisher: Google News files a
+        # publisher's own post under the platform's domain, collapsing every outlet
+        # that posts there into one identity for corroboration, verification labels
+        # and penalties. Recover the publisher from the page slug where we know it.
+        # Google News links hide the slug behind a redirect, so those are resolved
+        # first — only for social items, which run about five a day.
+        if is_social_platform(domain):
+            social_url = url
+            if "news.google.com" in social_url:
+                from src.services.google_news_resolver import resolve_url
+                social_url = resolve_url(social_url) or social_url
+            publisher = social_publisher_domain(social_url)
+            if publisher:
+                stats["social_publisher_resolved"] += 1
+                logger.debug("Social post attributed to %s (was %s)", publisher, domain)
+                domain = publisher
+            else:
+                # Unrecognised page: keep the platform domain, which is what this
+                # item had before. Never invent an identity the corroboration count
+                # would then treat as an independent outlet.
+                stats["social_publisher_unresolved"] += 1
+
         # Scraped-content farms, rejected before any scoring can see them. Placed
         # after domain extraction because the check reads the domain, and before the
         # penalty gate because penalty_score is earned over time while this content

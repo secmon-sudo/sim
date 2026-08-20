@@ -39,6 +39,7 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "DNIPRO":    ["dnipro", "dnepropetrovsk", "dnipropetrovsk"],
     "LVIV":      ["lviv", "lvov"],
     "MYKOLAIV":  ["mykolaiv", "nikolaev"],
+    "KHERSON":   ["kherson", "khersonshchyna"],
     "MOSCOW":    ["moscow", "moskva"],
     "BELGOROD":  ["belgorod"],
     "GAZA":      ["gaza", "gaza strip"],
@@ -110,6 +111,41 @@ _CITY_ALIASES: dict[str, list[str]] = {
 _ALIAS_TO_CANON: dict[str, str] = {
     alias: canon for canon, aliases in _CITY_ALIASES.items() for alias in aliases
 }
+
+# Alias phrases as whole-word patterns, longest first so "gaza strip" wins over
+# "gaza". Used to scan free text (a headline) rather than a location field, which
+# is what `geo_key` expects.
+_ALIAS_SCAN_RE = re.compile(
+    r"\b(?:%s)\b" % "|".join(
+        re.escape(a) for a in sorted(_ALIAS_TO_CANON, key=len, reverse=True)
+    )
+)
+
+
+def place_keys(text: str | None) -> set[str]:
+    """Canonical city keys named anywhere in a free-text string.
+
+    Unlike `geo_key` this reads a whole sentence and returns EVERY place it
+    recognises, so two headlines can be compared on the geography they claim.
+    Only the curated gazetteer counts: an unrecognised place yields nothing,
+    which callers must read as "no opinion", never as "no place".
+    """
+    if not isinstance(text, str) or not text:
+        return set()
+    return {_ALIAS_TO_CANON[m.group(0)] for m in _ALIAS_SCAN_RE.finditer(_clean(text))}
+
+
+def places_disagree(text_a: str | None, text_b: str | None) -> bool:
+    """True when both texts name known places and share none of them.
+
+    The asymmetric case — one side names a city, the other names none — is NOT
+    disagreement: "Russian strike kills 12" is a legitimate retelling of "Russian
+    strike on Kyiv kills 12". Only two positive, disjoint claims count, which is
+    what makes this safe to use as a veto.
+    """
+    a, b = place_keys(text_a), place_keys(text_b)
+    return bool(a and b and not (a & b))
+
 
 # Country ISO -> canonical capital key, so "<country> capital" / "capital" phrasing
 # (common when a source avoids naming the city) collapses onto the real place.

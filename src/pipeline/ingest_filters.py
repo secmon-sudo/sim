@@ -15,6 +15,8 @@ from pathlib import Path
 
 import tldextract
 
+from src.core.geo import places_disagree
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
@@ -159,6 +161,74 @@ def is_content_farm(title: str | None, url: str | None = None,
     if url and _HASH_PATH_RE.search(url.split("?")[0]):
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Social platforms are carriers, not publishers
+# ---------------------------------------------------------------------------
+#
+# Google News indexes publishers' own social posts, and its <source url=> then names
+# the PLATFORM: 127 events over 30 days to 2026-08-19 were filed under "facebook.com".
+# The content is genuine — DW News, the New York Times, the Washington Post and
+# ABS-CBN posting their own stories — so this is a misattribution problem, not a junk
+# problem, and the items are worth keeping.
+#
+# It is not cosmetic, because source_domain is an IDENTITY that three decisions read:
+#   * _record_corroboration() refuses a duplicate whose registrable domain equals the
+#     survivor's, so an NYT post and a DW post both filed as facebook.com looked like
+#     one outlet republishing itself and their corroboration was never recorded;
+#   * the same collapse runs the other way — dw.com plus facebook.com/deutschewellenews
+#     counted as TWO independent domains for label_cluster(), inflating a single
+#     outlet into "Onaylandı (Çoklu kaynak)";
+#   * domain_penalties accrue against the platform as one undifferentiated blob.
+#
+# The publisher is recoverable: it is the page slug in the post URL. Pages that are
+# not in the map keep the platform domain — that is the behaviour they already had,
+# so an unrecognised page costs nothing, while a mapped one is repaired.
+_SOCIAL_PLATFORM_DOMAINS = {
+    "facebook.com", "twitter.com", "x.com", "instagram.com", "t.me", "threads.net",
+}
+
+# Facebook page slug → the publisher's real registrable domain. Built from the pages
+# actually seen in the corpus; extend it as new ones appear rather than guessing.
+# Deliberately NOT populated with commentators and aggregators (officialbenshapiro,
+# lonewolfnewsandmedia): they are not outlets, and mapping them would manufacture a
+# publisher identity the corroboration count would then trust.
+_FACEBOOK_PAGE_PUBLISHERS = {
+    "deutschewellenews": "dw.com",
+    "nytimes": "nytimes.com",
+    "washingtonpost": "washingtonpost.com",
+    "manchestereveningnews": "manchestereveningnews.co.uk",
+    "theliverpoolecho": "liverpoolecho.co.uk",
+    "abscbnnews": "abs-cbn.com",
+    "rapplerdotcom": "rappler.com",
+    "sunstardavaonews": "sunstar.com.ph",
+    "dailyguardianph": "dailyguardian.com.ph",
+    "detroitfreepress": "freep.com",
+    "bbcsurrey": "bbc.co.uk",
+    "addisstandardeng": "addisstandard.com",
+}
+
+# facebook.com/<page>/posts/... , /videos/... , /photos/... — the slug is the first
+# path segment. Profile-id URLs (/profile.php?id=) carry no slug and stay unmapped.
+_FACEBOOK_PAGE_RE = re.compile(r"facebook\.com/([A-Za-z0-9._-]+)/", re.IGNORECASE)
+
+
+def is_social_platform(domain: str | None) -> bool:
+    """True when the domain names a carrier rather than a publisher."""
+    if not domain:
+        return False
+    return domain.strip().lower().removeprefix("www.") in _SOCIAL_PLATFORM_DOMAINS
+
+
+def social_publisher_domain(url: str | None) -> str | None:
+    """The real publisher behind a social post URL, or None if unrecognised."""
+    if not url:
+        return None
+    m = _FACEBOOK_PAGE_RE.search(url)
+    if not m:
+        return None
+    return _FACEBOOK_PAGE_PUBLISHERS.get(m.group(1).lower())
 
 
 def is_noise(text: str) -> bool:
@@ -491,6 +561,19 @@ def find_content_duplicate(recent_events: list[tuple[str, str]], title: str,
     text_shingles = _shingles(canonical_text) if len(canonical_text) > 100 else None
 
     for idx, (existing_title, existing_text) in enumerate(recent_events):
+        # Veto: two headlines that name DIFFERENT known places are not the same
+        # incident, whatever the letters say. Wire headlines about one war share a
+        # scaffolding ("Russian missile strike on X kills N") that the char-ratio
+        # matcher scores on its own: measured 2026-08-20, "Russian missile strike on
+        # Kharkiv region kills ten" scored 0.667 against "Russian Missile Attack on
+        # Kyiv Kills 12" — over the configured 0.65 — so the Kharkiv massacre was
+        # dropped as a duplicate AND filed as corroborating evidence for the Kyiv
+        # strike, which is how a Kharkiv link ended up cited under a Kyiv cluster in
+        # that day's SITREP. Only mutual, disjoint place claims veto (see
+        # places_disagree); one side naming no city stays a duplicate candidate.
+        if places_disagree(title, existing_title):
+            continue
+
         # Signal 1: char-ratio title similarity (primary)
         if title_similarity(title, existing_title) >= _TITLE_SIM_THRESHOLD:
             return idx

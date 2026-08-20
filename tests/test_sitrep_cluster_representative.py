@@ -22,6 +22,7 @@ Two independent causes, one test file:
 from datetime import datetime, timezone
 
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_SINGLE
+from src.services import sitrep_generator
 from src.services.sitrep_generator import build_sitrep_clusters
 
 KYIV_STORYLINE = "2c09a725-8220-467c-a90d-b49d14331156"
@@ -403,3 +404,51 @@ class TestCountryTermTables:
     def test_unknown_country_never_folds(self):
         from src.services.sitrep_generator import _is_country_level
         assert _is_country_level({"anchor_name_raw": "Somewhere", "country_iso": "ZZ"}) is False
+
+
+class TestRetrospectiveClusters:
+    """An arrest made today for a shooting in May is a real development and stays
+    in the record — but it is not a new incident, and the 2026-08-20 US report
+    narrated two of them as if they were, under a "KÜTLESEL KAYIP OLAYLARI"
+    heading they had inherited from the event_type label.
+    """
+
+    def _ev(self, **over):
+        d = {c: None for c in sitrep_generator._EVENT_COLUMNS}
+        d.update(id="e1", source_title="Gunmen kill 12 at market",
+                 source_domain="reuters.com", source_url="https://reuters.com/a",
+                 event_type="mass_casualty_event", country_iso="US",
+                 severity_score=90, anchor_name_raw="Springfield",
+                 canonical_text="Twelve people were killed.", corroborating_sources=[])
+        d.update(over)
+        return d
+
+    def test_followup_classification_marks_the_cluster(self):
+        ev = self._ev(report_kind="followup")
+        [cluster] = sitrep_generator.build_sitrep_clusters([ev], [])
+        assert cluster["kayit_turu"] == "olay_sonrasi"
+
+    def test_arrest_headline_marks_the_cluster(self):
+        ev = self._ev(source_title="Man arrested over May shooting that killed teen")
+        [cluster] = sitrep_generator.build_sitrep_clusters([ev], [])
+        assert cluster["kayit_turu"] == "olay_sonrasi"
+
+    def test_fresh_incident_is_not_marked(self):
+        [cluster] = sitrep_generator.build_sitrep_clusters([self._ev()], [])
+        assert "kayit_turu" not in cluster
+
+    def test_one_fresh_member_keeps_the_cluster_current(self):
+        members = [self._ev(id="a", report_kind="followup", storyline_id="s1"),
+                   self._ev(id="b", report_kind="new_incident", storyline_id="s1",
+                            source_domain="ap.org", source_url="https://ap.org/b")]
+        [cluster] = sitrep_generator.build_sitrep_clusters(members, [])
+        assert "kayit_turu" not in cluster
+
+    def test_retrospective_ranks_below_a_lesser_live_incident(self):
+        live = self._ev(id="live", severity_score=60, anchor_name_raw="Denver",
+                        source_title="Explosion injures three at depot",
+                        canonical_text="An explosion injured three.")
+        past = self._ev(id="past", severity_score=95, anchor_name_raw="Springfield",
+                        source_title="Suspect arrested in July shooting that killed teen")
+        clusters = sitrep_generator.build_sitrep_clusters([past, live], [])
+        assert [c["location"] for c in clusters] == ["Denver", "Springfield"]

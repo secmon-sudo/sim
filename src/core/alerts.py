@@ -215,6 +215,27 @@ _AFTERMATH_PATTERNS = (
      re.compile(r"\b(what we know|as it happened|key moments|explainer)\b", re.I)),
     ("probe",
      re.compile(r"(expands? probe|probe into|investigation into|inquiry into)", re.I)),
+    # The news is the ARREST, and an arrest is downstream of an incident that already
+    # happened — often months earlier. Measured 2026-08-20: the US SITREP carried two
+    # of these ("Suspect arrested in July shooting that killed teen", "Man arrested
+    # following May fatal shooting at east side hotel") narrated as if they were that
+    # day's violence, under a mass-casualty heading. Deliberately narrow, because a
+    # mass arrest IS an incident in this corpus: it needs a person-shaped subject in
+    # front of the verb and a past incident behind the preposition, so "Israeli forces
+    # arrest gynecologist after raid" and "113 arrested after protest turns violent"
+    # are untouched. Over 4 days of arrest-shaped headlines this matched only filings
+    # about an earlier incident, and none of them had paged.
+    ("arrest_for_earlier_incident",
+     re.compile(r"\b(suspects?|men|man|woman|women|teen|teenager|youth|driver|"
+                r"student|person|individual|resident|worker|diver|soldier|"
+                r"two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\b"
+                r"(\s+\S+){0,3}\s+\b(arrested|detained|in custody|"
+                r"taken into custody)\b(\s+\S+){0,3}\s+"
+                r"\b(in|over|after|following|for)\b(\s+\S+){0,8}?\s*"
+                r"\b(shooting|killing|murder|homicide|stabbing|bombing|blast|blasts|"
+                r"explosion|explosions|crash|assault|kidnapping|abduction|arson)\b"
+                r"|^(\w+\s+){0,2}arrests?\s+(made\s+)?(after|over|in connection with)\b",
+                re.I)),
     # The news is the prosecution, not the attack. "charges" needs its object and
     # preposition ("Ecuador charges ex-minister OVER …") because the bare noun is a
     # demolition term — "troops planted charges" is an incident, not a court filing.

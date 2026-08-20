@@ -298,9 +298,27 @@ class TestBuildAssessment:
 
     def test_country_card_kept_when_nothing_else_located(self):
         clusters = [{"location": "Ülke Geneli", "country_iso": "PL", "severity": 60,
-                     "event_type": "military_action", "snippet": ""}]
+                     "event_type": "airspace_closure", "snippet": ""}]
         out = build_airspace_assessment(clusters, "PL", CZIB)
         assert out["assessments"][0]["scope"] == "country"
+
+    def test_unlocatable_non_aviation_event_earns_no_country_card(self):
+        """A card that can only say "we could not place this, here are the
+        country's FIRs" is filler, and the narrator writes it up as analysis:
+        the 2026-08-20 US report explained that the country has 23 ARTCCs and
+        that the nearest airports could not be determined."""
+        clusters = [{"location": "Wilson Building", "country_iso": "PL",
+                     "severity": 79, "event_type": "terrorism", "snippet": ""}]
+        assert build_airspace_assessment(clusters, "PL", CZIB) is None
+
+    def test_unlocatable_event_keeps_card_where_a_restriction_is_in_force(self):
+        """Ukraine's standing CZIB is the one thing worth saying about an event
+        we could not place — that card stays."""
+        clusters = [{"location": "Ülke Geneli", "country_iso": "UA", "severity": 90,
+                     "event_type": "missile_strike", "snippet": ""}]
+        out = build_airspace_assessment(clusters, "UA", CZIB)
+        assert out["assessments"][0]["scope"] == "country"
+        assert any(f["czib_active"] for f in out["assessments"][0]["firs"])
 
     def test_ordered_by_severity_and_capped(self):
         out = build_airspace_assessment(self._clusters(), "PL", CZIB, max_clusters=1)
@@ -356,7 +374,7 @@ class TestPromptCompaction:
     def test_country_scope_carries_no_radius(self):
         out = airspace.compact_for_prompt(build_airspace_assessment(
             [{"location": "Ülke Geneli", "country_iso": "PL", "severity": 60,
-              "event_type": "military_action", "snippet": ""}], "PL", CZIB))
+              "event_type": "airspace_closure", "snippet": ""}], "PL", CZIB))
         assert "yaricap_km" not in out["assessments"][0]
 
     def test_country_scope_offers_no_single_fir_and_no_distance(self):
@@ -366,8 +384,8 @@ class TestPromptCompaction:
         airport list that looked like a proximity ranking. Neither claim is
         constructible from what the country scope now sends."""
         out = airspace.compact_for_prompt(build_airspace_assessment(
-            [{"location": "Twin Falls In-N-Out", "country_iso": "US", "severity": 95,
-              "event_type": "mass_shooting", "snippet": ""}], "US", CZIB))
+            [{"location": "Twin Falls", "country_iso": "US", "severity": 95,
+              "event_type": "airspace_closure", "snippet": ""}], "US", CZIB))
         item = out["assessments"][0]
         assert item["kapsam"] == "country"
         assert "fir" not in item
@@ -395,7 +413,7 @@ class TestDigestSummary:
     def test_country_scope_line_omits_distances(self):
         out = build_airspace_assessment(
             [{"location": "Ülke Geneli", "country_iso": "PL", "severity": 60,
-              "event_type": "military_action", "snippet": ""}], "PL", CZIB)
+              "event_type": "airspace_closure", "snippet": ""}], "PL", CZIB)
         line = summarize_assessment(out)
         assert "EPWW" in line
         assert "km" not in line
@@ -403,3 +421,32 @@ class TestDigestSummary:
     def test_empty_assessment_yields_empty_string(self):
         assert summarize_assessment(None) == ""
         assert summarize_assessment({"assessments": []}) == ""
+
+
+class TestNameBasedPlacement:
+    """An anchor string only places an event AT an airport when it names one.
+
+    2026-08-20 (US SITREP): the New York Central Synagogue assault resolved to
+    JFK — "new york" is JFK's city field — and the report told the reader the
+    nearest commercial airport was "New York JFK (0 km)". A venue in a city is
+    not the city's airport, and a distance measured from an airport to itself is
+    not a proximity finding.
+    """
+
+    def test_venue_in_an_airport_city_does_not_resolve_to_the_airport(self):
+        assert airspace._airport_by_location_name("New York Central Synagogue", "US") is None
+
+    def test_bare_city_name_does_not_resolve_to_the_airport(self):
+        assert airspace._airport_by_location_name("New York", "US") is None
+
+    def test_named_airport_still_resolves(self):
+        ap = airspace._airport_by_location_name("Rzeszów–Jasionka Airport", "PL")
+        assert ap is not None
+        assert ap["iata"] == "RZE"
+
+    def test_synagogue_cluster_gets_no_fabricated_proximity(self):
+        cluster = {"location": "New York Central Synagogue", "country_iso": "US",
+                   "severity": 73, "event_type": "terrorism", "snippet": ""}
+        assert airspace.resolve_cluster_point(cluster) is None
+        # ...and with no point and no restriction over US airspace, no card at all.
+        assert build_airspace_assessment([cluster], "US", CZIB) is None
