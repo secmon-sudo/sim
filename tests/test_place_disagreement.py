@@ -33,7 +33,7 @@ class TestPlaceKeys:
         assert place_keys("Drone strike on minibus in Kherson kills four") == {"KHERSON"}
 
     def test_unknown_places_yield_no_opinion(self):
-        assert place_keys("Blast at Pechenihy village") == set()
+        assert place_keys("Blast at Hlukhiv village") == set()
 
     def test_disagreement_needs_two_positive_claims(self):
         assert places_disagree(KYIV, KHARKIV) is True
@@ -88,3 +88,103 @@ class TestClusterSources:
         names = [s["name"] for s in cluster["sources"]]
         assert "apa.az" not in names
         assert "nv.ua" in names
+
+
+class TestContainment:
+    """Measured 2026-08-21: 172 of the ~330 anchored events a day name a place the
+    curated city table does not, and the recurring ones are villages inside a
+    region. Added flat they would read as different places, and the veto would
+    split one strike in two — so the table records what contains what.
+    """
+
+    def test_village_agrees_with_its_region(self):
+        assert places_disagree(
+            "Russia kills 10 in missile strike on Pechenihy",
+            "Russian missile strike on Kharkiv region kills ten") is False
+
+    def test_village_still_disagrees_with_another_oblast(self):
+        assert places_disagree(
+            "10 killed in Russian missile strike on Pechenihy",
+            "One killed, seven injured in Russian strike on Kyiv region") is True
+
+    def test_west_bank_village_agrees_with_the_territory(self):
+        assert places_disagree("Settlers attack Qusra village",
+                               "Israeli raid in the West Bank kills two") is False
+
+    def test_west_bank_village_disagrees_with_gaza(self):
+        assert places_disagree("Settlers attack Qusra village",
+                               "Israeli strike on Gaza kills six") is True
+
+    def test_district_agrees_with_its_province(self):
+        assert places_disagree("Five terrorists killed in Panjgur",
+                               "Five terrorists killed in Balochistan IBO") is False
+
+
+class TestAnchorAsPlaceEvidence:
+    """The wire headline omits the town its own body names — "Russian missile
+    strike on Ukrainian town" — and the anchor is where the classifier recorded
+    it. Only the stored side can carry one: Pass C has not seen the incoming item.
+    """
+
+    STORED = "10 killed, 8 injured in Russian missile strike on Ukrainian town"
+    INCOMING = "One killed, seven injured in Russian strike on Kyiv region"
+
+    def test_headline_alone_cannot_tell_them_apart(self):
+        assert places_disagree(self.STORED, self.INCOMING) is False
+        assert find_content_duplicate([(self.STORED, self.STORED)],
+                                      self.INCOMING, self.INCOMING) == 0
+
+    def test_anchor_supplies_the_missing_place(self):
+        recent = [(self.STORED, self.STORED, "Pechenihy")]
+        assert find_content_duplicate(recent, self.INCOMING, self.INCOMING) is None
+
+    def test_anchor_does_not_break_a_true_duplicate(self):
+        """The anchor names the village; a duplicate naming the oblast it sits in
+        still collapses, because containment is what the comparison expands."""
+        recent = [(self.STORED, self.STORED, "Pechenihy")]
+        dupe = "10 killed, 8 injured in Russian missile strike on Kharkiv region town"
+        assert find_content_duplicate(recent, dupe, dupe) == 0
+
+    def test_two_tuple_entries_still_work(self):
+        assert find_content_duplicate([("A blast hit a market", "x")],
+                                      "A blast hit a market", "y") == 0
+
+
+class TestAgainstProductionPairs:
+    """Ten corroboration pairs sampled from the 2026-08-21 corpus, run through the
+    anchor-augmented rule. The two Pechenihy rows are the ones the headline-only
+    veto let through the day before: a strike on a village in Kharkiv oblast filed
+    as evidence for the Kyiv barrage.
+    """
+
+    CASES = [
+        ("10 killed, 8 injured in Russian missile strike on Ukrainian town", "Pechenihy",
+         "12 killed, 33 injured in Russian strikes on Kyiv and surrounding region", True),
+        ("10 killed, 8 injured in Russian missile strike on Ukrainian town", "Pechenihy",
+         "5 killed in Russian missile strikes on Kyiv - Pajhwok Afghan News", True),
+        ("Russian missile barrage across Ukraine's capital kills at least 14",
+         "Ukraine's capital",
+         "Russian missile barrage across Ukraine's capital kills at least 12", False),
+        ("Private plane from D.C. makes emergency landing at CAK", "CAK",
+         "Plane makes emergency landing at Akron-Canton Airport - WKYC", False),
+        ("Harrowing moment Russian ballistic missile hits Kyiv skyline: Killing 8",
+         "Kyiv skyline", "Russian ballistic missile attack sets Kyiv skyline ablaze", False),
+        ("Hamas Police Commanders Killed in Israeli Gaza Strike", "Gaza",
+         "Hamas Commander Killed in Nuseirat", False),
+        ("US Envoy Visits Ladakh, Signals Possible Travel Advisory Shift", "Ladakh",
+         "US Envoy Sergio Gor Signals Possible Easing of Travel Advisory for J&K", False),
+        ("Israeli strikes hit southern Lebanon", "southern Lebanon",
+         "Israeli warplanes carry out overnight strikes in southern Lebanon", False),
+        ("Gaza: Palestinians hold funeral for 50 people killed in Israeli attacks",
+         "Al-Shifa Hospital",
+         "Gaza holds mass funeral for 50 Palestinians killed in Israeli genocidal war", False),
+        ("Four killed in Russian drone attack on a bus in Kherson region", "Kherson",
+         "Four killed, five injured in Russian drone attack on bus in Kherson", False),
+    ]
+
+    def test_every_sampled_pair_lands_the_right_way(self):
+        wrong = [
+            (anchor, other) for title, anchor, other, expect in self.CASES
+            if places_disagree(other, f"{title} {anchor}") is not expect
+        ]
+        assert wrong == []

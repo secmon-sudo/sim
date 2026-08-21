@@ -102,20 +102,24 @@ def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list
     """Fetch recent events once to avoid O(N) database queries during ingestion.
 
     Returns (texts, meta) as two INDEX-ALIGNED lists: texts feeds the similarity
-    matcher (title, canonical_text); meta carries (event_id, source_domain) so a
-    detected duplicate can be credited back to the surviving event as
+    matcher (title, canonical_text, anchor); meta carries (event_id, source_domain)
+    so a detected duplicate can be credited back to the surviving event as
     corroboration.
+
+    The anchor rides along as place evidence for the place-disagreement veto in
+    find_content_duplicate: a wire headline routinely omits the town its own body
+    names, and the anchor is the only place the classifier's answer is recorded.
     """
     try:
         rows = db_conn.execute(
-            """SELECT id, source_domain, source_title, canonical_text
+            """SELECT id, source_domain, source_title, canonical_text, anchor_name_raw
                FROM events
                WHERE ingested_at > NOW() - (%s * INTERVAL '1 day')
                ORDER BY ingested_at DESC
                LIMIT 2000""",
             (_MAX_ARTICLE_AGE_DAYS,),
         ).fetchall()
-        texts = [(row[2] or "", row[3] or "") for row in rows]
+        texts = [(row[2] or "", row[3] or "", row[4] or "") for row in rows]
         meta = [(row[0], row[1] or "") for row in rows]
         return texts, meta
     except Exception:
@@ -630,7 +634,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     domain_inserts[domain] = domain_inserts.get(domain, 0) + 1
                     # Inline dedup: add to recent_events (and aligned meta) so later
                     # items in this run are compared — and corroborated — against it
-                    recent_events.insert(0, (item.get("title", ""), canonical))
+                    # No anchor yet — Pass C classifies this event later in the run.
+                    recent_events.insert(0, (item.get("title", ""), canonical, ""))
                     recent_meta.insert(0, (new_row[0], domain))
                     if len(recent_events) > 2500:
                         recent_events.pop()

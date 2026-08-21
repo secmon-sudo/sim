@@ -107,6 +107,52 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "BALTIMORE":    ["baltimore"],
 }
 
+# Places the classifier's anchor names that the city table above does not, plus the
+# containment that makes them safe to compare. Measured 2026-08-21 over 5 days: 172
+# of the 329 anchored events a day point at a place outside the curated table, and
+# the recurring ones are villages inside a region ("Pechenihy" 19, "Qusra" 8,
+# "Panjgur"/"Kharan" 5) or the region itself ("Balochistan" 16, "West Bank" 5).
+#
+# Containment is the whole point. Added FLAT, "Pechenihy" and "Kharkiv" would read as
+# two different places and a veto would split the same strike apart — the exact
+# false-negative this file exists to avoid. `parent` says the village is inside the
+# oblast, so the two agree, while Pechenihy and Kyiv (410 km and a different oblast)
+# still disagree. Country-level anchors ("Ukraine", "UAE") are deliberately absent:
+# they contain everything, so they can only produce false disagreement.
+_SUB_PLACES: dict[str, dict] = {
+    "PECHENIHY":  {"aliases": ["pechenihy", "pechenehy", "pechenigy"], "parent": "KHARKIV"},
+    "BALOCHISTAN": {"aliases": ["balochistan", "baluchistan"]},
+    "PANJGUR":    {"aliases": ["panjgur"], "parent": "BALOCHISTAN"},
+    "KHARAN":     {"aliases": ["kharan"], "parent": "BALOCHISTAN"},
+    "WEST BANK":  {"aliases": ["west bank"]},
+    "QUSRA":      {"aliases": ["qusra"], "parent": "WEST BANK"},
+    "JENIN":      {"aliases": ["jenin"], "parent": "WEST BANK"},
+    "NABLUS":     {"aliases": ["nablus"], "parent": "WEST BANK"},
+    "SOUTHERN LEBANON": {"aliases": ["southern lebanon", "south lebanon"]},
+    "TAIZ":       {"aliases": ["taiz", "taizz"]},
+    "MOCHA":      {"aliases": ["mocha", "mokha", "al mukha", "mocha port"], "parent": "TAIZ"},
+    "BAB AL-MANDAB": {"aliases": ["bab al-mandab", "bab el-mandeb", "bab al mandab",
+                                  "bab el mandeb"]},
+    "BAIDOA":     {"aliases": ["baidoa"]},
+    "VARANASI":   {"aliases": ["varanasi"]},
+    "BHUBANESWAR": {"aliases": ["bhubaneswar"]},
+    "MANIPUR":    {"aliases": ["manipur"]},
+    # Bare "kashmir" is deliberately not an alias: it would collapse Indian- and
+    # Pakistani-administered Kashmir onto one key, and geo_key feeds the alert
+    # suppression window, where merging two sides of a disputed border merges two
+    # different incidents.
+    "JAMMU AND KASHMIR": {"aliases": ["jammu and kashmir", "jammu kashmir"]},
+    "ADAMAWA":    {"aliases": ["adamawa"]},
+    "CEUTA":      {"aliases": ["ceuta"]},
+}
+
+_CITY_ALIASES.update({k: v["aliases"] for k, v in _SUB_PLACES.items()})
+
+# canonical -> the place that contains it, for the disagreement check only.
+_PLACE_PARENT: dict[str, str] = {
+    k: v["parent"] for k, v in _SUB_PLACES.items() if v.get("parent")
+}
+
 # Reverse index: alias -> canonical, built once at import.
 _ALIAS_TO_CANON: dict[str, str] = {
     alias: canon for canon, aliases in _CITY_ALIASES.items() for alias in aliases
@@ -135,6 +181,17 @@ def place_keys(text: str | None) -> set[str]:
     return {_ALIAS_TO_CANON[m.group(0)] for m in _ALIAS_SCAN_RE.finditer(_clean(text))}
 
 
+def _with_ancestors(keys: set[str]) -> set[str]:
+    """The keys plus every place that contains one of them."""
+    out = set(keys)
+    for key in keys:
+        parent = _PLACE_PARENT.get(key)
+        while parent and parent not in out:
+            out.add(parent)
+            parent = _PLACE_PARENT.get(parent)
+    return out
+
+
 def places_disagree(text_a: str | None, text_b: str | None) -> bool:
     """True when both texts name known places and share none of them.
 
@@ -142,8 +199,12 @@ def places_disagree(text_a: str | None, text_b: str | None) -> bool:
     disagreement: "Russian strike kills 12" is a legitimate retelling of "Russian
     strike on Kyiv kills 12". Only two positive, disjoint claims count, which is
     what makes this safe to use as a veto.
+
+    Sides are compared after expanding each with the places that CONTAIN what it
+    names, so a village and its oblast agree while two villages in different
+    oblasts do not.
     """
-    a, b = place_keys(text_a), place_keys(text_b)
+    a, b = _with_ancestors(place_keys(text_a)), _with_ancestors(place_keys(text_b))
     return bool(a and b and not (a & b))
 
 

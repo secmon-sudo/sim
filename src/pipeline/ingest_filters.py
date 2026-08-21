@@ -542,7 +542,7 @@ def title_token_similarity(title_a: str, title_b: str) -> float:
     return _jaccard(_word_set(title_a), _word_set(title_b))
 
 
-def find_content_duplicate(recent_events: list[tuple[str, str]], title: str,
+def find_content_duplicate(recent_events: list[tuple], title: str,
                            canonical_text: str) -> int | None:
     """
     Return the index of the first similar article in recent_events, else None.
@@ -556,11 +556,19 @@ def find_content_duplicate(recent_events: list[tuple[str, str]], title: str,
 
     Returning the INDEX (not a bool) lets Pass A credit the surviving event with
     the duplicate's source as corroboration instead of discarding the signal.
+
+    `recent_events` entries are (title, canonical_text) or, preferred,
+    (title, canonical_text, place_hint) — the stored event's anchor, which names
+    the place its headline often leaves out ("...strike on Ukrainian town",
+    anchor "Pechenihy"). The incoming item has no anchor: Pass C has not seen it
+    yet, so only the stored side can contribute one.
     """
     title_tokens = _word_set(title)
     text_shingles = _shingles(canonical_text) if len(canonical_text) > 100 else None
 
-    for idx, (existing_title, existing_text) in enumerate(recent_events):
+    for idx, entry in enumerate(recent_events):
+        existing_title, existing_text = entry[0], entry[1]
+        existing_place = entry[2] if len(entry) > 2 else ""
         # Veto: two headlines that name DIFFERENT known places are not the same
         # incident, whatever the letters say. Wire headlines about one war share a
         # scaffolding ("Russian missile strike on X kills N") that the char-ratio
@@ -571,7 +579,7 @@ def find_content_duplicate(recent_events: list[tuple[str, str]], title: str,
         # strike, which is how a Kharkiv link ended up cited under a Kyiv cluster in
         # that day's SITREP. Only mutual, disjoint place claims veto (see
         # places_disagree); one side naming no city stays a duplicate candidate.
-        if places_disagree(title, existing_title):
+        if places_disagree(title, f"{existing_title} {existing_place}".strip()):
             continue
 
         # Signal 1: char-ratio title similarity (primary)
