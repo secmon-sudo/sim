@@ -20,6 +20,7 @@ identical location strings still share a key.
 
 import math
 import re
+from functools import lru_cache
 
 # Administrative suffixes/prefixes that describe the same place with extra words.
 # Stripped before alias lookup so "Kyiv city" / "Kharkiv Oblast" collapse.
@@ -168,6 +169,19 @@ _ALIAS_SCAN_RE = re.compile(
 )
 
 
+# Cached because the ingest deduper asks the same questions relentlessly: every
+# incoming item is compared against the whole recent-events window, so one run
+# scans the same ~2,500 stored headlines ~1,700 times. Measured 2026-08-21 without
+# the cache: 404 ms per item against 2,000 candidates, i.e. up to ~11 minutes of
+# regex per run on a pipeline whose runs take ~20. The strings repeat exactly, so a
+# cache turns all but the first scan into a dict lookup.
+@lru_cache(maxsize=8192)
+def _place_keys_cached(text: str) -> frozenset[str]:
+    return frozenset(
+        _ALIAS_TO_CANON[m.group(0)] for m in _ALIAS_SCAN_RE.finditer(_clean(text))
+    )
+
+
 def place_keys(text: str | None) -> set[str]:
     """Canonical city keys named anywhere in a free-text string.
 
@@ -178,7 +192,7 @@ def place_keys(text: str | None) -> set[str]:
     """
     if not isinstance(text, str) or not text:
         return set()
-    return {_ALIAS_TO_CANON[m.group(0)] for m in _ALIAS_SCAN_RE.finditer(_clean(text))}
+    return set(_place_keys_cached(text))
 
 
 def _with_ancestors(keys: set[str]) -> set[str]:
@@ -204,8 +218,12 @@ def places_disagree(text_a: str | None, text_b: str | None) -> bool:
     names, so a village and its oblast agree while two villages in different
     oblasts do not.
     """
-    a, b = _with_ancestors(place_keys(text_a)), _with_ancestors(place_keys(text_b))
-    return bool(a and b and not (a & b))
+    if not text_a or not text_b:
+        return False
+    a, b = _place_keys_cached(text_a), _place_keys_cached(text_b)
+    if not a or not b or (a & b):
+        return False
+    return not (_with_ancestors(a) & _with_ancestors(b))
 
 
 # Country ISO -> canonical capital key, so "<country> capital" / "capital" phrasing

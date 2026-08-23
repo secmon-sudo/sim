@@ -266,6 +266,13 @@ def is_airspace_relevant(cluster: Dict[str, Any], flight_disruption_check=None) 
     ingest_filters._is_flight_disruption so the definition of "aviation event"
     stays identical to the one used at ingest.
     """
+    # A retrospective describes an incident that is over — often long over. The
+    # 2026-08-21 GB report computed a FIR card, a nearest-airport distance and a
+    # CZIB check for a synagogue attack that happened LAST YEAR, because the day's
+    # news was the charging decision. Exposure analysis answers "what is the risk
+    # around this event now", and for these there is none to state.
+    if cluster.get("kayit_turu") == "olay_sonrasi":
+        return False
     if (cluster.get("event_type") or "") in AIRSPACE_THREAT_EVENT_TYPES:
         return True
     if flight_disruption_check is None:

@@ -1056,6 +1056,30 @@ def is_truncated(llm_result: Dict[str, Any]) -> bool:
     return (llm_result.get("finish_reason") or "").strip().lower() in _TRUNCATED_FINISH_REASONS
 
 
+# A bullet's source clause, from "Kaynak:" to the end of the line.
+_SOURCE_CLAUSE_RE = re.compile(r"(Kaynak\s*:).*$", re.IGNORECASE)
+_UNCITED_NOTICE = "Kaynak: belirtilmedi (bkz. rapor sonundaki künye)"
+
+
+def _mark_uncited_bullets(lines: List[str]) -> Tuple[List[str], int]:
+    """Replace a source clause that cites no URL with an explicit admission.
+
+    Only bullets are touched, and only when nothing already flagged the line: a
+    citation the allowlist blanked keeps its "[kaynak listede]" marker and its
+    publisher name, which says more than this notice would.
+    """
+    out, marked = [], 0
+    for line in lines:
+        is_bullet = line.lstrip().startswith(("•", "-", "*"))
+        if (is_bullet and "Kaynak" in line and "http" not in line
+                and "[kaynak listede]" not in line
+                and _SOURCE_CLAUSE_RE.search(line)):
+            line = _SOURCE_CLAUSE_RE.sub(_UNCITED_NOTICE, line)
+            marked += 1
+        out.append(line)
+    return out, marked
+
+
 def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
     """
     Server-side guardrails: required section header, URL allowlist, and canonical
@@ -1102,10 +1126,18 @@ def validate_sitrep(text: str, allowed_urls: List[str]) -> str:
         logger.warning("SITREP: %d citation URL(s) not in the source list, blanked: %s",
                        len(dropped), ", ".join(dropped[:5]))
 
-    return "\n".join(
+    lines = [
         _normalize_label_line(line) if "Doğruluk Durumu:" in line else line
         for line in text.splitlines()
-    )
+    ]
+    lines, uncited = _mark_uncited_bullets(lines)
+    if uncited:
+        # The prompt forbids a URL-less attribution outright, and the model obeys
+        # it almost always — which is what makes the exception dangerous. Measured
+        # 2026-08-21 (GB): one bullet closed with "Kaynak: Yukarıda belirtilen
+        # kaynaklar", which reads exactly like a citation and is not one.
+        logger.warning("SITREP: %d bullet(s) cited no URL; marked as uncited", uncited)
+    return "\n".join(lines)
 
 
 def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetime) -> List[str]:

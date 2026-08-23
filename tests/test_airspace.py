@@ -450,3 +450,40 @@ class TestNameBasedPlacement:
         assert airspace.resolve_cluster_point(cluster) is None
         # ...and with no point and no restriction over US airspace, no card at all.
         assert build_airspace_assessment([cluster], "US", CZIB) is None
+
+
+class TestRetrospectiveClusters:
+    """2026-08-21 (GB): the day's news was a charging decision over a synagogue
+    attack committed the YEAR BEFORE, and the report still worked out its FIR, its
+    nearest commercial airport and whether EASA restricts the airspace. Exposure
+    analysis states the risk around an event now; a closed incident has none.
+    """
+
+    def _cluster(self, **over):
+        c = {"location": "Manchester", "country_iso": "GB", "severity": 73,
+             "event_type": "terrorism", "snippet": "Man charged over attack."}
+        c.update(over)
+        return c
+
+    def test_retrospective_earns_no_card(self):
+        cluster = self._cluster(kayit_turu="olay_sonrasi")
+        assert airspace.is_airspace_relevant(cluster) is False
+        assert build_airspace_assessment([cluster], "GB", CZIB) is None
+
+    def test_live_incident_at_the_same_place_still_does(self):
+        # A live incident carries the coordinate Pass D/E resolved for it; that is
+        # what put the Manchester card in the report in the first place.
+        out = build_airspace_assessment(
+            [self._cluster(latitude=53.48, longitude=-2.24)], "GB", CZIB)
+        assert out["assessments"][0]["fir"]["icao"] == "EGTT"
+
+    def test_coordinates_do_not_rescue_a_retrospective(self):
+        assert build_airspace_assessment(
+            [self._cluster(latitude=53.48, longitude=-2.24,
+                           kayit_turu="olay_sonrasi")], "GB", CZIB) is None
+
+    def test_retrospective_aviation_event_is_skipped_too(self):
+        cluster = self._cluster(event_type="airspace_closure",
+                                snippet="Airport reopened after last year's closure.",
+                                kayit_turu="olay_sonrasi")
+        assert build_airspace_assessment([cluster], "GB", CZIB) is None

@@ -127,3 +127,43 @@ class TestCitationPunctuation:
         out = validate_sitrep(_HDR + "— Olay. Kaynak: X (https://other.example/a).",
                               ["https://ex.example/a"])
         assert "[kaynak listede]" in out
+
+
+class TestUncitedBullets:
+    """2026-08-21 (GB): a bullet closed with "Kaynak: Yukarıda belirtilen
+    kaynaklar." — the shape of a citation with none of the substance. The prompt
+    forbids it, the model obeys almost always, and every guardrail here passed it
+    through because the line contained no URL to check.
+    """
+
+    HEADER = "YÖNETİCİ ÖZETİ\nÖzet paragrafı.\n\n**OLAYLAR**\n"
+
+    def test_sourceless_bullet_is_marked(self):
+        text = self.HEADER + (
+            "• **2026-08-20** Bir olay oldu. — Doğruluk Durumu: Onaylandı "
+            "(Çoklu kaynak) — Kaynak: Yukarıda belirtilen kaynaklar.\n")
+        out = validate_sitrep(text, ["https://reuters.com/a"])
+        assert "Yukarıda belirtilen kaynaklar" not in out
+        assert "Kaynak: belirtilmedi (bkz. rapor sonundaki künye)" in out
+        assert "Onaylandı (Çoklu kaynak)" in out
+
+    def test_cited_bullet_is_untouched(self):
+        line = ("• **2026-08-20** Bir olay. — Doğruluk Durumu: Doğrulanmamış "
+                "(Tek kaynak) — Kaynak: Reuters (https://reuters.com/a)\n")
+        out = validate_sitrep(self.HEADER + line, ["https://reuters.com/a"])
+        assert "Kaynak: Reuters (https://reuters.com/a)" in out
+        assert "belirtilmedi" not in out
+
+    def test_blanked_url_keeps_its_own_marker(self):
+        """A citation the allowlist blanked already says so, and keeps the
+        publisher name — which tells the reader more than this notice would."""
+        line = ("• **2026-08-20** Bir olay. — Kaynak: Reuters "
+                "(https://uydurma.example/x)\n")
+        out = validate_sitrep(self.HEADER + line, ["https://reuters.com/a"])
+        assert "[kaynak listede]" in out
+        assert "belirtilmedi" not in out
+
+    def test_prose_mentioning_sources_is_untouched(self):
+        line = "Bu paragrafta kaynak kelimesi geçiyor ama bir madde değil.\n"
+        out = validate_sitrep(self.HEADER + line, [])
+        assert out.endswith(line.rstrip("\n"))
