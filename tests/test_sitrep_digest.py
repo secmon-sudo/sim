@@ -262,3 +262,77 @@ class TestAviationSection:
             out = sitrep_digest.build_digest(None, self._row_results(), "a", "b")
         assert out["aviation"][0].startswith("Aspen Havalimanı")
         assert not any("ayrıntı ülke raporunda" in line for line in out["aviation"])
+
+
+class TestAviationFallbackText:
+    """The safety net fired on 2 of 3 days (2026-08-22/23) and said "Ben Gurion
+    Airport — havacılığı doğrudan etkileyen gelişme bildirildi", while the country
+    report next to it said the airport's baggage and flight operations were still
+    disrupted after a workers' action. The report is already Turkish and already
+    checked, so the bullet is lifted from it — matched on the source URL, because
+    the report writes places in Turkish ("Moskova") and the cluster carries the
+    English anchor.
+    """
+
+    IL_BULLET = (
+        "• **2026-08-23** Ben Gurion Havalimanı'nda yaşanan işçi eylemi sonrasında "
+        "normalleşme sürecine girilse de, bagaj taşıma sistemleri ve uçuş "
+        "operasyonlarında aksaklıkların devam edebileceği bildirildi. Havalimanı "
+        "sendikası başkanı, yaşanan kesintiden sorumlu tutulmayı reddetti — "
+        "Doğruluk Durumu: Doğrulanmamış (Tek kaynak) — Kaynak: jpost.com "
+        "(https://www.jpost.com/israel-news/article-906269)")
+    IL_CLUSTER = {"location": "Ben Gurion Airport", "event_type": "unclassified",
+                  "severity": 70,
+                  "snippet": "Ben Gurion Airport flights suspended by a workers' action.",
+                  "sources": [{"name": "jpost.com",
+                               "url": "https://www.jpost.com/israel-news/article-906269"}]}
+
+    def test_bullet_comes_from_the_country_report(self):
+        line = sitrep_digest._aviation_fallback_line("İsrail", self.IL_CLUSTER,
+                                                     f"BAŞLIK\n\n{self.IL_BULLET}\n")
+        assert line.startswith("İsrail: Ben Gurion Havalimanı")
+        assert "bagaj taşıma sistemleri" in line
+        assert "Doğruluk Durumu" not in line and "Kaynak:" not in line
+        assert "2026-08-23" not in line
+
+    def test_other_date_shape_is_stripped_too(self):
+        bullet = ("• 2026-08-20: Aspen Havalimanı, yakınındaki orman yangını nedeniyle "
+                  "tüm uçuşları askıya aldı. Yetkililer bilgi verdi. — Kaynak: "
+                  "powder.com (https://powder.com/a)")
+        cluster = {"location": "Aspen Airport", "event_type": "airspace_closure",
+                   "sources": [{"url": "https://powder.com/a"}]}
+        line = sitrep_digest._aviation_fallback_line("ABD", cluster, bullet)
+        assert line.startswith("ABD: Aspen Havalimanı, yakınındaki orman yangını")
+        assert "2026-08-20" not in line and "powder.com" not in line
+
+    def test_unmatched_cluster_keeps_the_label(self):
+        line = sitrep_digest._aviation_fallback_line("İsrail", self.IL_CLUSTER,
+                                                     "Bu raporda o kaynak yok.")
+        assert "ayrıntı ülke raporunda" in line
+
+    def test_no_report_text_keeps_the_label(self):
+        line = sitrep_digest._aviation_fallback_line("İsrail", self.IL_CLUSTER, None)
+        assert "ayrıntı ülke raporunda" in line
+
+    def test_end_to_end_empty_section_is_filled_from_the_report(self):
+        results = [
+            {"country_iso": "IL", "country_name": "İsrail", "status": "completed",
+             "report_text": f"YÖNETİCİ ÖZETİ\nÖzet.\n\n{self.IL_BULLET}\n",
+             "clusters": [self.IL_CLUSTER]},
+            {"country_iso": "UA", "country_name": "Ukrayna", "status": "completed",
+             "report_text": "YÖNETİCİ ÖZETİ\nKiev vuruldu.",
+             "clusters": [{"location": "Kyiv", "event_type": "missile_strike",
+                           "severity": 100, "snippet": "Missiles hit Kyiv.",
+                           "sources": []}]},
+        ]
+        narrative = (
+            "GENEL DURUM DEĞERLENDİRMESİ\nGün yoğun.\n"
+            "ÜLKE DEĞERLENDİRMELERİ\n- IL | Havalimanında aksama.\n- UA | Saldırılar.\n"
+            "HAVACILIK OPERASYONLARINA ETKİ\nYOK\n"
+            "KRİTİK GELİŞMELER\n- Kiev vuruldu.\n"
+            "İZLEME VE BEKLENTİLER\n- Tırmanma riski.\n")
+        with mock.patch.object(sitrep_digest, "call_llm",
+                               return_value={"content": narrative, "provider": "p",
+                                             "model": "m"}):
+            out = sitrep_digest.build_digest(None, results, "a", "b")
+        assert any("bagaj taşıma sistemleri" in line for line in out["aviation"])

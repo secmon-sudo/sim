@@ -109,7 +109,58 @@ def aviation_clusters(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [c for c in clusters if is_aviation_specific(c, _is_flight_disruption)]
 
 
-def _aviation_fallback_line(name: str, cluster: Dict[str, Any]) -> str:
+# A report bullet: "• **2026-08-23** <text> — Doğruluk Durumu: … — Kaynak: …".
+# Both date shapes the narrator produces are stripped, as is the audit tail.
+_BULLET_HEAD_RE = re.compile(
+    r"^\s*[•\-\*]*\s*\**\s*\d{4}-\d{2}-\d{2}\**\s*[:\s]\s*")
+_BULLET_TAIL_RE = re.compile(
+    r"\s*[—–-]{1,2}\s*\**\s*(Doğruluk Durumu|Kaynak)\s*:.*$", re.IGNORECASE)
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s")
+_FALLBACK_MAX_CHARS = 240
+
+
+def _narrated_line(report_text: str | None, cluster: Dict[str, Any]) -> Optional[str]:
+    """The country report's own Turkish sentence for this cluster, if it has one.
+
+    Matched on the source URL rather than the place name: the report writes places
+    in Turkish ("Moskova", "Kiev") while the cluster carries the English anchor, so
+    name matching would miss exactly the events that matter. The URL is copied
+    verbatim into the bullet, which makes the match exact.
+    """
+    urls = [s.get("url") for s in (cluster.get("sources") or []) if s.get("url")]
+    if not urls or not report_text:
+        return None
+    for line in report_text.splitlines():
+        if not any(u in line for u in urls):
+            continue
+        body = _BULLET_TAIL_RE.sub("", line)
+        body = _BULLET_HEAD_RE.sub("", body).strip().strip("*").strip()
+        if not body:
+            return None
+        # One sentence is the right size for a briefing bullet; the second is
+        # taken only when the first is too short to say anything.
+        sentences = _SENTENCE_END_RE.split(body)
+        out = sentences[0]
+        if len(out) < 80 and len(sentences) > 1:
+            out = f"{out} {sentences[1]}"
+        return out[:_FALLBACK_MAX_CHARS].rstrip(" ,;—-")
+    return None
+
+
+def _aviation_fallback_line(name: str, cluster: Dict[str, Any],
+                            report_text: str | None = None) -> str:
+    """One aviation bullet built without the model.
+
+    Preferred form is the country report's own sentence about this cluster — it is
+    already Turkish, already checked, and says what happened. Measured 2026-08-23:
+    the flat label said "Ben Gurion Airport — havacılığı doğrudan etkileyen gelişme
+    bildirildi" where the report said the airport's baggage and flight operations
+    were still disrupted after a workers' action. Only when no bullet cites this
+    cluster's sources does the label stand in.
+    """
+    narrated = _narrated_line(report_text, cluster)
+    if narrated:
+        return f"{name}: {narrated}"
     label = _AVIATION_FALLBACK_LABEL.get(
         cluster.get("event_type") or "", _AVIATION_FALLBACK_DEFAULT)
     where = (cluster.get("location") or "").strip() or name
@@ -133,6 +184,7 @@ def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str,
             if (c.get("severity") or 0) >= SEVERE_SEVERITY
             and c.get("verification") in (LABEL_OFFICIAL, LABEL_MULTI)
         )
+        aviation_candidates = aviation_clusters(clusters)
         rows.append({
             "iso": res["country_iso"],
             "name": res.get("country_name") or res["country_iso"],
@@ -146,7 +198,15 @@ def build_digest_inputs(country_results: List[Dict[str, Any]]) -> List[Dict[str,
             "airspace_summary": summarize_assessment(res.get("airspace")),
             # Deterministic; see aviation_clusters(). Fed to the prompt as a
             # checklist and used as the fallback when the model ignores it.
-            "aviation_candidates": aviation_clusters(clusters),
+            "aviation_candidates": aviation_candidates,
+            # Rendered here because it reads the FULL report text, which the row
+            # above truncates for the prompt.
+            "aviation_fallback": [
+                _aviation_fallback_line(
+                    res.get("country_name") or res["country_iso"], c,
+                    res.get("report_text"))
+                for c in aviation_candidates
+            ],
         })
     rows.sort(key=lambda r: (-RISK_ORDER[r["risk"]], -r["max_severity"]))
     return rows
@@ -328,10 +388,7 @@ def build_digest(router: LLMRouter, country_results: List[Dict[str, Any]],
     # fill it from the record rather than publishing "YOK" over a closure. Flat
     # deterministic lines, so a reader can tell them from written analysis.
     if not parsed.get("aviation"):
-        fallback = [
-            _aviation_fallback_line(r["name"], c)
-            for r in rows for c in (r.get("aviation_candidates") or [])[:3]
-        ]
+        fallback = [line for r in rows for line in (r.get("aviation_fallback") or [])[:3]]
         if fallback:
             logger.warning("Digest aviation section came back empty over %d aviation "
                            "cluster(s); filling deterministically", len(fallback))

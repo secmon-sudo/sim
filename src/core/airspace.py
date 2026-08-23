@@ -258,6 +258,19 @@ def resolve_cluster_point(cluster: Dict[str, Any]) -> Optional[Tuple[float, floa
     return None
 
 
+def _disruption_inputs(cluster: Dict[str, Any]) -> Tuple[str, str]:
+    """(text, headline) for the flight-disruption gate.
+
+    The headline is the representative source's, which is what the gate's
+    title-scoped path needs: "Flights diverted after Manchester Airport security
+    breach" says it in the headline and nowhere else.
+    """
+    blob = f"{cluster.get('snippet') or ''} {cluster.get('location') or ''}"
+    sources = cluster.get("sources") or []
+    title = (sources[0].get("title") or "") if sources else ""
+    return f"{title} {blob}", title
+
+
 def is_airspace_relevant(cluster: Dict[str, Any], flight_disruption_check=None) -> bool:
     """Whether a cluster's geography is worth an airspace assessment.
 
@@ -277,8 +290,7 @@ def is_airspace_relevant(cluster: Dict[str, Any], flight_disruption_check=None) 
         return True
     if flight_disruption_check is None:
         return False
-    blob = f"{cluster.get('snippet') or ''} {cluster.get('location') or ''}"
-    return bool(flight_disruption_check(blob))
+    return bool(flight_disruption_check(*_disruption_inputs(cluster)))
 
 
 def is_aviation_specific(cluster: Dict[str, Any], flight_disruption_check=None) -> bool:
@@ -287,8 +299,7 @@ def is_aviation_specific(cluster: Dict[str, Any], flight_disruption_check=None) 
         return True
     if flight_disruption_check is None:
         return False
-    blob = f"{cluster.get('snippet') or ''} {cluster.get('location') or ''}"
-    return bool(flight_disruption_check(blob))
+    return bool(flight_disruption_check(*_disruption_inputs(cluster)))
 
 
 def _neighbor_views(firs: List[Dict[str, Any]],

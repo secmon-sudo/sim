@@ -346,10 +346,63 @@ _DISRUPTION_PATTERN = re.compile(
 )
 
 
-def _is_flight_disruption(text: str) -> bool:
-    """Aviation noun + disruption verb in the same text (see block comment)."""
-    return bool(_AVIATION_CONTEXT_PATTERN.search(text)
-                and _DISRUPTION_PATTERN.search(text))
+# The vocabulary above is noun-shaped: it has "disruption" but not "disrupted",
+# and no "delayed", "diverted" or "stranded" at all — so "Flights diverted after
+# Manchester Airport security breach" was not an aviation disruption to this
+# pipeline. Measured 2026-08-23 over 7 days: 660 events carry an aviation noun, the
+# strict gate above claims 120, and these verbs are in another 77.
+#
+# They cannot simply join the list. Read over a whole article those 77 are 45%
+# junk: a war roundup mentions an airport in one paragraph and a delay in another,
+# and co-occurrence in 4,000 characters means nothing. Two conditions fix that:
+#
+#   * the verb and the aviation noun must share the HEADLINE, which is short
+#     enough that co-occurrence implies they are about each other, and
+#   * the article must carry a security nexus somewhere — this pipeline is not
+#     interested in a technical snag, a snowstorm, or the bearded vulture that
+#     delayed a flight at Heraklion.
+#
+# So gated, the same window yields 19 additions and every one of them is a real
+# security-caused disruption: the Manchester airfield breach (5 filings), the
+# Houston Hobby bomb threat (3), Moscow's airports closing under drone attack (4),
+# Moldovan airspace closed by a cruise missile, an unauthorised aircraft at Fort
+# Lauderdale. Precision 19/19 against 21/38 for the ungated form.
+_AVIATION_HEADLINE_PATTERN = re.compile(
+    r"\b(airport|airports|airline|airlines|airspace|flight|flights|"
+    r"carrier|carriers|aviation|terminal|aircraft|runway|airfield|tarmac)\b",
+    re.IGNORECASE,
+)
+_WEAK_DISRUPTION_PATTERN = re.compile(
+    r"\b(disrupt|disrupts|disrupted|disrupting|delay|delays|delayed|"
+    r"divert|diverts|diverted|diversion|diversions|stranded|grounding|"
+    r"shutdown|closed)\b",
+    re.IGNORECASE,
+)
+_SECURITY_NEXUS_PATTERN = re.compile(
+    r"\b(bomb|bombs|explosive|explosives|drone|drones|uav|missile|missiles|"
+    r"rocket|rockets|attack|attacks|attacked|shooting|gunman|gunmen|hijack|"
+    r"hijacked|hijacking|breach|breached|incursion|intrusion|unauthorized|"
+    r"unauthorised|security|evacuated|evacuation|terror|terrorist|militant|"
+    r"militants|shelling|sabotage|threat|threats)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_flight_disruption(text: str, title: str | None = None) -> bool:
+    """Aviation noun + disruption verb in the same text (see block comment).
+
+    `title` opens the second path: a weak disruption verb counts when it shares the
+    headline with an aviation noun AND the article carries a security nexus. Absent
+    a title only the strict path runs, so a caller that has no headline to offer
+    keeps exactly the old behaviour.
+    """
+    if _AVIATION_CONTEXT_PATTERN.search(text) and _DISRUPTION_PATTERN.search(text):
+        return True
+    if not title:
+        return False
+    return bool(_AVIATION_HEADLINE_PATTERN.search(title)
+                and _WEAK_DISRUPTION_PATTERN.search(title)
+                and _SECURITY_NEXUS_PATTERN.search(text))
 
 
 def _matches_security_keywords(title: str, description: str) -> bool:
@@ -362,7 +415,7 @@ def _matches_security_keywords(title: str, description: str) -> bool:
     plus the aviation-disruption conjunction.
     """
     text = f"{title} {description}"
-    return bool(_SECURITY_KEYWORD_PATTERN.search(text)) or _is_flight_disruption(text)
+    return bool(_SECURITY_KEYWORD_PATTERN.search(text)) or _is_flight_disruption(text, title)
 
 
 # ---------------------------------------------------------------------------

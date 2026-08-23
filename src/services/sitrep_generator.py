@@ -233,11 +233,35 @@ _DISRUPTION_VERB_RE = (
     r"canceling|cancellation|cancellations|grounded|reroute|reroutes|"
     r"rerouted|closure|closures|disruption|disruptions)\y"
 )
+# Second path, mirroring _is_flight_disruption's `title` branch: a weak verb
+# ("diverted", "delayed", "stranded") counts only when it shares the HEADLINE with
+# an aviation noun and the article carries a security nexus. Same three vocabularies,
+# in Postgres regex — \y for the word boundary, as above.
+_AVIATION_HEADLINE_RE = (
+    r"\y(airport|airports|airline|airlines|airspace|flight|flights|"
+    r"carrier|carriers|aviation|terminal|aircraft|runway|airfield|tarmac)\y"
+)
+_WEAK_DISRUPTION_RE = (
+    r"\y(disrupt|disrupts|disrupted|disrupting|delay|delays|delayed|"
+    r"divert|diverts|diverted|diversion|diversions|stranded|grounding|"
+    r"shutdown|closed)\y"
+)
+_SECURITY_NEXUS_RE = (
+    r"\y(bomb|bombs|explosive|explosives|drone|drones|uav|missile|missiles|"
+    r"rocket|rockets|attack|attacks|attacked|shooting|gunman|gunmen|hijack|"
+    r"hijacked|hijacking|breach|breached|incursion|intrusion|unauthorized|"
+    r"unauthorised|security|evacuated|evacuation|terror|terrorist|militant|"
+    r"militants|shelling|sabotage|threat|threats)\y"
+)
+
 _AVIATION_NOUN_SQL = f"{_TEXT_BLOB_SQL} ~* '{_AVIATION_NOUN_RE}'"
 # Full conjunction — aviation noun AND disruption verb — for the selection count.
 _AVIATION_DISRUPTION_SQL = (
-    f"({_TEXT_BLOB_SQL} ~* '{_AVIATION_NOUN_RE}' "
+    f"(({_TEXT_BLOB_SQL} ~* '{_AVIATION_NOUN_RE}' "
     f"AND {_TEXT_BLOB_SQL} ~* '{_DISRUPTION_VERB_RE}')"
+    f" OR (source_title ~* '{_AVIATION_HEADLINE_RE}'"
+    f" AND source_title ~* '{_WEAK_DISRUPTION_RE}'"
+    f" AND {_TEXT_BLOB_SQL} ~* '{_SECURITY_NEXUS_RE}'))"
 )
 
 
@@ -274,7 +298,8 @@ def fetch_aviation_spillover_events(db_conn, country_iso: str, country_name: str
     ).fetchall()
     return [
         e for e in _rows_to_dicts(rows)
-        if _is_flight_disruption(f"{e.get('source_title') or ''} {e.get('canonical_text') or ''}")
+        if _is_flight_disruption(f"{e.get('source_title') or ''} {e.get('canonical_text') or ''}",
+                                 e.get("source_title"))
     ]
 
 

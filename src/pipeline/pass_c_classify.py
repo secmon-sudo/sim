@@ -250,7 +250,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # Aviation stopped flying, and not because of weather — the security scope.
     # is_noise() catches snowstorm/maintenance cancellations, so excluding noisy
     # here leaves only disruptions worth keeping (mirrors the ingest gate).
-    has_flight_disruption = _is_flight_disruption(blob) and not noisy
+    has_flight_disruption = _is_flight_disruption(blob, title) and not noisy
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 

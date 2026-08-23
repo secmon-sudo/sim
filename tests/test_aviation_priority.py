@@ -2,6 +2,7 @@
 Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus).
 """
 
+from src.pipeline.ingest_filters import _is_flight_disruption
 from src.pipeline.pass_a_ingest import _matches_security_keywords, is_noise
 from src.pipeline.pass_c_classify import (
     PRESCREEN_SKIP_FLOOR,
@@ -183,3 +184,58 @@ class TestFlightDisruptionSurvivesPassC:
     def test_non_aviation_not_flagged(self):
         det = deterministic_relevance("Gold mine suspends operations after workplace accident", "")
         assert det["has_flight_disruption"] is False
+
+
+class TestWeakDisruptionVerbsNeedHeadlineAndNexus:
+    """The strict vocabulary is noun-shaped: it has "disruption" but not
+    "disrupted", and no "delayed", "diverted" or "stranded" at all — so "Flights
+    diverted after Manchester Airport security breach" was not a disruption to
+    this pipeline at all.
+
+    Measured 2026-08-23 over 7 days: 660 events carry an aviation noun, the strict
+    gate claims 120, and these verbs sit in another 77. Letting them in over the
+    whole article is 45% junk — a war roundup names an airport in one paragraph
+    and a delay in another. Requiring the verb and the noun to share the HEADLINE,
+    plus a security nexus anywhere in the article, turns that into 19 additions,
+    all real: the Manchester airfield breach (5 filings), the Houston Hobby bomb
+    threat (3), Moscow's airports closing under drone attack (4), Moldovan
+    airspace closed by a cruise missile, an unauthorised aircraft at Fort
+    Lauderdale.
+    """
+
+    def test_security_caused_diversion_passes(self):
+        t = "Flights diverted after Manchester Airport security breach"
+        assert _is_flight_disruption(t, t)
+
+    def test_bomb_threat_delay_passes(self):
+        t = "Southwest Airlines Bomb Threat at Houston Hobby Airport Triggers Tarmac Delays"
+        assert _is_flight_disruption(t, t)
+
+    def test_drone_attack_closing_airports_passes(self):
+        t = "New wave of drones in Russia: Airports closed"
+        assert _is_flight_disruption(t, t)
+
+    def test_technical_snag_is_not_a_disruption(self):
+        t = "Indigo Delhi-Mangaluru Flight Delayed By 3 Hours Due To Technical Snag"
+        assert not _is_flight_disruption(t, t)
+
+    def test_wildlife_delay_is_not_a_disruption(self):
+        t = "Endangered bearded vulture delays flight at Crete's Heraklion Airport"
+        assert not _is_flight_disruption(t, t)
+
+    def test_roundup_mentioning_both_in_the_body_is_not(self):
+        """The whole point of the headline scope: co-occurrence across 4,000
+        characters of war roundup says nothing about aviation."""
+        title = "War in Ukraine: latest news. Missiles strike Kyiv: 15 dead"
+        body = (title + " Elsewhere an airport reopened. A train was delayed. "
+                "Drone attacks continued overnight.")
+        assert not _is_flight_disruption(body, title)
+
+    def test_strict_path_is_unchanged(self):
+        t = "Emirates suspends all flights to Tehran amid strikes"
+        assert _is_flight_disruption(t, t)
+        assert _is_flight_disruption(t)
+
+    def test_caller_without_a_headline_keeps_old_behaviour(self):
+        t = "Flights diverted after Manchester Airport security breach"
+        assert not _is_flight_disruption(t)

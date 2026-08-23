@@ -487,3 +487,26 @@ class TestRetrospectiveClusters:
                                 snippet="Airport reopened after last year's closure.",
                                 kayit_turu="olay_sonrasi")
         assert build_airspace_assessment([cluster], "GB", CZIB) is None
+
+
+class TestHeadlineScopedDisruption:
+    """The airspace layer asks the ingest gate the same question, so it inherits
+    the headline-scoped path — and must hand the gate a headline to do it.
+    """
+
+    def test_security_diversion_cluster_is_aviation_specific(self):
+        cluster = {"location": "Manchester Airport", "country_iso": "GB",
+                   "severity": 70, "event_type": "security_incident",
+                   "snippet": "Seven flights were affected.",
+                   "sources": [{"title": "Flights diverted after Manchester "
+                                         "Airport security breach"}]}
+        assert airspace.is_aviation_specific(cluster, _is_flight_disruption)
+        assert airspace.is_airspace_relevant(cluster, _is_flight_disruption)
+
+    def test_technical_delay_cluster_is_not(self):
+        cluster = {"location": "Delhi Airport", "country_iso": "IN",
+                   "severity": 40, "event_type": "security_incident",
+                   "snippet": "Passengers waited three hours.",
+                   "sources": [{"title": "Indigo Flight Delayed By 3 Hours Due "
+                                         "To Technical Snag"}]}
+        assert not airspace.is_aviation_specific(cluster, _is_flight_disruption)
