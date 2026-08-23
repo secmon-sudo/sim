@@ -177,12 +177,21 @@ def collect_prescreen_rejections(db_conn, days: int = 7) -> List[Dict[str, Any]]
 
     These ARE stored, so no fetch is needed — but the same blindness applies, and
     two of the three incidents in the module docstring were exactly here.
+
+    The score is RE-COMPUTED with today's vocabulary rather than read from the
+    stored prescreen verdict: a row archived last week under the old lexicon that
+    would score today is a gap already closed, not one to report again.
     """
+    # llm_raw_output IS NULL is the marker: no LLM response was ever received for
+    # this row. NOT llm_parsed_output — the prescreen writes its own verdict there
+    # ({"prescreen": {"score": 0, ...}}), so that column is never null and the
+    # first version of this query returned zero rows every time, which would have
+    # shown up as a permanently healthy gate.
     rows = db_conn.execute(
         """SELECT source_title, source_url, canonical_text
              FROM events
             WHERE status = 'archived'
-              AND llm_parsed_output IS NULL
+              AND llm_raw_output IS NULL
               AND ingested_at > NOW() - (%s * INTERVAL '1 day')
               AND source_title IS NOT NULL""",
         (days,),
