@@ -241,6 +241,23 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     return response
 
 
+# The stages that spend LLM calls. Kept as one closed list so spend can be summed
+# by stage without string-matching drift; add here before using a new name.
+PURPOSES = frozenset({
+    "classify_single",        # pass_c, one event per call (fallback path)
+    "classify_batch",         # pass_c, chunk of events per call (normal path)
+    "dedup_adjudication",     # duplicate-card judgement at dispatch
+    "storyline_adjudication", # storyline linking judgement
+    "storyline_narrative",    # prose narrative per storyline
+    "sitrep_country",         # per-country daily SITREP prose
+    "sitrep_digest",          # run-level executive briefing
+    "forecast_g1_selection",  # weekly: country shortlist
+    "forecast_g2_country",    # weekly: per-country assessment
+    "forecast_g3_global",     # weekly: global assessment
+    "vocab_audit_judge",      # weekly gate audit, scripts/vocab_audit.py
+})
+
+
 def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, max_tokens: int = 1024,
              json_mode: bool = True) -> dict[str, Any]:
     """
@@ -405,13 +422,28 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
     raise RuntimeError(f"All LLM accounts exhausted. Last error: {last_error}")
 
 
-def log_llm_telemetry(db_conn, result: dict, router: LLMRouter, success: bool):
-    """Write telemetry record after every LLM call (success or failure)."""
+def log_llm_telemetry(db_conn, result: dict, router: LLMRouter, success: bool,
+                      *, purpose: str):
+    """Write telemetry record after every LLM call (success or failure).
+
+    `purpose` names the pipeline stage that spent the call and is keyword-only and
+    mandatory on purpose: the column it feeds was absent until 2026-08-24, and
+    without it the table answered "how many calls" but never "on what". Two thirds
+    of the stages did not log at all, so the rows that did exist described only
+    classification and quietly implied the prose stages were free.
+
+    Use the stage names in PURPOSES — free-form strings would fragment the rollup.
+    """
+    if purpose not in PURPOSES:
+        # Not fatal: a mislabelled row is worth more than a lost one, and this
+        # function must never be the reason a run dies.
+        logger.warning("Unknown LLM telemetry purpose %r — recording as-is", purpose)
     try:
         usage = result.get("response", {}).get("usage", {})
         db_conn.execute(
             "INSERT INTO system_telemetry(event_type, value_json) VALUES ('llm_call', %s)",
             (json.dumps({
+                "purpose": purpose,
                 "provider": result.get("provider", "unknown"),
                 "account": result.get("account", "unknown"),
                 "model": result.get("model", "unknown"),

@@ -18,7 +18,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from src.core.airspace import is_aviation_specific, summarize_assessment
-from src.core.llm_client import call_llm
+from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL
 
@@ -354,7 +354,8 @@ def validate_digest(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_digest(router: LLMRouter, country_results: List[Dict[str, Any]],
-                 window_start: str, window_end: str) -> Optional[Dict[str, Any]]:
+                 window_start: str, window_end: str,
+                 db_conn=None) -> Optional[Dict[str, Any]]:
     """
     Full digest build. Returns None when fewer than two countries produced a
     report — a one-country digest would just be a worse copy of that country's
@@ -366,6 +367,8 @@ def build_digest(router: LLMRouter, country_results: List[Dict[str, Any]],
         return None
 
     res = run_digest_llm(router, rows, window_start, window_end)
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, res, router, success=True, purpose="sitrep_digest")
     parsed = validate_digest(parse_digest(res["content"], [r["iso"] for r in rows]))
 
     risk_by_iso = {r["iso"]: r for r in rows}

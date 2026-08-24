@@ -311,7 +311,7 @@ def test_adjudication_logs_llm_telemetry_when_given_a_connection(monkeypatch):
     router = MagicMock()
     calls = []
     monkeypatch.setattr(sa, "log_llm_telemetry",
-                        lambda conn, res, r, success: calls.append(success))
+                        lambda conn, res, r, success, purpose: calls.append((success, purpose)))
 
     event = {"storyline_hint": "balochistan ispr terrorist killed", "country_iso": "PK",
              "occurred_at_est": datetime(2026, 8, 6, 12, 0)}
@@ -322,4 +322,4 @@ def test_adjudication_logs_llm_telemetry_when_given_a_connection(monkeypatch):
         event, recent, router, db_conn=db,
         call_llm_fn=lambda *a, **k: {"content": '{"match": null}'},
     )
-    assert calls == [True]
+    assert calls == [(True, "storyline_adjudication")]

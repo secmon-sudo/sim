@@ -54,7 +54,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-from src.core.llm_client import call_llm
+from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter, build_bulk_router
 from src.pipeline.ingest_filters import canonicalize_text, is_noise
 from src.pipeline.ingest_queries import build_search_queries
@@ -235,7 +235,7 @@ def _parse_verdicts(content: str, expected: int) -> Dict[int, bool]:
 
 
 def judge_headlines(router: LLMRouter, headlines: Sequence[str],
-                    batch_size: int = _JUDGE_BATCH) -> List[Optional[bool]]:
+                    batch_size: int = _JUDGE_BATCH, db_conn=None) -> List[Optional[bool]]:
     """One verdict per headline; None where the model did not answer.
 
     Unanswered stays None rather than defaulting either way — a parse failure is
@@ -248,6 +248,9 @@ def judge_headlines(router: LLMRouter, headlines: Sequence[str],
         prompt = "\n".join(f"{i}. {h[:200]}" for i, h in enumerate(chunk))
         try:
             result = call_llm(router, prompt, _JUDGE_SYSTEM, max_tokens=512, json_mode=False)
+            if db_conn is not None:
+                log_llm_telemetry(db_conn, result, router, success=True,
+                                  purpose="vocab_audit_judge")
         except Exception:
             logger.exception("Audit: judge call failed for batch at %d", start)
             continue
@@ -268,9 +271,9 @@ def sample(items: Sequence[Dict[str, Any]], size: int, seed: str) -> List[Dict[s
 
 
 def audit_gate(router: LLMRouter, gate: str, items: Sequence[Dict[str, Any]],
-               samples: int, seed: str) -> Dict[str, Any]:
+               samples: int, seed: str, db_conn=None) -> Dict[str, Any]:
     drawn = sample(items, samples, f"{seed}:{gate}")
-    verdicts = judge_headlines(router, [d["title"] for d in drawn])
+    verdicts = judge_headlines(router, [d["title"] for d in drawn], db_conn=db_conn)
     judged = [(d, v) for d, v in zip(drawn, verdicts) if v is not None]
     misses = [d for d, v in judged if v]
     return {
@@ -293,11 +296,12 @@ def run_audit(db_conn, router: LLMRouter, samples: int = DEFAULT_SAMPLES,
         rejected = collect_ingest_rejections(db_conn)
         for gate in (GATE_KEYWORD, GATE_NOISE):
             if gate in gates:
-                results.append(audit_gate(router, gate, rejected[gate], samples, seed))
+                results.append(audit_gate(router, gate, rejected[gate], samples, seed,
+                                          db_conn=db_conn))
     if GATE_PRESCREEN in gates:
         results.append(audit_gate(router, GATE_PRESCREEN,
                                   collect_prescreen_rejections(db_conn, days),
-                                  samples, seed))
+                                  samples, seed, db_conn=db_conn))
     return {"week": seed, "days": days, "samples": samples, "gates": results}
 
 

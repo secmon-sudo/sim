@@ -278,7 +278,8 @@ def adjudicate_duplicate_page(
         logger.exception("Duplicate-page adjudication failed; sending the alert")
         return None
     if db_conn is not None:
-        log_llm_telemetry(db_conn, result, router, success=True)
+        log_llm_telemetry(db_conn, result, router, success=True,
+                          purpose="dedup_adjudication")
     idx = _parse_match_index(result.get("content", ""), len(paged))
     if idx is None:
         return None
@@ -326,7 +327,8 @@ def adjudicate_storyline(
         logger.exception("Storyline adjudication LLM call failed; treating as NEW")
         return None
     if db_conn is not None:
-        log_llm_telemetry(db_conn, result, router, success=True)
+        log_llm_telemetry(db_conn, result, router, success=True,
+                          purpose="storyline_adjudication")
     decision = _parse_decision(result.get("content", ""), candidates)
     if decision:
         logger.info(

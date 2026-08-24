@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from src.core.llm_router import LLMRouter
-from src.core.llm_client import call_llm
+from src.core.llm_client import call_llm, log_llm_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,18 @@ def extract_json(text: str) -> str:
     return text
 
 
+def _log(db_conn, res, router, purpose: str) -> None:
+    """Record one forecast call. Placed immediately after call_llm returns, not
+    after parsing: a response that fails validation was still paid for, and the
+    G-passes retry up to three times."""
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, res, router, success=True, purpose=purpose)
+
+
 def run_g1_selection(
     router: LLMRouter,
     candidate_countries: List[Dict[str, Any]],
+    db_conn=None,
 ) -> G1Selection:
     """
     Pass G1: Selects which countries to analyze from pre-filtered candidate list (max 8).
@@ -104,6 +113,7 @@ def run_g1_selection(
     for attempt in range(3):
         try:
             res = call_llm(router, user_prompt, system_prompt, max_tokens=1000)
+            _log(db_conn, res, router, "forecast_g1_selection")
             cleaned = extract_json(res["content"])
             data = json.loads(cleaned)
             return G1Selection.model_validate(data)
@@ -153,6 +163,7 @@ def run_g2_country_assessment(
     events: List[Dict[str, Any]],
     metrics: Dict[str, Any],
     calibration_note: str = "",
+    db_conn=None,
 ) -> G2CountryAssessment:
     """
     Pass G2: Detailed evaluation and forecast for a single chosen country.
@@ -234,6 +245,7 @@ def run_g2_country_assessment(
         try:
             current_prompt = user_prompt + feedback_msg
             res = call_llm(router, current_prompt, system_prompt, max_tokens=1500)
+            _log(db_conn, res, router, "forecast_g2_country")
             cleaned = extract_json(res["content"])
             data = json.loads(cleaned)
             assessment = G2CountryAssessment.model_validate(data)
@@ -283,7 +295,8 @@ def run_g2_country_assessment(
 
 def run_g3_global_assessment(
     router: LLMRouter,
-    country_assessments: List[G2CountryAssessment]
+    country_assessments: List[G2CountryAssessment],
+    db_conn=None,
 ) -> G3GlobalAssessment:
     """
     Pass G3: Regional/Global correlation and regional spillover analysis.
@@ -328,6 +341,7 @@ def run_g3_global_assessment(
     for attempt in range(3):
         try:
             res = call_llm(router, user_prompt, system_prompt, max_tokens=1800)
+            _log(db_conn, res, router, "forecast_g3_global")
             cleaned = extract_json(res["content"])
             data = json.loads(cleaned)
             global_brief = G3GlobalAssessment.model_validate(data)

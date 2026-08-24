@@ -983,7 +983,8 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
                 ),
             )
         if log_telemetry:
-            log_llm_telemetry(db_conn, result, router, success=True)
+            log_llm_telemetry(db_conn, result, router, success=True,
+                              purpose="classify_single")
         logger.info("Event %s archived — relevance=%d, llm_type=%s, reason=%s",
                     event_id[:8], relevance, event_type,
                     parsed.get("relevance_reasoning", "")[:80])
@@ -1091,7 +1092,8 @@ def _apply_llm_classification(db_conn, router: LLMRouter, event: dict, det: dict
 
     # Log telemetry (batched path logs once for the whole chunk instead)
     if log_telemetry:
-        log_llm_telemetry(db_conn, result, router, success=True)
+        log_llm_telemetry(db_conn, result, router, success=True,
+                          purpose="classify_single")
 
     logger.info(
         "Classified event %s as %s via %s/%s (%.0fms)",
@@ -1303,7 +1305,8 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
         # Record the failure so a model's true garbage-JSON rate is measurable —
         # successes already log telemetry, so without this a degrading :free slot
         # (e.g. Nemotron) stays invisible until it starves the run.
-        log_llm_telemetry(db_conn, result, router, success=False)
+        log_llm_telemetry(db_conn, result, router, success=False,
+                          purpose="classify_batch")
         _release_pending(requeue=True)
         stats["failed"] += len(llm_events)
         stats["parse_error"] = True
@@ -1317,7 +1320,7 @@ def classify_event_batch(db_conn, router: LLMRouter, events: list[dict], worker_
 
     # One call covered the whole chunk — log it once, here, rather than once per
     # event inside the apply loop (which recorded the same call N times over).
-    log_llm_telemetry(db_conn, result, router, success=True)
+    log_llm_telemetry(db_conn, result, router, success=True, purpose="classify_batch")
 
     for i, event in enumerate(llm_events, 1):
         item = items.get(i)

@@ -319,7 +319,7 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     logger.info("Candidates selected for LLM G1 Selection: %s", [c["country_iso"] for c in candidate_countries])
 
     # Pass G1: Select final countries for assessment (max 8)
-    g1_result = run_g1_selection(router, candidate_countries)
+    g1_result = run_g1_selection(router, candidate_countries, db_conn=db_conn)
     chosen_isos = g1_result.chosen_countries
     
     logger.info("LLM G1 chosen countries: %s", chosen_isos)
@@ -334,14 +334,15 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
             if country_note:
                 note = f"{note} {country_note}" if note else country_note
             ass = run_g2_country_assessment(
-                router, c["country_iso"], c["events"], c, calibration_note=note
+                router, c["country_iso"], c["events"], c, calibration_note=note,
+                db_conn=db_conn,
             )
             c["assessment"] = ass.model_dump()
             g2_assessments.append(ass)
 
     # Pass G3: Global Assessment
     logger.info("Running G3 Global & Spillover Assessment...")
-    g3_result = run_g3_global_assessment(router, g2_assessments)
+    g3_result = run_g3_global_assessment(router, g2_assessments, db_conn=db_conn)
     global_brief = g3_result.model_dump()
 
     # Watchlist & Emerging Concerns Groupings

@@ -21,7 +21,7 @@ import json
 import logging
 from pathlib import Path
 
-from src.core.llm_client import LLMRequestTooLarge, call_llm
+from src.core.llm_client import LLMRequestTooLarge, call_llm, log_llm_telemetry
 from src.core.storyline_narrative import build_timeline, summarize_timeline
 
 logger = logging.getLogger(__name__)
@@ -239,6 +239,8 @@ def run_storyline_narratives(db_conn, router) -> dict:
                 # returns HTTP 400 (validator requires "json" in the prompt).
                 json_mode=False,
             )
+            log_llm_telemetry(db_conn, result, router, success=True,
+                              purpose="storyline_narrative")
             narrative = (result.get("content") or "").strip()
             if not narrative:
                 stats["failed"] += 1

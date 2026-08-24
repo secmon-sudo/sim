@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.airspace import build_airspace_assessment
+from src.core.llm_client import log_llm_telemetry
 from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
 from src.services.czib_client import fetch_active_czib_by_country
@@ -154,6 +155,8 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
         res = run_sitrep_llm(router, country_iso, country_name,
                              window_start, window_end, field, strategic, spillover,
                              airspace=airspace)
+        log_llm_telemetry(db_conn, res, router, success=True,
+                          purpose="sitrep_country")
         allowed_urls = [
             s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
         ]
@@ -260,7 +263,7 @@ def run_digest(db_conn, router: LLMRouter, results: List[Dict[str, Any]],
     ws = f"{window_start:%Y-%m-%d %H:%M}"
     we = f"{window_end:%Y-%m-%d %H:%M}"
     try:
-        digest = build_digest(router, results, ws, we)
+        digest = build_digest(router, results, ws, we, db_conn=db_conn)
     except Exception as e:
         logger.exception("Digest generation failed")
         try:
