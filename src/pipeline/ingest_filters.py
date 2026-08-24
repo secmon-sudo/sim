@@ -271,6 +271,21 @@ _HIGH_SIGNAL_TERMS = {
     "invasion", "invaded", "coup", "overthrow", "overthrown",
     "ceasefire", "blockade", "siege", "ambush", "offensive",
     "casualties", "fatalities", "killed", "wounded", "dead",
+    # Present tense and gerunds of the verbs above. Headlines default to the
+    # present ("Strike KILLS 16"), not the past, so listing only the participle
+    # dropped the most canonical event shape this pipeline exists to catch:
+    # measured 2026-08-24, "Russian strike on Kyiv kills 16" was rejected here
+    # while "...killed 16" passed. Bare "injured"/"injuries" were absent too —
+    # config carried only compounds ("multiple injured").
+    # NB: bare "kills"/"killing" are deliberately NOT here. They belong to the
+    # anchored _CASUALTY_CLAIM_PATTERN below — pass_c's prescreen scores off this
+    # same lexicon, and a bare casualty verb defeats the anchoring it relies on to
+    # reject "the tax deal kills jobs". Nouns and participles are safe here; verbs
+    # are not, and listing a verb in both places double-counts it — "Blast injures
+    # 18" outscored "18 injured in blast" until "injures" was taken back out.
+    "injured", "injuries",
+    "abducts", "abducting", "kidnaps", "kidnapping",
+    "assassinates", "assassinating", "invades", "invading", "massacres",
     "artillery", "mortar", "rocket", "rockets",
     "drone attack", "drone strike", "drone strikes",
     "war", "warfare", "conflict", "clashes",
@@ -405,6 +420,34 @@ def _is_flight_disruption(text: str, title: str | None = None) -> bool:
                 and _SECURITY_NEXUS_PATTERN.search(text))
 
 
+# Counts, shared by the ingest gate below and the priority scorer further down.
+_CASUALTY_NUM = (r"(?:\d{1,4}|dozens?|scores|one|two|three|four|five|six|seven|"
+                 r"eight|nine|ten|eleven|twelve)")
+
+# A casualty VERB earns entry only when something anchors it, for the reason
+# pass_c's HOSTILE_ACT_PATTERN gives: bare "kills" is where the metaphors live
+# ("the deal kills jobs", "United kills off the comeback"). The three anchors are
+# an armed subject, an explicitly human object, or a stated count — none of which
+# a metaphor carries. Added 2026-08-24, when the flat lexicon was found to hold
+# "killed" but not "kills", and so dropped "Strike kills 16" outright.
+_CASUALTY_CLAIM_PATTERN = re.compile(
+    r"\b(?:drones?|missiles?|rockets?|uavs?|strikes?|airstrikes?|shelling|"
+    r"bombardment|blasts?|explosions?|troops|forces|militants?|gunmen|rebels?|"
+    r"insurgents?|terrorists?|jets?|warplanes?|raids?|attacks?|gangs?|police|"
+    r"soldiers|army|militia)"
+    r"['\u2019\"]?\s+(?:[\w'\u2019-]+\s+){0,3}"
+    r"(?:kills?|killing|injur(?:e|es|ing)|wounds?|wounding)\b"
+    r"|\b(?:kills?|killing|injur(?:e|es|ing)|wounds?|wounding)\s+"
+    r"(?:[\w'\u2019-]+\s+){0,2}"
+    r"(?:civilians?|people|residents?|children|child|women|worshippers|passengers|"
+    r"pilgrims|troops|soldiers|officers)\b"
+    r"|\b(?:kills?|killing|injur(?:e|es|ing)|wounds?|wounding)\s+"
+    r"(?:at\s+least\s+|more\s+than\s+|nearly\s+|up\s+to\s+|some\s+)?"
+    + _CASUALTY_NUM + r"\b",
+    re.IGNORECASE,
+)
+
+
 def _matches_security_keywords(title: str, description: str) -> bool:
     """Check if article title/description contains at least one security keyword.
 
@@ -415,7 +458,9 @@ def _matches_security_keywords(title: str, description: str) -> bool:
     plus the aviation-disruption conjunction.
     """
     text = f"{title} {description}"
-    return bool(_SECURITY_KEYWORD_PATTERN.search(text)) or _is_flight_disruption(text, title)
+    return (bool(_SECURITY_KEYWORD_PATTERN.search(text))
+            or bool(_CASUALTY_CLAIM_PATTERN.search(text))
+            or _is_flight_disruption(text, title))
 
 
 # ---------------------------------------------------------------------------
@@ -464,11 +509,45 @@ _CRITICAL_PRIORITY_PATTERN = re.compile(
 
 # "N killed/dead/wounded…" — a concrete casualty count is the strongest cheap
 # signal that an article reports a real, current incident.
+# The count may be a digit or a word, and the clause runs in either order:
+# "14 killed in the barrage" and "barrage kills 14" report the same event. Only
+# the first was matched until 2026-08-24, so identical events scored 6 or 0 on
+# word order alone — and because the per-run insert budget always binds, a 0
+# here is not a lower rank but an item dropped.
+# Hebrew was the one feed language with no casualty vocabulary here, so its
+# incident reports could never earn the casualty bonus and sat permanently below
+# their English equivalents in the budget ranking — visible the moment the
+# English side was strengthened on 2026-08-24.
+_CASUALTY_PARTICIPLE = (r"(?:killed|dead|deaths|injured|wounded|casualties|fatalities|"
+                        r"ölü|yaralı|قتيل|قتلى|جريح|"
+                        r"הרוגים|הרוג|נהרגו|נהרג|פצועים|פצוע|נפצעו|נפצע|חללים)")
+_CASUALTY_VERB = r"(?:kills?|killing|injures?|injuring|wounds?|wounding)"
+
 _CASUALTY_COUNT_PATTERN = re.compile(
-    r"\b(\d{1,4})\s+(?:people\s+|civilians\s+|soldiers\s+)?"
-    r"(?:killed|dead|deaths|injured|wounded|casualties|fatalities|ölü|yaralı|قتيل|قتلى|جريح)\b",
+    rf"\b(?P<n1>{_CASUALTY_NUM})\s+(?:people\s+|civilians\s+|soldiers\s+)?"
+    rf"{_CASUALTY_PARTICIPLE}\b"
+    rf"|\b{_CASUALTY_VERB}\s+"
+    rf"(?:at\s+least\s+|more\s+than\s+|nearly\s+|up\s+to\s+|some\s+)?"
+    rf"(?P<n2>{_CASUALTY_NUM})\b",
     re.IGNORECASE,
 )
+
+# Word-form counts, so the ">= 10" escalation is not silently forfeited whenever
+# a headline spells the number out. "dozens"/"scores" are read at their
+# conventional floor, which is all the >= 10 test needs.
+_CASUALTY_NUM_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "dozen": 12, "dozens": 24, "scores": 40,
+}
+
+
+def _casualty_count(match: re.Match) -> int:
+    """Numeric value of whichever count group matched, 0 if unreadable."""
+    raw = (match.group("n1") or match.group("n2") or "").lower()
+    if raw.isdigit():
+        return int(raw)
+    return _CASUALTY_NUM_WORDS.get(raw, 0)
 
 _BREAKING_PATTERN = re.compile(
     r"\b(breaking|urgent|just in|son dakika|عاجل)\b", re.IGNORECASE
@@ -481,7 +560,8 @@ def priority_score(title: str, description: str) -> int:
     Components (all word-boundary regex, multi-language):
       +4 per distinct critical-term hit (capped at 3 hits)
       +1 per security-keyword hit (capped at 5)
-      +3 if a concrete casualty count is stated (+2 more if >= 10)
+      +3 if a concrete casualty count is stated (+2 more if >= 10),
+         or +2 for an anchored casualty claim that states no number
       +1 for breaking/urgent markers
     """
     text = f"{title} {description}"
@@ -491,16 +571,26 @@ def priority_score(title: str, description: str) -> int:
     score += 4 * min(len(critical_hits), 3)
 
     keyword_hits = {m.group(0).lower() for m in _SECURITY_KEYWORD_PATTERN.finditer(text)}
+    claim = _CASUALTY_CLAIM_PATTERN.search(text)
+    if claim:
+        # Stands in for the keyword hit the flat lexicon cannot safely carry:
+        # "killed" is a listed term, a bare "kills" can never be one. Without this
+        # the same event scored a point lower for being written in the present
+        # tense, which is the tense wire copy actually uses.
+        keyword_hits.add("__casualty_claim__")
     score += min(len(keyword_hits), 5)
 
     casualty = _CASUALTY_COUNT_PATTERN.search(text)
     if casualty:
         score += 3
-        try:
-            if int(casualty.group(1)) >= 10:
-                score += 2
-        except ValueError:
-            pass
+        if _casualty_count(casualty) >= 10:
+            score += 2
+    elif claim:
+        # An anchored casualty claim that states no number — "strike kills child",
+        # "gunmen kill worshippers" — still reports an incident. Without this it
+        # cleared the gate and then scored 0, which under a permanently binding
+        # insert budget means dropped: admitted in name only.
+        score += 2
 
     if _BREAKING_PATTERN.search(text):
         score += 1
