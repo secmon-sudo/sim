@@ -16,6 +16,8 @@ re-exports below preserve the historical import surface of pass_a_ingest.
 
 import json
 import logging
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -53,7 +55,9 @@ from src.pipeline.ingest_sources import (  # noqa: F401
     fetch_rss_feed,
     fetch_travel_advisories,
     google_translate,
+    reset_translation_counter,
     translate_to_english_if_needed,
+    translation_call_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +101,20 @@ _PER_DOMAIN_CAPS = {
 # ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
+
+# Pass A is ~78% of run wall-clock (measured 2026-08-24 over 43 runs) and had no
+# phase timing at all, so the only honest answer to "why" was inference. These
+# accumulate seconds per phase into the existing pass_a telemetry blob; the loop
+# phases are accumulators because the cost is spread over ~1000 iterations rather
+# than spent in one block.
+@contextmanager
+def _timed(acc: dict, key: str):
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        acc[key] = acc.get(key, 0.0) + (time.perf_counter() - start)
+
 
 def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list[tuple]]:
     """Fetch recent events once to avoid O(N) database queries during ingestion.
@@ -349,8 +367,12 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "article_fetch_failed": 0,
     }
     now_utc = datetime.now(timezone.utc)
+    timings: dict[str, float] = {}
+    pass_started = time.perf_counter()
+    reset_translation_counter()
 
-    queries = build_search_queries(db_conn)
+    with _timed(timings, "build_queries"):
+        queries = build_search_queries(db_conn)
     all_items = []
 
     # Execute up to 50 queries per run. Active storyline queries always run first;
@@ -368,7 +390,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         selected_queries.extend(rotated[:remaining_slots])
 
     for query_info in selected_queries:
-        items = fetch_rss_feed(query_info, is_direct_url=False, stats=stats)
+        with _timed(timings, "fetch_query_feeds"):
+            items = fetch_rss_feed(query_info, is_direct_url=False, stats=stats)
         all_items.extend(items)
         stats["queries_executed"] += 1
 
@@ -379,7 +402,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     configured = (SETTINGS.get("sources", {}).get("publisher_feeds", [])
                   + SETTINGS.get("sources", {}).get("news_queries", []))
     for feed_url in configured:
-        items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
+        with _timed(timings, "fetch_configured_feeds"):
+            items = fetch_rss_feed(feed_url, is_direct_url=True, stats=stats)
         # Apply keyword filter: only keep items matching security keywords
         filtered_items = []
         for it in items:
@@ -393,7 +417,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
     # Fetch official travel advisories (US State Dept + UK FCDO) — Level 3-4 / "do not travel"
     try:
-        advisory_items = fetch_travel_advisories(stats=stats)
+        with _timed(timings, "fetch_advisories"):
+            advisory_items = fetch_travel_advisories(stats=stats)
         all_items.extend(advisory_items)
         if advisory_items:
             stats["queries_executed"] += 1
@@ -422,7 +447,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
     # Fetch recent events for comparison once (texts and id/domain meta are
     # index-aligned; in-run inserts are prepended to both)
-    recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
+    with _timed(timings, "load_dedup_corpus"):
+        recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
 
     inserted = 0
     domain_inserts: dict[str, int] = {}
@@ -448,17 +474,20 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # Auto-translate title and description if needed
         title = item.get("title", "")
         description = item.get("description", "")
-        if title:
-            item["title"] = translate_to_english_if_needed(title)
-        if description:
-            item["description"] = translate_to_english_if_needed(description)
+        with _timed(timings, "translate"):
+            if title:
+                item["title"] = translate_to_english_if_needed(title)
+            if description:
+                item["description"] = translate_to_english_if_needed(description)
 
         # Canonicalize
         raw_text = f"{item.get('title', '')} {item.get('description', '')}"
         canonical = canonicalize_text(raw_text)
 
         # Noise filter — skip for official travel advisory items
-        if not item.get("_skip_noise_filter") and is_noise(canonical):
+        with _timed(timings, "noise_filter"):
+            noisy = not item.get("_skip_noise_filter") and is_noise(canonical)
+        if noisy:
             stats["noise_filtered"] += 1
             continue
 
@@ -504,7 +533,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             logger.info("Content farm rejected: %s | %.80s", domain, item.get("title") or "")
             continue
 
-        penalty = check_domain_penalty(db_conn, domain)
+        with _timed(timings, "domain_penalty_db"):
+            penalty = check_domain_penalty(db_conn, domain)
         if penalty > 0.8:
             stats["domain_penalized"] += 1
             continue
@@ -520,12 +550,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # Content dedup: a similar article already exists → don't re-insert, but
         # credit its source to the surviving event as corroboration (the dropped
         # duplicate IS the multi-source verification evidence).
-        dup_idx = find_content_duplicate(recent_events, item.get("title", ""), canonical)
+        with _timed(timings, "content_dedup_cpu"):
+            dup_idx = find_content_duplicate(recent_events, item.get("title", ""), canonical)
         if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
             dup_event_id, dup_event_domain = recent_meta[dup_idx]
-            if _record_corroboration(db_conn, dup_event_id, dup_event_domain,
-                                     domain, url, item.get("title", "")):
+            with _timed(timings, "corroboration_db"):
+                corroborated = _record_corroboration(db_conn, dup_event_id, dup_event_domain,
+                                                     domain, url, item.get("title", ""))
+            if corroborated:
                 stats["corroborations_recorded"] += 1
             continue
 
@@ -553,7 +586,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         if (_VERIFY_PUBLISH_DATE or _FETCH_FULL_TEXT) and \
                 stats["full_text_attempted"] < _ARTICLE_FETCH_MAX_PER_RUN:
             stats["full_text_attempted"] += 1
-            article = fetch_article(url)
+            with _timed(timings, "article_fetch"):
+                article = fetch_article(url)
 
             # Prefer the publisher's URL: it is what a reader should be handed in
             # a report, and it makes source_url_hash stable — the same story
@@ -613,7 +647,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
         # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
         try:
-            with db_conn.transaction():
+            with _timed(timings, "insert_db"), db_conn.transaction():
                 result = db_conn.execute(
                     """INSERT INTO events (source_url, source_url_hash, source_domain,
                                            source_title, raw_text, canonical_text, status,
@@ -652,6 +686,19 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         stats["priority_inserted_max"] = max(inserted_priorities)
         stats["priority_inserted_median"] = int(statistics.median(inserted_priorities))
     stats["priority_dropped_max"] = dropped_priority_max
+
+    # Phase timings, seconds. Reported as a nested block so the existing counters
+    # keep their shape, and rounded because nothing here is worth sub-ms precision.
+    # 'unaccounted' is deliberate: it is the part of Pass A no timer covers yet, and
+    # a large value means the next place to look is not on this list.
+    elapsed = time.perf_counter() - pass_started
+    measured = sum(timings.values())
+    block = {k: round(v, 1) for k, v in sorted(timings.items())}
+    block["translations_performed"] = translation_call_count()
+    block["measured_total"] = round(measured, 1)
+    block["pass_a_total"] = round(elapsed, 1)
+    block["unaccounted"] = round(elapsed - measured, 1)
+    stats["timings_sec"] = block
 
     # Log telemetry
     try:

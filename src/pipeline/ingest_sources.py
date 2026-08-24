@@ -789,6 +789,23 @@ _NON_LATIN_CHAR_RE = re.compile(
 _TRANSLATE_MIN_NON_LATIN_RATIO = 0.3
 
 
+# Translation is the one network call Pass A makes per ITEM rather than per
+# inserted event, so its volume is invisible in every existing counter. Counted
+# here rather than at the call site because only this function knows whether the
+# ratio gate actually fired.
+_TRANSLATE_CALLS = 0
+
+
+def translation_call_count() -> int:
+    """Network translations performed since the last reset."""
+    return _TRANSLATE_CALLS
+
+
+def reset_translation_counter() -> None:
+    global _TRANSLATE_CALLS
+    _TRANSLATE_CALLS = 0
+
+
 def translate_to_english_if_needed(text: str) -> str:
     """Translate to English when the text is substantially non-Latin script.
 
@@ -804,6 +821,8 @@ def translate_to_english_if_needed(text: str) -> str:
         return text
     letters = sum(1 for ch in text if ch.isalpha())
     if letters and non_latin / letters >= _TRANSLATE_MIN_NON_LATIN_RATIO:
+        global _TRANSLATE_CALLS
+        _TRANSLATE_CALLS += 1
         return google_translate(text, target="en")
     return text
 
