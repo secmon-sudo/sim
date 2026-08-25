@@ -490,12 +490,23 @@ def cycle_common_tokens(recent_events: list[dict]) -> set:
 
     Callers pass the already recency-ordered candidate list; slicing here keeps the
     ordering contract in one place.
+
+    The slice counts STORYLINES, not rows. The pool carries every member of every
+    storyline (see _fetch_recent_events_for_linking), so 200 rows is no longer 200
+    storylines — taking rows would quietly shrink the denominator a threshold of 3 was
+    calibrated against, and a smaller denominator makes containment MORE permissive,
+    which is the direction that merges distinct incidents.
     """
-    return overexposed_tokens(
-        ((r.get("storyline_id"), r.get("storyline_hint"))
-         for r in recent_events[:CYCLE_SLICE_STORYLINES]),
-        STORYLINE_CONTAINMENT_COMMON_MIN,
-    )
+    seen: set = set()
+    sliced = []
+    for r in recent_events:
+        sid = r.get("storyline_id")
+        if sid not in seen:
+            if len(seen) >= CYCLE_SLICE_STORYLINES:
+                break
+            seen.add(sid)
+        sliced.append((sid, r.get("storyline_hint")))
+    return overexposed_tokens(sliced, STORYLINE_CONTAINMENT_COMMON_MIN)
 
 
 def link_storylines(event: dict, recent_events: list[dict],
@@ -696,7 +707,7 @@ CYCLE_SLICE_STORYLINES = 200
 
 
 def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
-    """One representative event per storyline across the full linking window.
+    """Every member of every storyline across the full linking window.
 
     This used to be `ORDER BY occurred_at_est DESC LIMIT 200` over raw events, which
     made the configured 14-day window a fiction: at ~800 events/day the 200 newest rows
@@ -708,32 +719,39 @@ def _fetch_recent_events_for_linking(db_conn) -> list[dict]:
     is what put three mutually contradictory casualty tolls in the RU SITREP as if they
     were three separate attacks.
 
-    Keying the cap to storylines rather than to events is what makes the window honest:
-    linking asks "does this belong to an existing storyline", so one recent
-    representative per storyline is the complete candidate set, and it is SMALLER than
-    the old raw-event pool would have to be to cover the same time span (2147 storylines
-    vs 3976 events over 14 days). Cost measured at 0.8s per run for the whole pool.
+    It used to return ONE representative per storyline — the most recent member — on
+    the reasoning that linking asks "does this belong to an existing storyline", so one
+    member answers for the whole. That reasoning is wrong in the case that matters. A
+    storyline's wording DRIFTS as it grows: by the time it holds a dozen filings its
+    newest member reads "gaza hospital strike casualties" while the member a new report
+    actually matches, "gaza israeli airstrike", is hidden behind it. The candidate that
+    would have linked is exactly the one the representative hides.
 
-    The representative is each storyline's most RECENT member: the anchor-assist and
-    containment paths in should_link_storyline carry tight 72-hour windows, so the
-    freshest member is the one most likely to still be inside them.
+    Measured 2026-08-25 by replaying link_storylines over 3 days of real events (1244
+    events, 41 runs), counting hints that appear on 2+ events and land in more than one
+    storyline:
+
+        pool shape            storylines   split
+        production (1 rep)          938      73%
+        replay, 1 rep               616      14%
+        replay, 3 reps              575       8%
+        replay, 10 reps             543       3%
+        replay, all members         550       1%
+
+    All members costs 45% more rows than one representative (5962 vs 4097 over 14 days),
+    not the multiple the storyline-keyed design assumed — most storylines are singletons,
+    so capping them saved almost nothing while hiding almost everything. Callers that
+    assume one row per storyline must say so themselves; see cycle_common_tokens.
     """
     try:
         rows = db_conn.execute(
             """SELECT id, storyline_id, storyline_hint, country_iso, occurred_at_est,
                       anchor_name_norm, anchor_name_raw, anchor_confidence
-               FROM (
-                   SELECT DISTINCT ON (storyline_id)
-                          id, storyline_id, storyline_hint, country_iso,
-                          occurred_at_est, anchor_name_norm, anchor_name_raw,
-                          anchor_confidence
-                   FROM events
-                   WHERE status IN ('scored', 'reconciled')
-                     AND storyline_hint IS NOT NULL
-                     AND storyline_id IS NOT NULL
-                     AND occurred_at_est > NOW() - (%s * INTERVAL '1 day')
-                   ORDER BY storyline_id, occurred_at_est DESC
-               ) reps
+               FROM events
+               WHERE status IN ('scored', 'reconciled')
+                 AND storyline_hint IS NOT NULL
+                 AND storyline_id IS NOT NULL
+                 AND occurred_at_est > NOW() - (%s * INTERVAL '1 day')
                ORDER BY occurred_at_est DESC""",
             (STORYLINE_TIME_WINDOW_DAYS,),
         ).fetchall()

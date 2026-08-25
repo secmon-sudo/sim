@@ -7,10 +7,19 @@ turned the configured 14-day window into roughly 21 hours at production volume. 
 storylines the previous runs had created. That fragmentation is what printed three
 contradictory casualty tolls in the RU SITREP as if they were three separate attacks.
 
-The invariant this file pins: the pool is capped by STORYLINE, not by event count, so a
-heavily-covered incident can never crowd older storylines out of its own candidate list.
-Mocked db_conn cannot execute DISTINCT ON, which is precisely why these run against real
-Postgres — the same gap that hid the alert_suppression upsert bug for a day.
+The invariant this file pins: NOTHING is capped away. Every member of every storyline
+inside the window is a candidate, so neither a heavily-covered incident nor a storyline's
+own newest filing can hide the member a new report would have matched.
+
+The pool was narrowed to one representative per storyline on 2026-08-11 and that turned
+out to hide the very candidate that matters: a storyline's wording drifts as it grows, so
+by the time it holds a dozen filings its newest member reads "gaza hospital strike
+casualties" while the one a new report matches, "gaza israeli airstrike", sits behind it.
+Measured 2026-08-25 over 3 days of real events, 73% of hints appearing on 2+ events were
+split across storylines in production against 1% when the pool carries every member.
+
+These run against real Postgres because a mocked db_conn cannot execute this query —
+the same gap that hid the alert_suppression upsert bug for a day.
 """
 
 import os
@@ -85,20 +94,24 @@ def _add(conn, storyline, hint, hours_ago, status="scored", country="RU"):
 
 
 class TestLinkingPool:
-    def test_one_representative_per_storyline(self, conn):
+    def test_every_member_of_a_storyline_is_a_candidate(self, conn):
+        """One representative answered for the whole storyline and hid the rest."""
         s = str(uuid.uuid4())
         for i in range(5):
             _add(conn, s, f"nizhnekamsk drone attack {i}", hours_ago=i + 1)
         pool = _fetch_recent_events_for_linking(conn)
-        assert len(pool) == 1
+        assert len(pool) == 5
 
-    def test_representative_is_the_most_recent_member(self, conn):
+    def test_an_older_member_is_still_reachable_behind_a_drifted_newest(self, conn):
+        """The regression in one case: a new report matching "oldest" must still find
+        this storyline even though its most recent filing words the story differently."""
         s = str(uuid.uuid4())
         _add(conn, s, "oldest", hours_ago=40)
         _add(conn, s, "newest", hours_ago=2)
         _add(conn, s, "middle", hours_ago=20)
         pool = _fetch_recent_events_for_linking(conn)
-        assert [p["storyline_hint"] for p in pool] == ["newest"]
+        assert [p["storyline_hint"] for p in pool] == ["newest", "middle", "oldest"]
+        assert len({p["storyline_id"] for p in pool}) == 1
 
     def test_busy_storyline_cannot_crowd_out_older_ones(self, conn):
         """The actual 2026-08-11 failure: an incident covered by many sources filled
@@ -110,9 +123,8 @@ class TestLinkingPool:
         _add(conn, quiet, "quiet older incident", hours_ago=30)
 
         pool = _fetch_recent_events_for_linking(conn)
-        assert len(pool) == 2
-        assert {p["storyline_hint"] for p in pool} == {"loud incident",
-                                                       "quiet older incident"}
+        assert len(pool) == 251
+        assert "quiet older incident" in {p["storyline_hint"] for p in pool}
 
     def test_ordered_by_recency(self, conn):
         """cycle_common_tokens slices the head of this list, so the ordering is a

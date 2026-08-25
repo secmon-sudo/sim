@@ -10,6 +10,12 @@ because the fragmentation this fix removes was splitting one incident.
 
 So the two consumers were separated: linking sees the whole window, the token census
 sees the head of it.
+
+Updated 2026-08-25: the linking pool now carries every MEMBER of every storyline, not
+one representative each, so "the head of the list" is no longer 200 storylines' worth of
+rows. The slice counts distinct storylines itself — taking rows would shrink the
+denominator the threshold was calibrated against, and a smaller denominator declares
+fewer words generic, which makes the containment path MORE permissive.
 """
 
 from src.pipeline.pass_d_score import (
@@ -53,6 +59,22 @@ class TestCycleSlice:
         pool = [{"storyline_id": "same", "storyline_hint": "nizhnekamsk drone refinery"}
                 for _ in range(40)]
         assert cycle_common_tokens(pool) == set()
+
+    def test_the_slice_counts_storylines_not_rows(self):
+        """A heavily-covered storyline sits on many consecutive rows now. If the slice
+        counted rows, one loud incident could consume the whole census window and the
+        cycle's real vocabulary would go unseen."""
+        loud = [{"storyline_id": "loud", "storyline_hint": "loud incident"}
+                for _ in range(CYCLE_SLICE_STORYLINES * 2)]
+        cycle = [_rep(i, "kyiv drone strike") for i in range(3)]
+        assert cycle_common_tokens(loud + cycle) == {"kyiv"}
+
+    def test_the_storyline_budget_is_still_enforced(self):
+        """Distinct storylines past the budget are dropped, however few rows they take."""
+        head = [_rep(i, "fresh cycle token") for i in range(CYCLE_SLICE_STORYLINES)]
+        tail = [_rep(1000 + i, "ancient buried token") for i in range(50)]
+        tokens = cycle_common_tokens(head + tail)
+        assert "fresh" in tokens and "ancient" not in tokens
 
     def test_rows_without_a_storyline_are_ignored(self):
         pool = [{"storyline_id": None, "storyline_hint": "kyiv drone strike"}

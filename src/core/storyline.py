@@ -6,6 +6,7 @@ Bigram-enhanced Jaccard similarity for linking related aviation events.
 """
 
 import re
+from functools import lru_cache
 from typing import Set
 
 from src.core.geo import geo_key
@@ -77,12 +78,14 @@ def strip_date_hint(text: str) -> str:
     return re.sub(r"\s+", " ", _DATE_HINT_IN_TEXT.sub("", text)).strip()
 
 
-def tokenize_storyline_hint(text: str) -> Set[str]:
-    """
-    Bigram-enhanced tokenization.
-    Example: "runway incursion CAI" → {"runway", "incursion", "cai",
-                                        "runway incursion", "incursion cai"}
-    """
+# Cached because linking asks the same question thousands of times per run: every
+# scored event is compared against the whole candidate pool, and the pool now carries
+# every member of every storyline rather than one representative each (see
+# _fetch_recent_events_for_linking). The hints repeat exactly — that is the entire
+# point of a storyline — so this turns all but the first tokenization of a given
+# string into a dict lookup. Same reasoning as _place_keys_cached in core.geo.
+@lru_cache(maxsize=16384)
+def _tokenize_storyline_hint_cached(text: str) -> frozenset:
     clean = re.sub(r"[^\w\s]", "", text.lower())
     tokens = [
         t for t in clean.split()
@@ -90,7 +93,16 @@ def tokenize_storyline_hint(text: str) -> Set[str]:
     ]
     unigrams = set(tokens)
     bigrams = {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
-    return unigrams | bigrams
+    return frozenset(unigrams | bigrams)
+
+
+def tokenize_storyline_hint(text: str) -> Set[str]:
+    """
+    Bigram-enhanced tokenization.
+    Example: "runway incursion CAI" → {"runway", "incursion", "cai",
+                                        "runway incursion", "incursion cai"}
+    """
+    return set(_tokenize_storyline_hint_cached(text))
 
 
 def jaccard_similarity(hint_a: str, hint_b: str) -> float:
