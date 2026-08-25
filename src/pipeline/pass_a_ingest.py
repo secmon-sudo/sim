@@ -23,6 +23,11 @@ from pathlib import Path
 
 # Re-exported: historical import surface of this module (consumers: orchestrator,
 # pass_c_classify, tests). Keep these names importable from pass_a_ingest.
+# sitrep_verify owns the question "does this domain count as an outlet of its own",
+# so ingest and the report layer cannot disagree about it. Safe to import at module
+# level: sitrep_verify pulls ingest_filters lazily, inside registrable_domain.
+from src.core.sitrep_verify import is_independent_publisher
+
 from src.pipeline.ingest_filters import (  # noqa: F401
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
@@ -197,6 +202,15 @@ def _record_corroboration(db_conn, event_id, event_domain: str,
         return False
     if registrable_domain(dup_domain) == registrable_domain(event_domain or ""):
         return False
+    # A carrier is not a witness: Yahoo/AOL syndication and Reddit crossposts
+    # redistribute one newsroom's filing, and recording them here is what feeds both
+    # the "Onaylandı (Çoklu kaynak)" label and the corroboration ALERT floor. Refused
+    # at the source so the column stops accumulating them; the two readers filter as
+    # well, because rows written before 2026-08-25 keep theirs for the retention window.
+    if not is_independent_publisher(dup_domain):
+        logger.debug("Corroboration from carrier %s not recorded", dup_domain)
+        return False
+
     entry = json.dumps([{"domain": dup_domain, "url": _citable_url(dup_url),
                          "title": (dup_title or "")[:200],
                          "seen_at": datetime.now(timezone.utc).isoformat()}])

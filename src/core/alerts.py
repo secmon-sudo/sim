@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.core.geo import geo_key, trusted_anchor
+from src.core.sitrep_verify import is_independent_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +460,11 @@ def corroboration_count(event: dict) -> int:
     """Independent publishers that reported the same incident.
 
     Pass A drops same-registrable-domain duplicates before appending, so each entry is
-    a distinct outlet rather than a distinct URL.
+    a distinct outlet rather than a distinct URL — but distinct is not independent.
+    Carriers (Yahoo/AOL syndication, Reddit crossposts; see is_independent_publisher)
+    redistribute one wire filing under several domains, and this count is a floor that
+    can raise a tier to ALERT. Rows written before 2026-08-25 still contain them, so
+    the filter has to run here rather than only at ingest.
     """
     sources = event.get("corroborating_sources")
     if isinstance(sources, str):
@@ -467,7 +472,12 @@ def corroboration_count(event: dict) -> int:
             sources = json.loads(sources)
         except (TypeError, ValueError):
             return 0
-    return len(sources) if isinstance(sources, list) else 0
+    if not isinstance(sources, list):
+        return 0
+    return sum(
+        1 for s in sources
+        if isinstance(s, dict) and is_independent_publisher(s.get("domain") or "")
+    )
 
 
 def _tier_from_signals(sev, conf, anc: str, time_: str, located: bool,

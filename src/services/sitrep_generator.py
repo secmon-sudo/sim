@@ -25,6 +25,7 @@ from src.core.sitrep_verify import (
     LABEL_OFFICIAL,
     LABEL_SINGLE,
     fallback_cluster_key,
+    is_independent_publisher,
     is_official_domain,
     label_cluster,
     registrable_domain,
@@ -704,7 +705,12 @@ def build_sitrep_clusters(events: List[Dict[str, Any]],
         for e in members:
             for s in (e.get("corroborating_sources") or []):
                 dom = registrable_domain(s.get("domain") or "")
-                if dom and dom not in seen_corrob_domains:
+                # Carriers are dropped before they can do either job they would do
+                # here: count toward "Onaylandı (Çoklu kaynak)" and get printed as a
+                # source the reader is invited to check. Yesterday's Ukraine SITREP
+                # published a Kherson strike as multi-source confirmed on UNITED24
+                # plus a REDDIT CROSSPOST of that same UNITED24 article.
+                if dom and dom not in seen_corrob_domains and is_independent_publisher(dom):
                     seen_corrob_domains.add(dom)
                     corroborating.append(s)
 

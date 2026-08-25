@@ -129,6 +129,52 @@ def registrable_domain(domain_or_url: str) -> str:
     return extract_domain(host) or host
 
 
+# Carriers: domains that redistribute another newsroom's copy instead of reporting.
+# They are not independent publishers, so they must never turn a single-source story
+# into a corroborated one — the verification label is the thing a reader trusts most.
+#
+# Measured over the 7 days to 2026-08-25 on live corroborating_sources: yahoo.com was
+# the single most frequent corroborator in the whole corpus (93 credits), ahead of
+# Al Jazeera, with reddit.com at 43 and aol.com + aol.co.uk at 46. Yahoo and AOL are
+# one syndication feed, so an event carrying both looked doubly confirmed by a single
+# wire. The clearest case: the Haiti church attack was credited to inbox.lv,
+# modernghana.com and yahoo.com under the BYTE-IDENTICAL headline "Haiti gang members
+# kill around 40 displaced people in church attack near capital" — one agency report
+# counted as three independent outlets.
+#
+# Brands are matched on the FIRST LABEL of the registrable domain, the same technique
+# OFFICIAL_DOMAIN_LABELS uses, so ccTLD editions (yahoo.co.jp, aol.co.uk) are covered
+# without listing every country. Short or generic names that no label test can safely
+# claim ("t.me", "x.com") are matched exactly instead.
+#
+# Deliberately NOT listed: outlets with a real newsroom that ALSO republish wire copy
+# (modernghana.com, streamlinefeed.co.ke). Blanket-listing them would discard their
+# original reporting; the identical-headline signal is the honest way to catch a
+# syndicated filing, and that is a separate change.
+NON_INDEPENDENT_LABELS = frozenset({
+    "yahoo", "aol", "msn", "reddit", "facebook", "instagram", "threads",
+    "linkedin", "youtube", "flipboard", "newsbreak", "biztoc",
+    # Google News collapses to "google.com" under the public suffix list, so the
+    # entry has to be the brand, not the news.google.com hostname it arrives as.
+    "google",
+})
+NON_INDEPENDENT_DOMAINS = frozenset({
+    "t.me", "x.com", "twitter.com", "inbox.lv",
+})
+
+
+def is_independent_publisher(domain: str) -> bool:
+    """True when this domain can count as an outlet of its own.
+
+    False for carriers (see NON_INDEPENDENT_*) and for anything that does not resolve
+    to a registrable domain — an unattributable source cannot corroborate anything.
+    """
+    reg = registrable_domain(domain)
+    if not reg or reg in NON_INDEPENDENT_DOMAINS:
+        return False
+    return reg.split(".")[0] not in NON_INDEPENDENT_LABELS
+
+
 def state_media_home_iso(domain: str) -> str | None:
     """The ISO2 whose state this domain's news agency speaks for, if it is one."""
     reg = registrable_domain(domain)
@@ -174,14 +220,18 @@ def label_cluster(
     """
     Compute the verification label for one event cluster (same real-world event
     reported by 1..n sources). `penalized_domains` (from the domain_penalties
-    table) are excluded from both the official check and the independence count;
-    if every source is penalized the cluster stays unverified.
+    table) and carriers (see is_independent_publisher) are excluded from both the
+    official check and the independence count; if every source is excluded the
+    cluster stays unverified.
     """
     penalized = {registrable_domain(d) for d in (penalized_domains or ())}
     domains = []
     for ev in events:
         reg = registrable_domain(ev.get("source_domain") or ev.get("source_url") or "")
-        if reg and reg not in penalized:
+        # Carriers are dropped for the same reason penalized domains are: the count
+        # below is "how many newsrooms saw this", and a syndication portal or a
+        # crosspost adds a copy, not a witness.
+        if reg and reg not in penalized and is_independent_publisher(reg):
             domains.append(reg)
 
     # Which country the cluster is about — a state agency is only "official" at home.

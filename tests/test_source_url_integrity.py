@@ -66,10 +66,26 @@ def _recorded_entry(conn):
 
 class TestRecordCorroboration:
     def test_long_google_news_url_is_recorded_intact(self):
+        """The 1054-char case, with the domain it actually arrives as.
+
+        Google News links reach corroboration with the PUBLISHER resolved, not the
+        aggregator: measured 2026-08-25 over 14 days, 5157 of 6406 corroboration
+        entries carry a news.google.com URL and exactly 0 carry a google domain. The
+        URL is the long one either way, which is what this guard is about.
+        """
         conn = _conn()
         assert _record_corroboration(conn, "evt-1", "reuters.com",
-                                     "news.google.com", GNEWS, "t") is True
+                                     "kyivindependent.com", GNEWS, "t") is True
         assert _recorded_entry(conn)["url"] == GNEWS
+
+    def test_carrier_domain_is_refused(self):
+        """A carrier redistributes someone else's filing, so it cannot corroborate —
+        and an aggregator link whose publisher never resolved is unattributable."""
+        for carrier in ("yahoo.com", "reddit.com", "news.google.com"):
+            conn = _conn()
+            assert _record_corroboration(conn, "evt-1", "reuters.com",
+                                         carrier, "https://a.b/c", "t") is False
+            conn.execute.assert_not_called()
 
     def test_the_domain_is_kept_even_when_the_url_is_dropped(self):
         # The corroboration SIGNAL is the domain count (CORROBORATION_ALERT_MIN);
