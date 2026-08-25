@@ -425,16 +425,40 @@ _PLACE_ALIASES: Dict[str, str] = {
 # Casualty figures in BOTH orders wire copy uses: "15 killed" and "kills 15".
 # ingest_filters._CASUALTY_COUNT_PATTERN only covers the first, which misses
 # most headlines of a developing story ("Kyiv strike kills 15", "Attack Kills 17").
-_SUBJECT = r"(?:people\s+|civilians\s+|soldiers\s+|others\s+)?"
+#
+# The verb-first alternative is deliberately restricted to verbs that CARRY the
+# outcome. "kills 16" can only mean 16 dead, but "leaves"/"claims" take any object
+# at all, and matching them bare invented casualties out of headlines that reported
+# none: "Russia claims 269 Ukrainian drones intercepted" scored 269 DEATHS and
+# "Radan Claims 6,500 Arrests" scored 6 (the comma cut the number short), while
+# "Kills 16 and Leaves 14 Children Injured" added 14 more to the toll. Measured
+# 2026-08-23, that put a drone-interception claim at the top of the Russia SITREP's
+# ranking, which is what decides the lead story and which clusters reach the prompt.
+#
+# Dropping them costs nothing: the number-first alternative already covers every
+# correct reading, because those headlines all state the outcome word after the
+# figure — "leaves 47 dead", "leaves 2 Dead", "Claims 13 Soldiers Killed".
+#
+# _SUBJECT is a bounded run of words rather than a fixed noun list, because the list
+# could only ever name what someone had already seen. It missed the auxiliary in
+# "42 people WERE killed", every demonym ("2 Palestinians killed", "9 more Gazans
+# killed") and every qualifier ("16 CONFIRMED dead", "3 REPORTED killed"). Two words
+# is the measured ceiling: it reaches those readings while punctuation and the
+# required outcome word keep it from jumping across clauses.
+#
+# Verified over 1373 real headlines (10 days of SITREP clusters plus an 800-event
+# ingest corpus): 1357 unchanged, 15 figures recovered, and exactly one lost — the
+# phantom 269 this block exists to kill.
+_SUBJECT = r"(?:[A-Za-z'\u2019]+\s+){0,2}"
 _DEATH_RE = re.compile(
     rf"\b(\d{{1,4}})\s+{_SUBJECT}(?:killed|dead|deaths|fatalities|ölü)\b"
-    r"|\b(?:kills?|killed|leaves?|claims?)\s+(?:at\s+least\s+)?(\d{1,4})\b",
+    r"|\b(?:kills?|killed)\s+(?:at\s+least\s+)?(\d{1,4})\b",
     re.IGNORECASE,
 )
 _ANY_CASUALTY_RE = re.compile(
     rf"\b(\d{{1,4}})\s+{_SUBJECT}"
     r"(?:killed|dead|deaths|injured|wounded|casualties|fatalities|missing|ölü|yaralı)\b"
-    r"|\b(?:kills?|killed|leaves?|injures?|wounds?|claims?)\s+(?:at\s+least\s+)?(\d{1,4})\b",
+    r"|\b(?:kills?|killed|injures?|wounds?)\s+(?:at\s+least\s+)?(\d{1,4})\b",
     re.IGNORECASE,
 )
 
