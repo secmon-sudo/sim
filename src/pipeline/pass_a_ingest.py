@@ -219,8 +219,38 @@ def _record_corroboration(db_conn, event_id, event_domain: str,
         return False
 
 
-def check_domain_penalty(db_conn, domain: str) -> float:
-    """Get penalty score for a domain. Returns 0.0 if not found, if total_events < 5, or if whitelisted."""
+def load_domain_penalties(db_conn) -> dict[str, float] | None:
+    """Snapshot the penalty table once, so the ingest loop needs no DB round trips.
+
+    domain_penalties is only written by update_domain_penalty() in Pass C, which runs
+    after Pass A has finished, so the table is static for the length of a run and one
+    snapshot answers every lookup the loop makes. Measured at 210 s/run (25% of Pass A)
+    as a per-item query, against ~700 eligible rows — the round trips were the cost,
+    not the data. Returns None on failure so callers fall back to querying per item;
+    an empty dict would silently mean "nothing is penalized".
+    """
+    try:
+        with db_conn.transaction():
+            rows = db_conn.execute(
+                # penalty_score is nullable with a 0.0 default; coalesced here so one
+                # NULL row cannot put a None into the map and blow up the `> 0.8`
+                # comparison at the call site.
+                "SELECT domain, COALESCE(penalty_score, 0.0) FROM domain_penalties"
+                " WHERE total_events >= 5"
+            ).fetchall()
+        return {row[0]: float(row[1]) for row in rows}
+    except Exception:
+        logger.warning("Domain penalty preload failed; falling back to per-item lookups")
+        return None
+
+
+def check_domain_penalty(db_conn, domain: str,
+                         penalties: dict[str, float] | None = None) -> float:
+    """Get penalty score for a domain. Returns 0.0 if not found, if total_events < 5, or if whitelisted.
+
+    `penalties` is a load_domain_penalties() snapshot; it already excludes rows under
+    the 5-event floor, so a miss is 0.0 for the same reason the query path returns 0.0.
+    """
     TRUSTED_DOMAINS = {
         "reuters.com", "bbc.co.uk", "travel.state.gov", "defense.gov",
         "timesofisrael.com", "aljazeera.com", "jpost.com", "haaretz.com",
@@ -237,6 +267,9 @@ def check_domain_penalty(db_conn, domain: str) -> float:
     }
     if domain in TRUSTED_DOMAINS:
         return 0.0
+
+    if penalties is not None:
+        return penalties.get(domain, 0.0)
 
     try:
         with db_conn.transaction():
@@ -450,6 +483,12 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     with _timed(timings, "load_dedup_corpus"):
         recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
 
+    # One read for the whole run instead of one per candidate (see
+    # load_domain_penalties). Timed under the same key as the loop lookups it
+    # replaces, so the phase stays comparable across runs.
+    with _timed(timings, "domain_penalty_db"):
+        domain_penalties = load_domain_penalties(db_conn)
+
     inserted = 0
     domain_inserts: dict[str, int] = {}
     # Triage-quality telemetry: what priorities made it in vs. got cut. A high
@@ -534,7 +573,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             continue
 
         with _timed(timings, "domain_penalty_db"):
-            penalty = check_domain_penalty(db_conn, domain)
+            penalty = check_domain_penalty(db_conn, domain, domain_penalties)
         if penalty > 0.8:
             stats["domain_penalized"] += 1
             continue

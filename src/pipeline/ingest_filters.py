@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import tldextract
@@ -631,6 +632,13 @@ def canonicalize_text(raw_text: str) -> str:
     return text
 
 
+# The dedup loop asks the same questions of the same stored strings over and over:
+# every candidate is compared against the whole recent-events window, so one run
+# normalizes the same ~2,000 stored titles and bodies ~1,000 times each. These are
+# pure functions of the string, so caching them changes nothing but the bill —
+# profiled 2026-08-25, normalization was 8 s and shingle-building 4 s of the 64 s
+# spent in find_content_duplicate. Same reasoning as _place_keys_cached in core.geo.
+@lru_cache(maxsize=16384)
 def normalize_title(title: str) -> str:
     """Normalize title for deduplication comparison."""
     text = title.lower()
@@ -647,26 +655,57 @@ def normalize_title(title: str) -> str:
     return text
 
 
-def title_similarity(title_a: str, title_b: str) -> float:
-    """Compute similarity between two normalized titles."""
+def title_similarity(title_a: str, title_b: str, min_ratio: float = 0.0) -> float:
+    """Compute similarity between two normalized titles.
+
+    `min_ratio` is a caller's accept threshold, and it turns on difflib's own cheap
+    upper bounds: real_quick_ratio() (length only) and quick_ratio() (multiset of
+    characters) are both documented to be >= ratio(), so a bound below the threshold
+    proves ratio() is below it too and the O(n*m) matcher can be skipped. Profiled
+    2026-08-25 on 200 real candidates against 600 stored events: SequenceMatcher was
+    50 s of the 71 s spent in find_content_duplicate, and almost all of those pairs
+    are unrelated headlines that no threshold would ever accept.
+
+    THE SHORT-CIRCUIT RETURN IS AN UPPER BOUND, NOT THE RATIO. It is only meaningful
+    as "below min_ratio" — pass min_ratio only when comparing against it, and leave
+    it at 0.0 (every bound passes) when the number itself is the answer.
+    """
     norm_a = normalize_title(title_a)
     norm_b = normalize_title(title_b)
     if not norm_a or not norm_b:
         return 0.0
-    return difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+    matcher = difflib.SequenceMatcher(None, norm_a, norm_b)
+    if min_ratio > 0.0:
+        bound = matcher.real_quick_ratio()
+        if bound < min_ratio:
+            return bound
+        bound = matcher.quick_ratio()
+        if bound < min_ratio:
+            return bound
+    return matcher.ratio()
+
+
+@lru_cache(maxsize=16384)
+def _word_set_cached(text: str) -> frozenset[str]:
+    return frozenset(normalize_title(text).split())
 
 
 def _word_set(text: str) -> set[str]:
     """Normalized word set of a title (lowercased, punctuation-stripped)."""
-    return set(normalize_title(text).split())
+    return set(_word_set_cached(text))
+
+
+@lru_cache(maxsize=8192)
+def _shingles_cached(text: str, n: int = 4) -> frozenset[str]:
+    words = normalize_title(text).split()
+    if len(words) < n:
+        return frozenset(words)
+    return frozenset(" ".join(words[i:i + n]) for i in range(len(words) - n + 1))
 
 
 def _shingles(text: str, n: int = 4) -> set[str]:
     """Word n-grams (shingles) of canonical text — robust to reordering/truncation."""
-    words = normalize_title(text).split()
-    if len(words) < n:
-        return set(words)
-    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+    return set(_shingles_cached(text, n))
 
 
 def _jaccard(a: set, b: set) -> float:
@@ -706,8 +745,12 @@ def find_content_duplicate(recent_events: list[tuple], title: str,
     anchor "Pechenihy"). The incoming item has no anchor: Pass C has not seen it
     yet, so only the stored side can contribute one.
     """
-    title_tokens = _word_set(title)
-    text_shingles = _shingles(canonical_text) if len(canonical_text) > 100 else None
+    # Read the cached frozensets directly rather than the set-copying wrappers: this
+    # runs once per stored event per candidate, and copying a body's several-hundred
+    # shingles each time would hand back exactly what the cache saves. Nothing here
+    # mutates them.
+    title_tokens = _word_set_cached(title)
+    text_shingles = _shingles_cached(canonical_text) if len(canonical_text) > 100 else None
 
     for idx, entry in enumerate(recent_events):
         existing_title, existing_text = entry[0], entry[1]
@@ -726,16 +769,16 @@ def find_content_duplicate(recent_events: list[tuple], title: str,
             continue
 
         # Signal 1: char-ratio title similarity (primary)
-        if title_similarity(title, existing_title) >= _TITLE_SIM_THRESHOLD:
+        if title_similarity(title, existing_title, _TITLE_SIM_THRESHOLD) >= _TITLE_SIM_THRESHOLD:
             return idx
 
         # Signal 2: token-set title similarity (cross-source rephrasing)
-        if _jaccard(title_tokens, _word_set(existing_title)) >= _TITLE_TOKEN_THRESHOLD:
+        if _jaccard(title_tokens, _word_set_cached(existing_title)) >= _TITLE_TOKEN_THRESHOLD:
             return idx
 
         # Signal 3: content shingle similarity for longer texts
         if text_shingles is not None and len(existing_text) > 100:
-            if _jaccard(text_shingles, _shingles(existing_text)) >= _CONTENT_SHINGLE_THRESHOLD:
+            if _jaccard(text_shingles, _shingles_cached(existing_text)) >= _CONTENT_SHINGLE_THRESHOLD:
                 return idx
     return None
 
