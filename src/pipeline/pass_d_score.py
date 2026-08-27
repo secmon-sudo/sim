@@ -510,7 +510,8 @@ def cycle_common_tokens(recent_events: list[dict]) -> set:
 
 
 def link_storylines(event: dict, recent_events: list[dict],
-                    common_tokens: set | None = None) -> str | None:
+                    common_tokens: set | None = None,
+                    diag: dict | None = None) -> str | None:
     """Link this event to the BEST-matching existing storyline.
 
     Uses config-driven thresholds (settings.json -> storyline.*) and picks the
@@ -520,9 +521,29 @@ def link_storylines(event: dict, recent_events: list[dict],
     common_tokens: pass the per-run value from cycle_common_tokens() to avoid
     recomputing it for every event. Omitted, it is derived here so existing callers
     and tests keep working.
+
+    diag: optional dict, filled with why this call decided what it did — the pool it
+    was handed, how many candidates cleared should_link_storyline, and the best
+    similarity seen. Measured 2026-08-27: production linked 16.7% of events to a
+    storyline opened in an earlier run, while replaying THIS function over the same
+    stored rows linked 67.6%. Same commit, same data, and production's pool is a
+    SUPERSET of the replay's (the DB rows plus the same-run appends below), so the
+    disagreement cannot come from the rules — it has to be in what the pool actually
+    holds at runtime. Six hypotheses were eliminated by reading code and querying the
+    database (deployed SHA, pool depth, silent exception, common-token inflation, the
+    country gate, a Pass E rewrite); none of them can be settled without counting the
+    pool where it is used, which is here.
     """
+    if diag is not None:
+        diag["pool"] = len(recent_events)
+        diag["gate_passed"] = 0
+        diag["best_sim"] = None
+        diag["skipped_no_time"] = False
+
     # Guard: skip storyline linking if occurred_at_est is missing
     if event.get("occurred_at_est") is None:
+        if diag is not None:
+            diag["skipped_no_time"] = True
         return None
 
     event_hint = event.get("storyline_hint") or ""
@@ -545,11 +566,15 @@ def link_storylines(event: dict, recent_events: list[dict],
             common_tokens=common_tokens,
         ):
             continue
+        if diag is not None:
+            diag["gate_passed"] += 1
         sim = jaccard_similarity(event_hint, existing.get("storyline_hint") or "")
         if sim > best_sim:
             best_sim = sim
             best_id = existing.get("storyline_id")
 
+    if diag is not None and best_sim >= 0:
+        diag["best_sim"] = round(best_sim, 3)
     return best_id
 
 
@@ -855,7 +880,9 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         severity, is_safety = apply_safety_downrank(event["event_type"], severity, llm_parsed)
 
         # 3. Try storyline linking first (needed for diversity score)
-        storyline_id = link_storylines(event, recent_events, common_tokens)
+        link_diag: dict = {}
+        storyline_id = link_storylines(event, recent_events, common_tokens, link_diag)
+        link_source = "deterministic" if storyline_id else None
         if not storyline_id and adjudicator is not None:
             # Deterministic linking failed — let the LLM adjudicator judge same-place,
             # near-time candidates (paraphrases the lexical path could not confirm).
@@ -863,8 +890,21 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
                 storyline_id = adjudicator(event, recent_events)
             except Exception:
                 logger.exception("Storyline adjudicator failed for %s", event_id[:8])
+        if storyline_id and link_source is None:
+            link_source = "adjudicator"
         if not storyline_id:
             storyline_id = str(uuid.uuid4())
+            link_source = "new"
+        # A new storyline opened while a candidate DID clear the gates means the match
+        # was found and then lost, which is a different defect from never seeing it.
+        # Separating the two is the whole point of the counter in run_pass_d.
+        if link_source == "new" and link_diag.get("gate_passed"):
+            logger.warning(
+                "Event %s opened a new storyline despite %d gate-passing candidate(s) "
+                "in a pool of %d (best_sim=%s)",
+                event_id[:8], link_diag["gate_passed"], link_diag.get("pool", -1),
+                link_diag.get("best_sim"),
+            )
 
         # 4. Compute confidence (with real source diversity and credibility multiplier)
         llm_conf = _safe_float(event["llm_parsed"].get("confidence", 0.5))
@@ -1038,6 +1078,10 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
             "dispatch_result": dispatch_result,
             "anchor_norm": anchor["norm"],
             "storyline_id": storyline_id,
+            # Which of the three paths assigned the storyline, and what the
+            # deterministic linker saw when it decided. Aggregated by run_pass_d.
+            "link_source": link_source,
+            "link_diag": link_diag,
         }
 
     except Exception:
@@ -1071,6 +1115,18 @@ def run_pass_d(db_conn) -> dict:
         # 'unknown' time_certainty. The counterpart to alert_vetoes: this relaxation
         # recovers ~8 pages/day by measurement, and this is how that stays honest.
         "alert_grants": {},
+        # What the storyline candidate query actually returned this run. The single
+        # number that separates "the rules refused to link" from "the pool never
+        # showed the candidate" — see link_storylines' diag docstring for why the
+        # question could not be answered any other way.
+        "linking_pool": {},
+        # How each scored event got its storyline: deterministic linker, LLM
+        # adjudicator, or a fresh uuid.
+        "link_source": {},
+        # Events that opened a new storyline even though a candidate HAD cleared
+        # should_link_storyline. Zero by construction; non-zero means the match was
+        # computed and then lost rather than never found.
+        "link_new_despite_candidate": 0,
     }
 
     try:
@@ -1080,6 +1136,23 @@ def run_pass_d(db_conn) -> dict:
         # times a run would scan 200K hints to reach the same answer every time.
         recent_events = _fetch_recent_events_for_linking(db_conn)
         common_tokens = cycle_common_tokens(recent_events)
+        stats["linking_pool"] = {
+            "rows": len(recent_events),
+            "storylines": len({r.get("storyline_id") for r in recent_events}),
+            "oldest": (recent_events[-1]["occurred_at_est"].isoformat()
+                       if recent_events else None),
+            "common_tokens": len(common_tokens),
+        }
+        logger.info("Linking pool: %s", stats["linking_pool"])
+        if not recent_events:
+            # _fetch_recent_events_for_linking swallows its own errors and returns [],
+            # so an empty pool and a failed query look identical downstream. Either way
+            # every event opens its own storyline, which is silent today.
+            logger.warning(
+                "Linking pool is EMPTY — every event this run will open its own "
+                "storyline. Expected thousands of rows across the %d-day window.",
+                STORYLINE_TIME_WINDOW_DAYS,
+            )
 
         # Build the LLM adjudicators once per pass (bulk router, isolated quota). Both
         # share one router: they ask the same kind of question at different moments, and
@@ -1126,6 +1199,10 @@ def run_pass_d(db_conn) -> dict:
                                         adjudicator, dup_adjudicator, common_tokens)
             if result:
                 stats["events_scored"] += 1
+                src = result.get("link_source") or "unknown"
+                stats["link_source"][src] = stats["link_source"].get(src, 0) + 1
+                if src == "new" and (result.get("link_diag") or {}).get("gate_passed"):
+                    stats["link_new_despite_candidate"] += 1
                 # Count an alert only when a Telegram card was ACTUALLY dispatched
                 # this run — not merely "tier-eligible". dispatch_result is the source
                 # of truth; effective tier is forced to ALERT for severity-gated sends,
