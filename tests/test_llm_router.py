@@ -7,6 +7,7 @@ import time
 
 
 from src.core.llm_router import (
+    ERROR_THRESHOLD,
     LLMAccount,
     LLMRouter,
     ProviderStatus,
@@ -79,16 +80,42 @@ class TestLLMRouter:
         assert recovered.model == "test-model"
 
     def test_error_threshold(self):
-        """After 10 consecutive errors, account should be marked ERROR."""
+        """ERROR_THRESHOLD consecutive soft errors mark the account ERROR.
+
+        Lowered from 10 on 2026-08-27: a 5xx costs a full request_timeout when the
+        provider goes silent rather than answering, so ten strikes was a time budget
+        rather than a guard. SITREP #48 spent 29 of 34 minutes reaching the tenth.
+        """
         a1 = make_account(rpd=1000)
         router = LLMRouter([a1])
 
         acct = router.get_available_account()
-        for _ in range(10):
+        for _ in range(ERROR_THRESHOLD - 1):
             router.report_failure(acct, is_rate_limit=False)
+        assert acct.status != ProviderStatus.ERROR
 
+        router.report_failure(acct, is_rate_limit=False)
         assert acct.status == ProviderStatus.ERROR
-        assert acct.daily_errors == 10
+        assert acct.daily_errors == ERROR_THRESHOLD
+
+    def test_soft_error_sidelines_before_threshold(self):
+        """A 5xx below the threshold must still leave the rotation.
+
+        This is the defect behind SITREP #48: below the threshold the slot stayed
+        SERVING, so the next selection picked the same dead account again — nine
+        mistral-large 503s in a row before the tenth finally sidelined it.
+        """
+        a1 = make_account(model="mistral-large-2512", rpd=1000)
+        a2 = make_account(model="openai/gpt-oss-120b", rpd=1000)
+        router = LLMRouter([a1, a2])
+
+        acct1 = router.get_available_account()
+        assert acct1.model == "mistral-large-2512"
+        router.report_failure(acct1, is_rate_limit=False)
+
+        assert acct1.status != ProviderStatus.ERROR      # still transient
+        assert acct1.cooldown_until > time.monotonic()   # but out of rotation
+        assert router.get_available_account().model == "openai/gpt-oss-120b"
 
     def test_hard_error_sidelines_slot(self):
         """A deterministic 4xx should cooldown the slot so it isn't re-picked this loop."""

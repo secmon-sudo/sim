@@ -29,7 +29,17 @@ RATE_LIMIT_COOLDOWN_SECONDS = 30
 MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300
 # Repeated hard (non-429) errors: likely a real outage/bad key — back off long.
 ERROR_COOLDOWN_SECONDS = 600
-ERROR_THRESHOLD = 10
+# Was 10 until 2026-08-27. A 5xx costs a round trip when the provider answers fast and
+# a full request_timeout when it does not, so ten strikes is a budget, not a guard:
+# Daily Country SITREP #48 spent 29 of its 34 minutes collecting nine mistral-large
+# 503s and six 180-second read timeouts before the tenth failure finally sidelined the
+# account. Three is enough evidence that a provider is down for this run, and routers
+# are rebuilt per run so a wrong call costs one run's worth of a single slot.
+ERROR_THRESHOLD = 3
+# A 5xx below the threshold is still treated as transient — a short sideline, not the
+# 600s outage cooldown — but it must be a sideline. Leaving the slot SERVING is what let
+# the same dead account be re-picked on the very next selection, nine times in a row.
+SOFT_ERROR_COOLDOWN_SECONDS = 30
 # Deterministic client error (HTTP 4xx other than 429): the request is structurally
 # rejected (bad model, unsupported param, bad key). Sideline the slot briefly so the
 # router stops re-selecting it within the same rotation loop — where no cooldown means
@@ -212,6 +222,13 @@ class LLMRouter:
                     logger.error(
                         "Account %s marked ERROR after %d failures, cooldown %ds",
                         acct.display_name, acct.daily_errors, ERROR_COOLDOWN_SECONDS,
+                    )
+                else:
+                    acct.status = ProviderStatus.RATE_LIMITED
+                    acct.cooldown_until = time.monotonic() + SOFT_ERROR_COOLDOWN_SECONDS
+                    logger.warning(
+                        "Account %s soft error #%d, sidelined %ds",
+                        acct.display_name, acct.daily_errors, SOFT_ERROR_COOLDOWN_SECONDS,
                     )
 
     def penalize_model_slot(self, provider: str, account_id: str, model: str):

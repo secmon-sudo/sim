@@ -1,11 +1,31 @@
 name: Daily Country SITREP
 
+# TETİKLEYİCİ YALNIZCA workflow_dispatch. GitHub'ın kendi `schedule` cron'u
+# ('30 7 * * *') 2026-08-27'de KALDIRILDI — çalışmadığı için değil, GÜVENİLMEZ
+# çalıştığı için: 27 Ağustos'ta 00:56-11:45 arası bu repoda hiçbir zamanlanmış
+# workflow tetiklenmedi (saatlik deadman'de 10,8 saatlik boşluk; son 40 koşuda
+# ortalama ara 1,5 saat, 39 aranın 10'u 1,5 saati aşıyor). O günün 07:30 SITREP'i
+# yuvasını kaçırdı ve ancak 18:22'de, ~11 saat gecikmeyle dağıtıldı.
+#
+# Aynı pencerede OSINT pipeline saniyesinde koştu, çünkü onun dakik koşuları
+# cron-job.org'dan gelen workflow_dispatch — GitHub cron'undan değil. Aynı
+# tespit osint-pipeline.yml'de zaten yazılı ("unreliable — cron-job.org dispatch
+# is the backstop"); orada iki tetikleyici yan yana duruyor çünkü fazladan bir
+# koşunun maliyeti yok. Burada var: ikinci koşu raporu yeniden üretip Telegram'a
+# tekrar gönderir, yani kullanıcıya görünen bir kopya. Bu yüzden cron burada
+# yedek olarak BIRAKILMADI, kaldırıldı.
+#
+# ⚠ Sonuç olarak bu iş artık YALNIZCA dışarıdan tetikleniyor. cron-job.org'daki
+# job silinir veya token'ı süresi dolarsa günlük SITREP sessizce durur — hiçbir
+# şey hata vermez, rapor sadece çıkmaz. Kurulum:
+#   POST https://api.github.com/repos/secmon-sudo/sim/actions/workflows/daily-sitrep.yml/dispatches
+#   body: {"ref":"master"}   → HTTP 204
+#
+# ⚠ Dış zamanlama 07:30 UTC olarak KALMALI: Gemini RPD kotası 07:00 UTC'de
+# (Pasifik gece yarısı) sıfırlanır. Eskiden 06:00'daydı ve her gün tükenmiş
+# kotayla koşuyordu. 07:30 = taze kota + ingest/haftalık raporla çakışmama.
 on:
-  schedule:
-    - cron: '30 7 * * *'   # Her gün 07:30 UTC — Gemini RPD kotası 07:00 UTC'de (Pasifik gece
-                           # yarısı) sıfırlanır; 06:00'daki eski saat her gün tükenmiş kotayla
-                           # koşuyordu. 07:30, taze kota + ingest/haftalık rapor çakışmaması demek.
-  workflow_dispatch:       # GitHub UI üzerinden el ile tetikleme
+  workflow_dispatch:       # cron-job.org (günlük 07:30 UTC) veya GitHub UI'dan el ile
     inputs:
       countries:
         description: 'ISO2 ülke kodları (boşlukla ayrılmış, örn: IR IQ). Boş bırakılırsa otomatik seçim.'

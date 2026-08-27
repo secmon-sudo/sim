@@ -344,3 +344,40 @@ def test_ceiling_scales_with_the_completion_budget():
     narrative = model_profiles.wall_clock_ceiling(profile, 6000)
     assert batch == model_profiles.DEFAULT_WALL_CLOCK_SECONDS
     assert narrative > 2 * batch
+
+
+class TestReadTimeoutIsNotRetried:
+    """A read timeout must not be re-paid; a failed connection may be retried.
+
+    Measured 2026-08-27 on Daily Country SITREP #48: six read timeouts at ~180s each
+    (mistral-large's request_timeout) inside a 33.8-minute run whose normal duration is
+    8-12 minutes. Run #47 the day before died on the workflow's 35-minute timeout.
+    """
+
+    def _retry_state(self, exc):
+        class _Outcome:
+            def exception(self_inner):
+                return exc
+        class _State:
+            outcome = _Outcome()
+            attempt_number = 1
+        return _State()
+
+    def test_read_timeout_is_not_retried(self):
+        from src.core.llm_client import _worth_retrying
+        assert _worth_retrying(self._retry_state(httpx.ReadTimeout("timed out"))) is False
+
+    def test_write_timeout_is_not_retried(self):
+        from src.core.llm_client import _worth_retrying
+        assert _worth_retrying(self._retry_state(httpx.WriteTimeout("timed out"))) is False
+
+    def test_connection_failures_are_still_retried(self):
+        from src.core.llm_client import _worth_retrying
+        for exc in (httpx.ConnectError("refused"),
+                    httpx.ConnectTimeout("timed out"),
+                    httpx.PoolTimeout("no slot")):
+            assert _worth_retrying(self._retry_state(exc)) is True, type(exc).__name__
+
+    def test_unrelated_exception_is_not_retried(self):
+        from src.core.llm_client import _worth_retrying
+        assert _worth_retrying(self._retry_state(ValueError("nope"))) is False

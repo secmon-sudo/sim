@@ -155,10 +155,29 @@ def _post_within(send, body: dict, ceiling: float, acct: LLMAccount) -> httpx.Re
     return outcome["response"]
 
 
+def _worth_retrying(retry_state) -> bool:
+    """Retry a connection that never got established; never re-pay a read timeout.
+
+    The two failures inside httpx.TimeoutException cost wildly different amounts and
+    carry different information. A ConnectTimeout/ConnectError fails before the request
+    is on the wire — cheap, usually transient, worth another go. A ReadTimeout means the
+    server ACCEPTED the request and then went silent for the whole request_timeout, and
+    retrying buys the same answer at the same price: with mistral-large's 180s timeout,
+    three attempts is nine minutes spent learning one fact.
+
+    Measured 2026-08-27 on Daily Country SITREP #48: six read timeouts, ~180s apiece,
+    inside a 33.8-minute run whose normal duration is 8-12 minutes. Run #47 the day
+    before died on the workflow's 35-minute timeout and #48 survived it by 42 seconds.
+    This is the same reasoning the router already applies to slow slots, where a longer
+    cooldown is justified because "a slow slot charges another full ceiling for the same
+    information" — it just was not applied to the retry that precedes it.
+    """
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+
+
 @tenacity.retry(
-    retry=tenacity.retry_if_exception_type(
-        (httpx.ConnectError, httpx.TimeoutException)
-    ),
+    retry=_worth_retrying,
     wait=tenacity.wait_exponential(multiplier=1, min=2, max=60),
     stop=tenacity.stop_after_attempt(3),
     before_sleep=lambda rs: logger.warning(
