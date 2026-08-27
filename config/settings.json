@@ -182,7 +182,13 @@
       "https://news.google.com/rss/search?q=%28%22Port-au-Prince%22%20OR%20Haiti%29%20%28gang%20OR%20gangs%20OR%20kidnapping%20OR%20killed%20OR%20attack%29%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=Mexico%20OR%20Ecuador%20cartel%20violence%20OR%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
       "https://news.google.com/rss/search?q=%22South%20China%20Sea%22%20OR%20Taiwan%20military%20incursion%20OR%20confrontation%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
-      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen"
+      "https://news.google.com/rss/search?q=DRC%20OR%20Congo%20OR%20Mozambique%20rebels%20attack%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%22runway%20incursion%22%20OR%20%22near%20miss%22%20airport%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%22bomb%20threat%22%20OR%20%22bomb%20scare%22%20airport%20OR%20flight%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%22drone%20sighting%22%20OR%20%22drone%20spotted%22%20OR%20%22drone%20sighted%22%20airport%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%22GPS%20jamming%22%20OR%20%22GNSS%20interference%22%20OR%20%22GPS%20spoofing%22%20aviation%20OR%20flights%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=%22laser%20strike%22%20OR%20%22laser%20attack%22%20pilot%20OR%20aircraft%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+      "https://news.google.com/rss/search?q=stowaway%20aircraft%20OR%20%22landing%20gear%22%20OR%20airport%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen"
     ],
     "travel_advisory_feeds": [
       "https://travel.state.gov/_res/rss/TAsTWs.xml",

@@ -473,6 +473,47 @@ _SCREENING_CONTEXT_PATTERN = re.compile(
 )
 
 
+# The aviation-security classes that are neither an attack nor a flight
+# disruption: a bomb threat called in, a runway incursion, a drone over the
+# approach path, GNSS jamming, a laser in the cockpit, a stowaway in the wheel
+# well. Each is an incident this pipeline exists to report, and none of them
+# carries a word the flat lexicon recognises.
+#
+# Measured 2026-08-27 over 15,429 unique headlines (14 days, every status): an
+# aviation noun plus one of these class terms matches 49 headlines and every one
+# of them is on-class — no junk to trade away. Ten were sitting in the archive,
+# prescreen-archived at score 0 without an LLM ever reading them:
+#
+#   "African stowaway found frozen to death in plane's wheel compartment at Gatwick"
+#   "Sydney Airport faces safety scrutiny after third ground near-miss in three weeks"
+#   "Qantas Jets Avoids Collision at Sydney Airport Marks 4th Near Miss Incident"
+#   "Police Didn't Notify Public Of G7 Bomb Scare At Calgary Airport"
+#
+# The Sydney runway-incursion series is the clearest symptom: some filings of the
+# same investigation were scored and others archived, on nothing but wording.
+#
+# The other 39 already passed, but every one of them scored priority 1 — the
+# median inserted item, which is to say the coin-flip line. So the class was not
+# only being archived, it was permanently first in the queue to be dropped
+# whenever the insert budget tightened, which it always does.
+_AVIATION_INCIDENT_PATTERN = re.compile(
+    r"\b(lasers?|lasered|laser strike|laser attack|"
+    r"gnss|gps jamming|gps spoofing|jamming|spoofing|"
+    r"drone sighting|drones? spotted|drones? sighted|uav sighting|"
+    r"cockpit|stowaways?|runway incursion|near miss|near-miss|"
+    r"bomb threat|bomb scare|bomb hoax|hoax call)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_aviation_security_incident(title: str) -> bool:
+    """Aviation noun + an aviation-security class term, both in the headline."""
+    if not title:
+        return False
+    return bool(_AVIATION_HEADLINE_PATTERN.search(title)
+                and _AVIATION_INCIDENT_PATTERN.search(title))
+
+
 def _is_screening_breach(title: str) -> bool:
     """Prohibited item + aviation noun + screening/carriage word, all in the headline.
 
@@ -532,7 +573,11 @@ def _matches_security_keywords(title: str, description: str) -> bool:
             # the priority scorer ever ranked it. Measured 2026-08-27, the Dhaka
             # live-rounds headline returned False from this function — the earliest of
             # the four zeroes, and the one that leaves no database row to notice.
-            or _is_screening_breach(title))
+            or _is_screening_breach(title)
+            # Same reason again: measured 2026-08-27, "ATSB Probes Third Runway Near
+            # Miss at Sydney Airport" and "African stowaway found frozen to death in
+            # plane's wheel compartment at Gatwick Airport" both scored 0 here.
+            or _is_aviation_security_incident(title))
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +721,13 @@ def priority_score(title: str, description: str) -> int:
         # scored 1 and the highest DROPPED item scored 3. At +1 the class sits on the
         # coin-flip line; the whole point of the gate is that it stops being dropped.
         # Title only: see _is_screening_breach on why the conjunction needs a headline.
+        score += 4
+
+    if _is_aviation_security_incident(title):
+        # Weighted the same and for the same measured reason: of the 49 headlines this
+        # matches, the 39 that already passed all scored exactly 1 — the median inserted
+        # item. A class that is always on the coin-flip line is a class that disappears
+        # the moment the budget tightens, and the budget is never slack.
         score += 4
 
     return score

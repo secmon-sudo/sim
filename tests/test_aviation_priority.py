@@ -3,6 +3,7 @@ Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus)
 """
 
 from src.pipeline.ingest_filters import (
+    _is_aviation_security_incident,
     _is_flight_disruption,
     _is_screening_breach,
     priority_score,
@@ -298,3 +299,52 @@ class TestScreeningBreachGate:
         assert _is_screening_breach(
             "Turkey-Pakistan Military Flights: Is Ankara Sending Fresh Weapons to Islamabad"
         ) is False
+
+
+class TestAviationSecurityIncidentGate:
+    """Bomb threat, runway incursion, drone sighting, GNSS jamming, laser, stowaway.
+
+    Added 2026-08-27. Measured over 15,429 headlines: 49 matches, all on-class, of
+    which 10 were prescreen-archived at score 0 and the other 39 all scored priority
+    1 — the median inserted item, i.e. first to be dropped whenever the budget binds.
+    """
+
+    ARCHIVED = (
+        "African stowaway found frozen to death in plane's wheel compartment at Gatwick Airport",
+        "ATSB Probes Third Runway Near Miss at Sydney Airport",
+        "Police Didn't Notify Public Of G7 Bomb Scare At Calgary Airport",
+        "Qantas Jets Avoids Collision at Sydney Airport Marks 4th Near Miss Incident",
+    )
+
+    def test_recovers_headlines_the_prescreen_had_archived(self):
+        for title in self.ARCHIVED:
+            det = deterministic_relevance(title, "")
+            assert det["has_aviation_incident"] is True, title
+            assert det["score"] >= PRESCREEN_SKIP_FLOOR, title
+
+    def test_reaches_the_general_feed_admission_filter(self):
+        for title in self.ARCHIVED:
+            assert _matches_security_keywords(title, "") is True, title
+
+    def test_outranks_the_binding_insert_budget(self):
+        # The 39 that already passed all scored exactly 1 before this gate existed.
+        for title in self.ARCHIVED:
+            assert priority_score(title, "") > 3, title
+
+    def test_covers_the_classes_that_never_reached_the_feed(self):
+        for title in (
+            "GPS jamming disrupts navigation for flights over the Baltic",
+            "Drone sighting halts departures at Gatwick Airport",
+            "Laser strike blinds pilot on approach, aircraft diverted",
+            "Man attempts to breach cockpit door mid-flight on Delta aircraft",
+        ):
+            assert _is_aviation_security_incident(title) is True, title
+
+    def test_needs_an_aviation_noun(self):
+        # The class term alone is not enough: bomb threats and near misses happen
+        # everywhere, and this pipeline's scope here is the aviation ones.
+        assert _is_aviation_security_incident("Bomb threat closes city hall") is False
+        assert _is_aviation_security_incident("Near miss as trains pass on same track") is False
+
+    def test_unrelated_security_news_does_not_match(self):
+        assert _is_aviation_security_incident("Gun violence in Chicago claims three lives") is False

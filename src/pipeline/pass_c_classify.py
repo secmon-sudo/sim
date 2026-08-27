@@ -22,6 +22,7 @@ from src.core.storyline import strip_date_hint
 from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
+    _is_aviation_security_incident,
     _is_flight_disruption,
     _is_screening_breach,
     is_noise,
@@ -262,8 +263,13 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # the conjunction already requires three vocabularies to meet in one headline,
     # which is where the metaphors do not survive.
     has_screening_breach = _is_screening_breach(title)
+    # Bomb threat, runway incursion, drone sighting, GNSS jamming, laser, stowaway.
+    # Measured 2026-08-27: ten such headlines in 14 days were archived here at score 0,
+    # including a stowaway found dead in a wheel well at Gatwick and three filings of
+    # the Sydney runway-incursion investigation whose siblings were scored normally.
+    has_aviation_incident = _is_aviation_security_incident(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
-                    or has_screening_breach
+                    or has_screening_breach or has_aviation_incident
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -275,6 +281,8 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         score += 20  # ensure it clears the prescreen floor even with no other keyword
     if has_screening_breach:
         score += 20  # same reason: clears the floor (15) even against the noise penalty
+    if has_aviation_incident:
+        score += 20
     if has_casualty:
         score += 15
     if trusted_domain:
@@ -290,6 +298,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_hostile_act": has_hostile_act,
         "has_flight_disruption": has_flight_disruption,
         "has_screening_breach": has_screening_breach,
+        "has_aviation_incident": has_aviation_incident,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }
