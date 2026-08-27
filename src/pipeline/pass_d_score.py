@@ -575,6 +575,24 @@ def link_storylines(event: dict, recent_events: list[dict],
 
     if diag is not None and best_sim >= 0:
         diag["best_sim"] = round(best_sim, 3)
+    if diag is not None and best_id is None:
+        # Nothing cleared the gates. Measure how close the pool actually came, IGNORING
+        # every gate: run #1742 opened 30 new storylines with gate_passed 0 against a
+        # pool the fetch had just measured at 6034 rows — and four of them had a stored
+        # candidate with a byte-identical hint, the same country and a few hours' gap,
+        # which should_link_storyline links when handed the pair directly. Either that
+        # row was not in the list this function received, or its hint differs from what
+        # the database holds now. An ungated maximum separates the two: ~1.0 means the
+        # row was present and a GATE refused it, well below 1.0 means it was absent.
+        # Only computed on the no-match path, so the cost is bounded by the events that
+        # are actually in question.
+        ungated_best, ungated_id = -1.0, None
+        for existing in recent_events:
+            sim = jaccard_similarity(event_hint, existing.get("storyline_hint") or "")
+            if sim > ungated_best:
+                ungated_best, ungated_id = sim, existing.get("storyline_id")
+        diag["ungated_best"] = round(ungated_best, 3) if ungated_best >= 0 else None
+        diag["ungated_storyline"] = str(ungated_id)[:8] if ungated_id else None
     return best_id
 
 
@@ -1127,6 +1145,14 @@ def run_pass_d(db_conn) -> dict:
         # should_link_storyline. Zero by construction; non-zero means the match was
         # computed and then lost rather than never found.
         "link_new_despite_candidate": 0,
+        # The pool as link_storylines RECEIVED it, not as the fetch measured it. The two
+        # were assumed identical until run #1742 showed a 6034-row fetch alongside 30
+        # events that saw no candidate at all.
+        "link_pool_seen": {},
+        # For events that opened a new storyline: the best hint similarity anywhere in
+        # the pool with every gate ignored, bucketed. A bucket at 1.0 means an identical
+        # hint WAS in the list and a gate refused it; everything below means it was not.
+        "link_ungated_best": {},
     }
 
     try:
@@ -1201,8 +1227,19 @@ def run_pass_d(db_conn) -> dict:
                 stats["events_scored"] += 1
                 src = result.get("link_source") or "unknown"
                 stats["link_source"][src] = stats["link_source"].get(src, 0) + 1
-                if src == "new" and (result.get("link_diag") or {}).get("gate_passed"):
+                diag = result.get("link_diag") or {}
+                if src == "new" and diag.get("gate_passed"):
                     stats["link_new_despite_candidate"] += 1
+                seen = diag.get("pool")
+                if seen is not None:
+                    key = str(seen)
+                    stats["link_pool_seen"][key] = stats["link_pool_seen"].get(key, 0) + 1
+                ub = diag.get("ungated_best")
+                if ub is not None:
+                    bucket = ("1.0" if ub >= 0.999 else
+                              "0.8-1.0" if ub >= 0.8 else
+                              "0.4-0.8" if ub >= 0.4 else "<0.4")
+                    stats["link_ungated_best"][bucket] = stats["link_ungated_best"].get(bucket, 0) + 1
                 # Count an alert only when a Telegram card was ACTUALLY dispatched
                 # this run — not merely "tier-eligible". dispatch_result is the source
                 # of truth; effective tier is forced to ALERT for severity-gated sends,
