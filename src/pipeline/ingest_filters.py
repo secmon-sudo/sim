@@ -421,6 +421,71 @@ def _is_flight_disruption(text: str, title: str | None = None) -> bool:
                 and _SECURITY_NEXUS_PATTERN.search(text))
 
 
+# A prohibited item carried THROUGH passenger screening — ammunition in a bag, a
+# pistol at the checkpoint, a live round found on board. Aviation security in the
+# most literal sense, and until 2026-08-27 the pipeline could not see it at all.
+#
+# Measured that day on the headline that prompted this ("Businessman flies to Delhi
+# with 31 live rounds after passing through Dhaka airport security"): priority_score
+# 0, deterministic_relevance score 0 with has_security False, and no row in the
+# database at all. Three gates, three zeroes. Of 1485 configured keyword terms only
+# seven touch weapons — "ammunition depot", "weapons cache", "gun battle", "gun
+# attack", "knife attack", "weapon", "airport knife" — and not one of them describes
+# an item getting past a checkpoint. None of the four aviation news queries reaches
+# it either; they ask about attacks and about flight disruption.
+#
+# The flat lexicon is the wrong instrument here for the reason the disruption block
+# above gives: the class is written as a verb ("flies with", "passing through",
+# "found aboard"), and every fixed phrase that covers one variant misses the next.
+# A conjunction is the honest rule — a prohibited item AND an aviation noun AND a
+# screening-or-carriage word, all three sharing the HEADLINE, which is short enough
+# that co-occurrence implies the words are about each other.
+#
+# Measured over 15,429 unique headlines (14 days, every status):
+#
+#   item + aviation                    46 matches, 36 of them off-class
+#   item + aviation + screening        16 matches, 15 on-class + 1 explainer
+#
+# The 15 are the Varanasi checkpoint discharge, the Denver live-round-on-board
+# evacuation, and the Hyderabad baggage bomb scare — 6 of which the prescreen had
+# archived unread, including "Live bullet found aboard United flight". The one
+# non-incident is "What are the rules for carrying firearms on flights?", admitted
+# by the carriage verbs and archived one LLM call later by the report_kind gate.
+#
+# Two deliberate exclusions, both measured: "blade" is out because engine fan blades
+# collide with it ("Passenger Partially Sucked Out of Plane After Fan Blade Shatters
+# Window"), and "found" is out because it drags in ten Leipzig drone-explosive
+# filings — real security events, but a different class that is already covered, and
+# admitting them buys exactly one on-class headline whose incident three sibling
+# filings already carry.
+_PROHIBITED_ITEM_PATTERN = re.compile(
+    r"\b(live rounds?|live ammunition|ammunition|ammo|bullets?|cartridges?|"
+    r"firearms?|handguns?|pistols?|revolvers?|guns?|grenades?|explosives?|"
+    r"detonators?|knives|knife|weapons?)\b",
+    re.IGNORECASE,
+)
+_SCREENING_CONTEXT_PATTERN = re.compile(
+    r"\b(security|screening|screened|screeners?|checkpoint|scanner|scanners|"
+    r"x-ray|luggage|baggage|carry-on|suitcase|boarding|board|aboard|onboard|"
+    r"deplane|cabin|passengers?|check|checks|checked|carry|carrying|carried|"
+    r"carries|confiscat\w*|seiz\w*|smuggl\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_screening_breach(title: str) -> bool:
+    """Prohibited item + aviation noun + screening/carriage word, all in the headline.
+
+    Headline-only by design (see block comment): over a whole article the three
+    vocabularies co-occur for reasons that have nothing to do with each other.
+    """
+    if not title:
+        return False
+    return bool(_PROHIBITED_ITEM_PATTERN.search(title)
+                and _AVIATION_HEADLINE_PATTERN.search(title)
+                and _SCREENING_CONTEXT_PATTERN.search(title))
+
+
 # Counts, shared by the ingest gate below and the priority scorer further down.
 _CASUALTY_NUM = (r"(?:\d{1,4}|dozens?|scores|one|two|three|four|five|six|seven|"
                  r"eight|nine|ten|eleven|twelve)")
@@ -456,12 +521,18 @@ def _matches_security_keywords(title: str, description: str) -> bool:
     that aren't pre-filtered by search query. Matches on word boundaries to
     avoid substring false positives. Covers high-signal standalone terms plus
     config emergency/geopolitical keywords across all languages (en, ar, tr, fr),
-    plus the aviation-disruption conjunction.
+    plus the aviation-disruption and screening-breach conjunctions.
     """
     text = f"{title} {description}"
     return (bool(_SECURITY_KEYWORD_PATTERN.search(text))
             or bool(_CASUALTY_CLAIM_PATTERN.search(text))
-            or _is_flight_disruption(text, title))
+            or _is_flight_disruption(text, title)
+            # Same reason the disruption conjunction is here: this class carries no
+            # standalone security keyword, so on a general feed it was rejected before
+            # the priority scorer ever ranked it. Measured 2026-08-27, the Dhaka
+            # live-rounds headline returned False from this function — the earliest of
+            # the four zeroes, and the one that leaves no database row to notice.
+            or _is_screening_breach(title))
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +635,7 @@ def priority_score(title: str, description: str) -> int:
       +3 if a concrete casualty count is stated (+2 more if >= 10),
          or +2 for an anchored casualty claim that states no number
       +1 for breaking/urgent markers
+      +4 if the headline describes a prohibited item through aviation screening
     """
     text = f"{title} {description}"
     score = 0
@@ -595,6 +667,16 @@ def priority_score(title: str, description: str) -> int:
 
     if _BREAKING_PATTERN.search(text):
         score += 1
+
+    if _is_screening_breach(title):
+        # Weighted like a critical-term hit rather than a keyword, because a keyword's
+        # +1 would not change this class's fate. Measured 2026-08-27: it scores 0 on
+        # every other component here, and the insert budget always binds — run #1740
+        # fetched 1629 candidates and inserted 100, where the median inserted item
+        # scored 1 and the highest DROPPED item scored 3. At +1 the class sits on the
+        # coin-flip line; the whole point of the gate is that it stops being dropped.
+        # Title only: see _is_screening_breach on why the conjunction needs a headline.
+        score += 4
 
     return score
 

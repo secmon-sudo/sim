@@ -23,6 +23,7 @@ from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
     _is_flight_disruption,
+    _is_screening_breach,
     is_noise,
 )
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
@@ -251,7 +252,18 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # is_noise() catches snowstorm/maintenance cancellations, so excluding noisy
     # here leaves only disruptions worth keeping (mirrors the ingest gate).
     has_flight_disruption = _is_flight_disruption(blob, title) and not noisy
+    # A prohibited item carried through passenger screening. Measured 2026-08-27, the
+    # class was invisible to every vocabulary above: "Businessman flies to Delhi with
+    # 31 live rounds after passing through Dhaka airport security" scored 0 here with
+    # has_security False, so the prescreen would have archived it unread even if the
+    # ingest budget had let it through. Six such headlines in 14 days were archived
+    # without an LLM ever seeing them, among them "Live bullet found aboard United
+    # flight". Unlike the disruption flag this one is NOT suppressed by is_noise():
+    # the conjunction already requires three vocabularies to meet in one headline,
+    # which is where the metaphors do not survive.
+    has_screening_breach = _is_screening_breach(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
+                    or has_screening_breach
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -261,6 +273,8 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         score += 25
     if has_flight_disruption:
         score += 20  # ensure it clears the prescreen floor even with no other keyword
+    if has_screening_breach:
+        score += 20  # same reason: clears the floor (15) even against the noise penalty
     if has_casualty:
         score += 15
     if trusted_domain:
@@ -275,6 +289,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_high_signal": has_high_signal,
         "has_hostile_act": has_hostile_act,
         "has_flight_disruption": has_flight_disruption,
+        "has_screening_breach": has_screening_breach,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }

@@ -2,7 +2,11 @@
 Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus).
 """
 
-from src.pipeline.ingest_filters import _is_flight_disruption
+from src.pipeline.ingest_filters import (
+    _is_flight_disruption,
+    _is_screening_breach,
+    priority_score,
+)
 from src.pipeline.pass_a_ingest import _matches_security_keywords, is_noise
 from src.pipeline.pass_c_classify import (
     PRESCREEN_SKIP_FLOOR,
@@ -239,3 +243,58 @@ class TestWeakDisruptionVerbsNeedHeadlineAndNexus:
     def test_caller_without_a_headline_keeps_old_behaviour(self):
         t = "Flights diverted after Manchester Airport security breach"
         assert not _is_flight_disruption(t)
+
+
+class TestScreeningBreachGate:
+    """A prohibited item carried through aviation screening (added 2026-08-27).
+
+    The class was invisible to all four gates: the general-feed admission filter,
+    the ingest priority scorer, the prescreen, and the keyword lexicon.
+    """
+
+    HEADLINE = ("Businessman flies to Delhi with 31 live rounds after passing "
+                "through Dhaka airport security")
+
+    def test_detects_the_headline_that_prompted_the_gate(self):
+        assert _is_screening_breach(self.HEADLINE) is True
+
+    def test_reaches_the_general_feed_admission_filter(self):
+        # Returned False before the conjunction was added, so on a general RSS feed
+        # the item was rejected before ranking and left no row to notice.
+        assert _matches_security_keywords(self.HEADLINE, "") is True
+
+    def test_outranks_the_binding_insert_budget(self):
+        # Scored 0 before. The budget always binds and the highest DROPPED item in
+        # run #1740 scored 3, so anything at or below 3 is not reliably ingested.
+        assert priority_score(self.HEADLINE, "") > 3
+
+    def test_survives_the_prescreen(self):
+        det = deterministic_relevance(self.HEADLINE, "")
+        assert det["has_screening_breach"] is True
+        assert det["has_security"] is True
+        assert det["score"] >= PRESCREEN_SKIP_FLOOR
+
+    def test_variants_of_the_same_incident(self):
+        for title in (
+            "Live bullet found aboard United flight",
+            "Passenger's pistol accidentally fires at Varanasi Airport: 2 injured",
+            "Bangladeshi trader carried ammunition on Delhi flight, probe ordered",
+            "Dhaka airport security lapse: passenger boarded with live cartridges",
+        ):
+            assert _is_screening_breach(title) is True, title
+
+    def test_conjunction_needs_all_three_vocabularies(self):
+        # Item + aviation alone matched 46 headlines in 14 days, 36 of them off-class.
+        assert _is_screening_breach("Ammunition depot struck by Ukrainian drone") is False
+        assert _is_screening_breach("Airport expansion project gets $2bn funding") is False
+
+    def test_engine_fan_blade_is_not_a_prohibited_item(self):
+        # Why "blade" is deliberately absent from the item vocabulary.
+        assert _is_screening_breach(
+            "Passenger Partially Sucked Out of Plane After Fan Blade Shatters Window"
+        ) is False
+
+    def test_military_cargo_is_not_a_screening_breach(self):
+        assert _is_screening_breach(
+            "Turkey-Pakistan Military Flights: Is Ankara Sending Fresh Weapons to Islamabad"
+        ) is False
