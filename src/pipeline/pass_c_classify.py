@@ -22,6 +22,7 @@ from src.core.storyline import strip_date_hint
 from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
+    _is_airport_intrusion,
     _is_aviation_security_incident,
     _is_bare_security_incident,
     _is_flight_disruption,
@@ -280,9 +281,13 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # this vocabulary is full of. That is deliberate and different from the
     # screening-breach flag, whose three-way conjunction leaves no room for metaphor.
     has_bare_incident = _is_bare_security_incident(title)
+    # A person through the fence, onto the airfield, into the wheel well. Measured
+    # 2026-08-31: 8 such headlines in seven days, all prescreen-archived, including a
+    # Manchester breach that diverted 20+ flights and a stowaway found dead at Gatwick.
+    has_airport_intrusion = _is_airport_intrusion(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or has_screening_breach or has_aviation_incident
-                    or has_bare_incident
+                    or has_bare_incident or has_airport_intrusion
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -295,6 +300,8 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     if has_screening_breach:
         score += 20  # same reason: clears the floor (15) even against the noise penalty
     if has_aviation_incident:
+        score += 20
+    if has_airport_intrusion:
         score += 20
     if has_casualty:
         score += 15
@@ -313,6 +320,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_screening_breach": has_screening_breach,
         "has_aviation_incident": has_aviation_incident,
         "has_bare_incident": has_bare_incident,
+        "has_airport_intrusion": has_airport_intrusion,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }

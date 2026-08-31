@@ -569,6 +569,58 @@ _CIVILIAN_COLLOCATION_PATTERN = re.compile(
 )
 
 
+# Someone physically getting where they should not be: onto the airfield, through the
+# fence, into the wheel well, past customs with contraband. Distinct from the screening
+# conjunction above, which is about an ITEM clearing a checkpoint — here the breach is a
+# PERSON, and the item may be absent entirely.
+#
+# Measured 2026-08-31 over seven days of prescreen-archived headlines: 300 carried an
+# aviation noun and 8 of them were physical intrusions, every one archived without an
+# LLM call. They are not small events — "Fuel Emergency As 20+ Flights Divert Or Hold
+# After Man Breaches Manchester Airport", a stowaway found frozen to death in a wheel
+# compartment at Gatwick, a driver through the fence into a parked aircraft.
+#
+# Two negatives carry the whole rule, and both were found by control headlines rather
+# than by reading matches:
+#
+#   * CYBER. "breach" is the same word for an airfield and a database, and that week
+#     the corpus held 8 filings of a UK airport data theft against 8 physical events —
+#     a rule without this negative would have been half wrong. Cyber incidents are
+#     deliberately out of scope for this pipeline (user, 2026-08-31), so they are
+#     excluded rather than ranked.
+#   * LEGAL. "Airline breaches contract with catering supplier" is the commercial sense
+#     of the same verb.
+#
+# `perimeter` was dropped as a standalone term after "Airport expansion breaks ground on
+# new perimeter road" matched on it; a real perimeter story says breach or intrusion too.
+_AIRPORT_INTRUSION_PATTERN = re.compile(
+    r"(\b(trespass\w*|gained access|gains access|breach\w*|intrusion|unauthoris?zed|"
+    r"stowaways?|smuggl\w*|ran onto|runs onto)\b"
+    r"|\b(smash\w+|crash\w+|drove|drives|ram\w+)\b[\w\s]{0,14}\bfence\b"
+    r"|\bonto the (tarmac|runway|airfield)\b"
+    r"|\bleft (a |the )?(gun|firearm|weapon|pistol|knife)\b)",
+    re.IGNORECASE,
+)
+_INTRUSION_NOT_PHYSICAL_PATTERN = re.compile(
+    r"\b(cyber\w*|hacker\w*|hack|hacked|hacking|data|records|customers?|phishing|"
+    r"ransomware|passwords?|contract|agreement|lawsuit|court|settlement|warranty|"
+    r"supplier)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_airport_intrusion(title: str) -> bool:
+    """A person physically breaching an airport, in the headline.
+
+    See the block comment for why the cyber and legal senses of "breach" are excluded
+    rather than scored.
+    """
+    if not title or _INTRUSION_NOT_PHYSICAL_PATTERN.search(title):
+        return False
+    return bool(_AVIATION_HEADLINE_PATTERN.search(title)
+                and _AIRPORT_INTRUSION_PATTERN.search(title))
+
+
 def _is_bare_security_incident(title: str) -> bool:
     """A bare security noun reporting HARM, in the headline.
 
@@ -658,7 +710,8 @@ def _matches_security_keywords(title: str, description: str) -> bool:
             # Same reason again: measured 2026-08-27, "ATSB Probes Third Runway Near
             # Miss at Sydney Airport" and "African stowaway found frozen to death in
             # plane's wheel compartment at Gatwick Airport" both scored 0 here.
-            or _is_aviation_security_incident(title))
+            or _is_aviation_security_incident(title)
+            or _is_airport_intrusion(title))
 
 
 # ---------------------------------------------------------------------------
@@ -809,6 +862,11 @@ def priority_score(title: str, description: str) -> int:
         # matches, the 39 that already passed all scored exactly 1 — the median inserted
         # item. A class that is always on the coin-flip line is a class that disappears
         # the moment the budget tightens, and the budget is never slack.
+        score += 4
+
+    if _is_airport_intrusion(title):
+        # Same weight, same reason. A perimeter breach that diverts twenty flights is
+        # not a marginal item, and it scored 0 here until 2026-08-31.
         score += 4
 
     return score

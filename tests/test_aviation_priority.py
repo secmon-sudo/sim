@@ -3,6 +3,7 @@ Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus)
 """
 
 from src.pipeline.ingest_filters import (
+    _is_airport_intrusion,
     _is_aviation_security_incident,
     _is_bare_security_incident,
     _is_flight_disruption,
@@ -399,4 +400,55 @@ class TestBareSecurityNounGate:
             "Bird Strikes: What Happens When a Bird Hits a Jet Engine") is False
         assert _is_bare_security_incident(
             "Lightning strikes near man, 11 flights diverted, extensive property damage") is False
+
+
+class TestAirportIntrusionGate:
+    """A person physically breaching an airport (added 2026-08-31).
+
+    Measured over seven days of prescreen-archived headlines: 300 carried an aviation
+    noun and 8 were physical intrusions, all archived without an LLM call.
+    """
+
+    ARCHIVED = (
+        "Fuel Emergency As 20+ Flights Divert Or Hold After Man Breaches Manchester Airport",
+        "Flights Diverted at Manchester Airport After Man Trespasses on Airfield",
+        "African stowaway found frozen to death in plane's wheel compartment at Gatwick Airport",
+        "Airport chaos erupts after driver suddenly smashes through fence, hits plane and tractor",
+        "Teen Crashes Airport Fence After Police Chase, Hits Plane",
+        "82g Gold Stuffed In Mouth! Passenger Busted Smuggling Gold Capsules At Bengaluru Airport",
+        "ICE officer left gun in U.S. airport bathroom",
+    )
+
+    def test_recovers_the_intrusions_the_prescreen_archived(self):
+        for title in self.ARCHIVED:
+            assert _is_airport_intrusion(title) is True, title
+            det = deterministic_relevance(title, "")
+            assert det["has_airport_intrusion"] is True, title
+            assert det["score"] >= PRESCREEN_SKIP_FLOOR, title
+
+    def test_reaches_the_admission_filter_and_outranks_the_budget(self):
+        for title in self.ARCHIVED:
+            assert _matches_security_keywords(title, "") is True, title
+            assert priority_score(title, "") > 3, title
+
+    def test_cyber_breaches_are_out_of_scope(self):
+        # "breach" is the same word for an airfield and a database. That week the corpus
+        # held 8 filings of a UK airport data theft against 8 physical events, so a rule
+        # without this negative would have been half wrong. Cyber is deliberately out of
+        # scope for this pipeline.
+        for title in (
+            "UK airport hackers access data of 8.7m people",
+            "Stansted Airport hit by cyber attack exposing 'a quantity of customer data'",
+            "Hackers Target Manchester Airport Group as Data of 8.7 Million Customers May Be Exposed",
+        ):
+            assert _is_airport_intrusion(title) is False, title
+
+    def test_commercial_sense_of_breach_is_excluded(self):
+        assert _is_airport_intrusion(
+            "Airline breaches contract with catering supplier") is False
+
+    def test_bare_perimeter_is_not_enough(self):
+        # Dropped as a standalone term after this headline matched on it.
+        assert _is_airport_intrusion(
+            "Airport expansion breaks ground on new perimeter road") is False
 
