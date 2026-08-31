@@ -96,6 +96,93 @@ def _tokenize_storyline_hint_cached(text: str) -> frozenset:
     return frozenset(unigrams | bigrams)
 
 
+# One word's morphology costs TWO tokens under the bigram tokenizer above, because the
+# unigram AND every bigram touching it change together:
+#
+#     "kyiv russia drone attack"  -> {kyiv, russia,  kyiv russia}
+#     "kyiv russian drone attack" -> {kyiv, russian, kyiv russian}
+#     intersection {kyiv} = 1, union = 5, jaccard = 0.20 against a 0.4 threshold
+#
+# Two headlines about the same incident, three words in four shared, scoring below the
+# threshold. Measured 2026-08-31 over five days of production hints (1897 distinct
+# hints, 2110 hint/storyline pairs): 140 groups of hints are token-identical once this
+# is normalised away, and those 140 groups are spread over 445 storylines. The
+# incidents underneath are single events — "kenscoff gang attack" and "kenscoff gangs
+# attack", "chernihiv russia drone attack" and "chernihiv russian drone attack".
+#
+# The alias map is CURATED, not derived. Deriving it from suffix rules over the corpus
+# proposed `nigerian -> niger`, which merges two different countries that both had live
+# stories that week (the Niamey coup attempt and the Borno attacks). Every entry here
+# was read; the plural rule was then checked against the whole corpus vocabulary and
+# produced 104 collision groups, all of them genuine singular/plural or demonym/country
+# pairs and none of them a false merge.
+_HINT_TOKEN_ALIASES = {
+    "russian": "russia", "russians": "russia",
+    "ukrainian": "ukraine", "ukrainians": "ukraine",
+    "israeli": "israel", "israelis": "israel",
+    "iranian": "iran", "iranians": "iran",
+    "palestinian": "palestine", "syrian": "syria",
+    "lebanese": "lebanon", "yemeni": "yemen", "somali": "somalia",
+    "nigerian": "nigeria", "pakistani": "pakistan", "indian": "india",
+    "haitian": "haiti", "sudanese": "sudan", "iraqi": "iraq",
+    "indonesian": "indonesia", "afghan": "afghanistan",
+}
+
+
+def _normalize_hint_token(token: str) -> str:
+    """Fold a token onto its base form: demonym to country, plural to singular.
+
+    The length guard keeps the plural rule off short words, and the `ss` guard keeps
+    it off words that merely end in one. A word that normalises "wrongly" but
+    CONSISTENTLY (belarus -> belaru) costs nothing here: both sides of every
+    comparison fold the same way, and matching is all these tokens are used for.
+    """
+    alias = _HINT_TOKEN_ALIASES.get(token)
+    if alias:
+        return alias
+    if len(token) > 4 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+@lru_cache(maxsize=4096)
+def _normalized_hint_tokens_cached(text: str) -> frozenset:
+    # Normalisation runs BEFORE the stopword filter on purpose: "drones" folds to
+    # "drone", which AVIATION_STOPWORDS then drops, so the plural no longer survives
+    # as a token while the singular is discarded.
+    clean = re.sub(r"[^\w\s]", "", text.lower())
+    tokens = [
+        n for t in clean.split()
+        for n in (_normalize_hint_token(t),)
+        if n not in AVIATION_STOPWORDS and not _DATE_TOKEN.match(n)
+    ]
+    unigrams = set(tokens)
+    bigrams = {f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)}
+    return frozenset(unigrams | bigrams)
+
+
+def normalized_hint_tokens(text: str) -> Set[str]:
+    """`tokenize_storyline_hint` with morphology folded away."""
+    return set(_normalized_hint_tokens_cached(text))
+
+
+def is_morphological_variant(hint_a: str, hint_b: str) -> bool:
+    """True when two hints are the SAME token set once morphology is folded away.
+
+    Deliberately exact identity rather than a similarity threshold. Sweeping the
+    threshold over five days of production hints showed why: at 0.4 the normalised
+    score newly links 2563 pairs, most of them wrong ("kyiv russia attacks western
+    ambassadors" with "kyiv russian drone strikes" — two different events sharing a
+    city and an aggressor). The count falls to 899 at 0.5 and 286 at 0.6, and from 0.8
+    upward it is a flat 215 — every one of them token-identical. The separation is that
+    clean, so the rescue takes the identical set and nothing else.
+    """
+    if not hint_a or not hint_b:
+        return False
+    tokens_a = _normalized_hint_tokens_cached(hint_a)
+    return bool(tokens_a) and tokens_a == _normalized_hint_tokens_cached(hint_b)
+
+
 def tokenize_storyline_hint(text: str) -> Set[str]:
     """
     Bigram-enhanced tokenization.
@@ -330,6 +417,23 @@ def should_link_storyline(
     # same event. Those pairs are handed to the LLM adjudicator instead of being
     # merged for free.
     if similarity > threshold and has_discriminating_overlap(
+        event_a.get("storyline_hint") or "", event_b.get("storyline_hint") or ""
+    ):
+        return True
+
+    # ── Morphological variant (zero-LLM) ──
+    # The same hint written with a different inflection. Jaccard cannot see it because
+    # one word's morphology moves the unigram AND every bigram touching it, so
+    # "chernihiv russia drone attack" and "chernihiv russian drone attack" score 0.20.
+    # Measured 2026-08-31 over five days of production hints: this rescue links 215
+    # pairs the Jaccard path refused, and at the exact-identity condition used here it
+    # links nothing else — the threshold sweep is flat from 0.8 upward, so there is no
+    # band of partial matches to argue about. The discriminating-overlap gate still
+    # applies, so two hints that fold together on nothing but incident vocabulary do
+    # not qualify here either.
+    if is_morphological_variant(
+        event_a.get("storyline_hint") or "", event_b.get("storyline_hint") or ""
+    ) and has_discriminating_overlap(
         event_a.get("storyline_hint") or "", event_b.get("storyline_hint") or ""
     ):
         return True

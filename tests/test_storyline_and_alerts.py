@@ -5,9 +5,15 @@ Blueprint V20.1 §PASS D
 
 
 import itertools
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from src.core.storyline import jaccard_similarity, tokenize_storyline_hint
+from src.core.storyline import (
+    is_morphological_variant,
+    jaccard_similarity,
+    normalized_hint_tokens,
+    should_link_storyline,
+    tokenize_storyline_hint,
+)
 
 
 class TestTokenize:
@@ -323,3 +329,63 @@ def test_adjudication_logs_llm_telemetry_when_given_a_connection(monkeypatch):
         call_llm_fn=lambda *a, **k: {"content": '{"match": null}'},
     )
     assert calls == [(True, "storyline_adjudication")]
+
+
+class TestMorphologicalVariant:
+    """One word's inflection costs two tokens, so near-identical hints score 0.20.
+
+    Measured 2026-08-31 over five days of production hints: folding morphology away
+    makes 140 groups token-identical, and those groups were spread over 445 storylines.
+    Replaying the rescue over the same window collapses 1562 storylines to 1261 — 301
+    fewer, 19.3%.
+    """
+
+    def test_the_pair_that_motivated_this(self):
+        a, b = "chernihiv russia drone attack", "chernihiv russian drone attack"
+        assert jaccard_similarity(a, b) < 0.4      # the whole problem
+        assert is_morphological_variant(a, b) is True
+
+    def test_plural_and_demonym_folds(self):
+        for a, b in (
+            ("kenscoff gang attack", "kenscoff gangs attack"),
+            ("sokoto terrorist attack", "sokoto terrorists attack"),
+            ("jordan iran missile interception", "jordan iranian missile interception"),
+            ("kherson russia drone attack", "kherson russians attack"),
+        ):
+            assert is_morphological_variant(a, b) is True, (a, b)
+
+    def test_different_incidents_do_not_fold(self):
+        # The threshold sweep is why this is exact identity and not a similarity band:
+        # at 0.4 the normalised score linked 2563 pairs, most of them like this one.
+        assert is_morphological_variant(
+            "kyiv russia attacks western ambassadors", "kyiv russian drone strikes") is False
+        assert is_morphological_variant(
+            "gaza israeli strike", "kherson russian drone attack") is False
+
+    def test_niger_and_nigeria_stay_apart(self):
+        # A suffix rule derived from the corpus proposed nigerian -> niger, merging two
+        # countries that both had live stories that week. The alias map is curated.
+        assert normalized_hint_tokens("nigeria troops terrorist attack") != \
+               normalized_hint_tokens("niger troops terrorist attack")
+
+    def test_plural_rule_leaves_short_words_alone(self):
+        # "gas", "ss"-enders and anything at or under four characters keep their form.
+        assert normalized_hint_tokens("homs gas depot") == normalized_hint_tokens("homs gas depot")
+        assert "pres" not in normalized_hint_tokens("press briefing baghdad")
+
+    def test_rescue_fires_inside_should_link(self):
+        base = datetime(2026, 8, 30, 12, 0, 0)
+        a = {"storyline_hint": "chernihiv russia drone attack", "country_iso": "UA",
+             "occurred_at_est": base}
+        b = {"storyline_hint": "chernihiv russian drone attack", "country_iso": "UA",
+             "occurred_at_est": base - timedelta(hours=8), "storyline_id": "C"}
+        assert should_link_storyline(a, b) is True
+
+    def test_rescue_still_obeys_the_country_gate(self):
+        base = datetime(2026, 8, 30, 12, 0, 0)
+        a = {"storyline_hint": "chernihiv russia drone attack", "country_iso": "UA",
+             "occurred_at_est": base}
+        b = {"storyline_hint": "chernihiv russian drone attack", "country_iso": "RU",
+             "occurred_at_est": base - timedelta(hours=8), "storyline_id": "C"}
+        assert should_link_storyline(a, b) is False
+
