@@ -4,6 +4,7 @@ Tests for Faz 1.2 (military-bypass canceller) and Faz 1.3 (aviation-nexus bonus)
 
 from src.pipeline.ingest_filters import (
     _is_aviation_security_incident,
+    _is_bare_security_incident,
     _is_flight_disruption,
     _is_screening_breach,
     priority_score,
@@ -348,3 +349,54 @@ class TestAviationSecurityIncidentGate:
 
     def test_unrelated_security_news_does_not_match(self):
         assert _is_aviation_security_incident("Gun violence in Chicago claims three lives") is False
+
+
+class TestBareSecurityNounGate:
+    """The bare security noun reporting harm (added 2026-08-31).
+
+    Found by the weekly vocabulary audit, not by accident: the prescreen's judged miss
+    rate went 10% -> 30% against 2267 weekly rejections. Every one of the 2273 events
+    the prescreen archived in seven days scored exactly 0, and 102 of them name a
+    security noun beside something killed, wounded or destroyed.
+    """
+
+    def test_recovers_the_headlines_the_prescreen_archived(self):
+        for title in (
+            "Ukraine Drones Attack Ozon Logistics Hubs, Killing Two Children in Dagestan",
+            "Infant food warehouse in Gaza destroyed by Israeli strike",
+            "Drone Hits Train in Kharkiv Region, Killing Passenger",
+            "Russian attack damages Nova Poshta warehouses in Kyiv Oblast",
+            "Four Palestinians martyred in Israeli attacks, three more succumb to wounds",
+        ):
+            assert _is_bare_security_incident(title) is True, title
+            det = deterministic_relevance(title, "")
+            assert det["has_bare_incident"] is True, title
+            assert det["score"] >= PRESCREEN_SKIP_FLOOR, title
+
+    def test_bare_noun_without_harm_is_not_enough(self):
+        # 290 archived headlines carry a security noun and no harm clause. They stay
+        # archived: the harm clause is what separates the military sense from the rest.
+        assert _is_bare_security_incident("Russia and Ukraine discuss drone technology") is False
+        assert _is_bare_security_incident("Defence firm unveils new attack drone design") is False
+
+    def test_civilian_senses_stay_out(self):
+        assert _is_bare_security_incident("Man survives heart attack after collapsing") is False
+        assert _is_bare_security_incident("Panic attack left her injured in a fall") is False
+
+    def test_lone_strike_with_labour_vocabulary_is_a_dispute(self):
+        assert _is_bare_security_incident("Kenya Nurses Strike Hits Day 29") is False
+        assert _is_bare_security_incident(
+            "Bank Holiday rail chaos to hit thousands as new strike announced") is False
+
+    def test_labour_veto_does_not_fire_when_another_noun_is_present(self):
+        # "pilots" and "rail" collide with military reporting, so the veto applies only
+        # when "strike" is the ONLY security noun in the headline.
+        assert _is_bare_security_incident(
+            "MiG-29 pilots destroyed command post for Russian drone operators") is True
+
+    def test_nature_strikes_are_excluded(self):
+        assert _is_bare_security_incident(
+            "Bird Strikes: What Happens When a Bird Hits a Jet Engine") is False
+        assert _is_bare_security_incident(
+            "Lightning strikes near man, 11 flights diverted, extensive property damage") is False
+

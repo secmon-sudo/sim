@@ -23,6 +23,7 @@ from src.pipeline.ingest_filters import (
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
     _is_aviation_security_incident,
+    _is_bare_security_incident,
     _is_flight_disruption,
     _is_screening_breach,
     is_noise,
@@ -268,8 +269,20 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # including a stowaway found dead in a wheel well at Gatwick and three filings of
     # the Sydney runway-incursion investigation whose siblings were scored normally.
     has_aviation_incident = _is_aviation_security_incident(title)
+    # A bare security noun reporting harm. The lexicon carries phrases, not the bare
+    # words, so "Russian attack damages Nova Poshta warehouses in Kyiv Oblast" matched
+    # nothing at all. Measured 2026-08-31 by the weekly vocabulary audit: every one of
+    # the 2273 events the prescreen archived in seven days scored exactly 0, and 102 of
+    # them name a security noun alongside something killed, wounded or destroyed.
+    #
+    # Counted as ordinary security vocabulary, NOT as high signal: it stays subject to
+    # the is_noise() penalty below, which is the existing guard against the metaphors
+    # this vocabulary is full of. That is deliberate and different from the
+    # screening-breach flag, whose three-way conjunction leaves no room for metaphor.
+    has_bare_incident = _is_bare_security_incident(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or has_screening_breach or has_aviation_incident
+                    or has_bare_incident
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -299,6 +312,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_flight_disruption": has_flight_disruption,
         "has_screening_breach": has_screening_breach,
         "has_aviation_incident": has_aviation_incident,
+        "has_bare_incident": has_bare_incident,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }

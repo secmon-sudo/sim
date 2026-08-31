@@ -506,6 +506,87 @@ _AVIATION_INCIDENT_PATTERN = re.compile(
 )
 
 
+# The bare security noun. "attack", "strike", "bomb", "drone", "terror" are NOT in the
+# keyword lexicon on their own — only phrases containing them are ("airport attack",
+# "car bomb", "gun attack"). That is a deliberate precision choice, because each of
+# those words alone has a large civilian sense: heart attack, panic attack, attack on
+# democracy, a labour strike, a box-office bomb, the drone of an engine.
+#
+# The cost of that choice was measured on 2026-08-31 by the weekly vocabulary audit
+# (scripts/vocab_audit.py), which samples what each gate REJECTED and has a model judge
+# whether the rejection was right. The prescreen's miss rate went 10% -> 30% week over
+# week against 2267 weekly rejections, and every one of the 2273 events the prescreen
+# archived in seven days scored exactly 0 — no distribution at all. Among them:
+#
+#   "Ukraine Drones Attack Ozon Logistics Hubs, Killing Two Children in Dagestan"
+#   "Infant food warehouse in Gaza destroyed by Israeli strike"
+#   "Drone Hits Train in Kharkiv Region, Killing Passenger"
+#   "Four Palestinians martyred in Israeli attacks, three more succumb to wounds"
+#
+# The conjunction that separates these from the civilian senses is HARM: the headline
+# names a bare security noun AND says something was killed, wounded, damaged or
+# destroyed. Nobody writes "the heart attack destroyed a warehouse".
+#
+# Measured over the same 2273 archived headlines: 102 match (4.5%), and reading all
+# 102, about 96 are real incidents — mostly Ukraine/Russia strike reporting the
+# pipeline exists to carry. Roughly 15 recoveries a day for ~15 extra classification
+# calls, the same trade the hostile-act verbs were accepted at in August.
+#
+# Two vetoes, both from that reading. A lone "strike" with labour vocabulary is an
+# industrial dispute ("Kenya Nurses Strike Hits Day 29") — applied only when "strike"
+# is the ONLY security noun present, so "MiG-29 pilots destroyed command post for
+# Russian drone operators" keeps its drone. And some collocations are not security
+# nouns at all — bird and lightning strikes, heart and panic attacks — so they are
+# scrubbed from the headline before the nouns are collected.
+#
+# Deliberately NOT immune to is_noise(), unlike the screening-breach conjunction. This
+# vocabulary is the broadest in the file and metaphor lives exactly here, so the noise
+# penalty stays free to take a match back down below the floor.
+_BARE_SECURITY_NOUN_PATTERN = re.compile(
+    r"\b(attacks?|strikes?|bombs?|bombing|bombings|shelling|drones?|rockets?|"
+    r"airstrikes?|terrorists?|militants?|gunmen)\b",
+    re.IGNORECASE,
+)
+_HARM_PATTERN = re.compile(
+    r"\b(kill\w*|dead|deaths?|wound\w*|injur\w*|casualt\w*|damag\w*|destroy\w*|"
+    r"struck|hits?|martyred|succumb\w*|blast|explosion)\b",
+    re.IGNORECASE,
+)
+_LABOUR_DISPUTE_PATTERN = re.compile(
+    r"\b(nurses?|rail|workers?|unions?|pay|teachers?|doctors?|staff|walkout|"
+    r"picket|hunger|industrial action)\b",
+    re.IGNORECASE,
+)
+# Collocations where the security noun is not a security noun at all. Scrubbed from the
+# headline BEFORE the nouns are collected, rather than vetoing the whole headline, so a
+# real incident reported alongside one of them still matches. The medical ones earn
+# their place: "Panic attack left her injured in a fall" satisfies noun-plus-harm
+# exactly, which is how a civilian sense slips through a rule built on harm.
+_CIVILIAN_COLLOCATION_PATTERN = re.compile(
+    r"\b((?:heart|panic|asthma|anxiety|migraine)\s+attacks?"
+    r"|(?:bird|lightning)\s+strikes?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_bare_security_incident(title: str) -> bool:
+    """A bare security noun reporting HARM, in the headline.
+
+    See the block comment for why the noun alone cannot be trusted and what the
+    harm clause buys.
+    """
+    if not title:
+        return False
+    scrubbed = _CIVILIAN_COLLOCATION_PATTERN.sub(" ", title)
+    nouns = {m.group(0).lower() for m in _BARE_SECURITY_NOUN_PATTERN.finditer(scrubbed)}
+    if not nouns or not _HARM_PATTERN.search(scrubbed):
+        return False
+    # A lone "strike" is an industrial dispute as readily as a military one.
+    if all(n in ("strike", "strikes") for n in nouns) and _LABOUR_DISPUTE_PATTERN.search(scrubbed):
+        return False
+    return True
+
+
 def _is_aviation_security_incident(title: str) -> bool:
     """Aviation noun + an aviation-security class term, both in the headline."""
     if not title:
