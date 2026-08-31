@@ -103,3 +103,63 @@ class TestTokenizerCache:
     def test_tokens_are_unchanged(self):
         assert tokenize_storyline_hint("runway incursion CAI") == {
             "runway", "incursion", "cai", "runway incursion", "incursion cai"}
+
+
+class TestIdenticalRefusalDiagnostic:
+    """Naming the gate that refuses a byte-identical hint.
+
+    Measured over four production runs on 2026-08-31: the pool reaches the linker
+    intact (link_pool_seen 6119 -> 6179 across a run, matching the 6111-6153 the fetch
+    reported), yet every run had 3-7 events whose best ungated similarity was 1.0 — an
+    identical hint sitting in that pool, refused. The same pairs link when handed to
+    should_link_storyline directly, so the refusal comes from a field that differs
+    between link time and what the row later holds. This diagnostic names which one.
+    """
+
+    BASE = datetime.fromisoformat("2026-08-31 12:00:00")
+
+    def _candidate(self, hint, iso, dt):
+        return {"storyline_hint": hint, "country_iso": iso,
+                "occurred_at_est": dt, "storyline_id": "CAND"}
+
+    def test_country_gate_is_named_with_both_isos(self):
+        # The leading suspect: Pass D links on the country Pass C wrote, then stores
+        # COALESCE(anchor_country, country_iso) — the anchor's. A US outlet filing on
+        # Haiti links as US and is stored as HT.
+        event = {"storyline_hint": "haiti gang attack", "country_iso": "US",
+                 "occurred_at_est": self.BASE}
+        pool = [self._candidate("haiti gang attack", "HT", self.BASE - timedelta(hours=6))]
+        diag = {}
+        assert link_storylines(event, pool, frozenset(), diag) is None
+        assert diag["ungated_best"] == 1.0
+        assert diag["identical_refused_by"] == "country:US!=HT"
+
+    def test_time_window_is_named(self):
+        event = {"storyline_hint": "haiti gang attack", "country_iso": "HT",
+                 "occurred_at_est": self.BASE}
+        pool = [self._candidate("haiti gang attack", "HT", self.BASE - timedelta(days=20))]
+        diag = {}
+        assert link_storylines(event, pool, frozenset(), diag) is None
+        assert diag["identical_refused_by"] == "time_window"
+
+    def test_generic_hint_is_named_lexical(self):
+        # Two identical strings still fail has_discriminating_overlap when the whole
+        # hint is incident-type vocabulary — same KIND of event, not the same event.
+        event = {"storyline_hint": "mass shooting", "country_iso": "US",
+                 "occurred_at_est": self.BASE}
+        pool = [self._candidate("mass shooting", "US", self.BASE - timedelta(hours=6))]
+        diag = {}
+        assert link_storylines(event, pool, frozenset(), diag) is None
+        assert diag["identical_refused_by"] == "lexical"
+
+    def test_no_diagnostic_when_the_link_succeeds(self):
+        # The ungated scan runs only on the no-match path, so a normal link costs
+        # nothing and leaves no misleading counter behind.
+        event = {"storyline_hint": "haiti gang attack", "country_iso": "HT",
+                 "occurred_at_est": self.BASE}
+        pool = [self._candidate("haiti gang attack", "HT", self.BASE - timedelta(hours=6))]
+        diag = {}
+        assert link_storylines(event, pool, frozenset(), diag) == "CAND"
+        assert "identical_refused_by" not in diag
+        assert diag.get("ungated_best") is None
+

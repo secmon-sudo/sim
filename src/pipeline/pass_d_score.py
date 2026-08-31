@@ -586,13 +586,47 @@ def link_storylines(event: dict, recent_events: list[dict],
         # row was present and a GATE refused it, well below 1.0 means it was absent.
         # Only computed on the no-match path, so the cost is bounded by the events that
         # are actually in question.
-        ungated_best, ungated_id = -1.0, None
+        ungated_best, ungated_row = -1.0, None
         for existing in recent_events:
             sim = jaccard_similarity(event_hint, existing.get("storyline_hint") or "")
             if sim > ungated_best:
-                ungated_best, ungated_id = sim, existing.get("storyline_id")
+                ungated_best, ungated_row = sim, existing
         diag["ungated_best"] = round(ungated_best, 3) if ungated_best >= 0 else None
-        diag["ungated_storyline"] = str(ungated_id)[:8] if ungated_id else None
+        diag["ungated_storyline"] = (
+            str(ungated_row.get("storyline_id"))[:8] if ungated_row else None
+        )
+
+        # WHICH gate refused it, for the identical-hint case only. Measured over four
+        # runs on 2026-08-31: every run had 3-7 events whose ungated best was 1.0 — a
+        # byte-identical hint sitting in the pool that should_link_storyline refused —
+        # while the same pairs, handed to the function directly, link. So the refusal
+        # comes from a field that differs between link time and what the row later
+        # holds, and the gates are few enough to name the culprit outright.
+        #
+        # The leading suspect is the country gate. Pass D links on row[3], the country
+        # Pass C wrote, but the UPDATE that follows stores
+        # `country_iso = COALESCE(anchor_country, country_iso)` — the ANCHOR's country.
+        # A US outlet filing on Haiti can therefore link as US and be stored as HT,
+        # which is exactly the shape that makes a replay disagree with production.
+        # Restricted to >=0.999 because below that a refusal is ordinary and says
+        # nothing; this counter exists to explain the contradiction, not the norm.
+        if ungated_row is not None and ungated_best >= 0.999:
+            dt_a = event.get("occurred_at_est")
+            dt_b = ungated_row.get("occurred_at_est")
+            iso_a = event.get("country_iso")
+            iso_b = ungated_row.get("country_iso")
+            if dt_a is None or dt_b is None:
+                reason = "missing_time"
+            elif abs((dt_a - dt_b).total_seconds()) > STORYLINE_TIME_WINDOW_DAYS * 86400:
+                reason = "time_window"
+            elif STORYLINE_COUNTRY_MATCH_REQUIRED and iso_a and iso_b and iso_a != iso_b:
+                reason = f"country:{iso_a}!={iso_b}"
+            else:
+                # Neither hard gate explains it, so the refusal is lexical — which for
+                # two identical strings means has_discriminating_overlap said the whole
+                # hint is generic incident vocabulary.
+                reason = "lexical"
+            diag["identical_refused_by"] = reason
     return best_id
 
 
@@ -1153,6 +1187,10 @@ def run_pass_d(db_conn) -> dict:
         # the pool with every gate ignored, bucketed. A bucket at 1.0 means an identical
         # hint WAS in the list and a gate refused it; everything below means it was not.
         "link_ungated_best": {},
+        # For the identical-hint refusals only (ungated_best 1.0): which gate said no.
+        # This is the field that decides between "the country gate reads a country the
+        # anchor later overwrites" and "the lexical gate calls the hint generic".
+        "link_identical_refused_by": {},
     }
 
     try:
@@ -1240,6 +1278,10 @@ def run_pass_d(db_conn) -> dict:
                               "0.8-1.0" if ub >= 0.8 else
                               "0.4-0.8" if ub >= 0.4 else "<0.4")
                     stats["link_ungated_best"][bucket] = stats["link_ungated_best"].get(bucket, 0) + 1
+                why = diag.get("identical_refused_by")
+                if why:
+                    stats["link_identical_refused_by"][why] = (
+                        stats["link_identical_refused_by"].get(why, 0) + 1)
                 # Count an alert only when a Telegram card was ACTUALLY dispatched
                 # this run — not merely "tier-eligible". dispatch_result is the source
                 # of truth; effective tier is forced to ALERT for severity-gated sends,
