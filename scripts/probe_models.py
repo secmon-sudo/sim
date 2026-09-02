@@ -15,12 +15,14 @@ per model and dumps raw content, since a malformed reply is the interesting case
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
 import time
 import urllib.request
 
+from src.core import llm_client
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMAccount, LLMRouter
 from src.core.model_profiles import get_profile
@@ -29,6 +31,7 @@ from src.pipeline.pass_c_classify import (
     BATCH_SYSTEM_SUFFIX,
     CLASSIFICATION_SYSTEM_PROMPT,
     _batch_prompt,
+    _parse_batch_response,
 )
 
 # Fixed sample so two models are graded on identical input, and so a re-run months
@@ -115,21 +118,26 @@ def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     ])
 
 
-def _grade(parsed: dict) -> tuple[bool, str]:
-    """Did the reply carry the batch schema Pass C parses?"""
-    if not isinstance(parsed, dict):
-        return False, f"top level is {type(parsed).__name__}, expected object"
-    results = parsed.get("results")
-    if not isinstance(results, list):
-        return False, "no 'results' array"
-    if len(results) != len(SAMPLE_EVENTS):
-        return False, f"{len(results)} results for {len(SAMPLE_EVENTS)} reports"
+def _grade(items: list) -> tuple[bool, str]:
+    """Did Pass C's own parser get usable items out of the reply?
+
+    Grades what production extracts, not what the model literally sent: the
+    parser has a salvage path for partly-corrupt batches, so hand-rolling a
+    stricter check here would fail models that Pass C would actually accept —
+    and pass ones it would not. `content` is the field pass_c reads; `response`
+    is the raw provider envelope, which is what an earlier version of this
+    graded, reporting FAIL for a flawless reply.
+    """
+    if not items:
+        return False, "parser recovered nothing"
+    if len(items) != len(SAMPLE_EVENTS):
+        return False, f"{len(items)} items for {len(SAMPLE_EVENTS)} reports"
     missing = []
-    for i, item in enumerate(results, 1):
+    for i, item in enumerate(items, 1):
         if not isinstance(item, dict):
             missing.append(f"#{i} not an object")
             continue
-        for field in ("report", "event_type", "relevance"):
+        for field in ("event_type", "relevance_score"):
             if field not in item:
                 missing.append(f"#{i} missing {field}")
     if missing:
@@ -137,7 +145,7 @@ def _grade(parsed: dict) -> tuple[bool, str]:
     return True, "schema OK"
 
 
-def probe(provider: str, model: str, key_env: str) -> None:
+def probe(provider: str, model: str, key_env: str, timeout: float | None = None) -> None:
     profile = get_profile(provider, model)
     print(f"\n{'=' * 72}\n{provider}/{model}")
     print(f"  profile: json_mode={profile.supports_json_mode} extras={profile.payload_extras} "
@@ -147,6 +155,20 @@ def probe(provider: str, model: str, key_env: str) -> None:
         return
 
     router = _one_slot_router(provider, model, key_env)
+    # A probe asks "can this model do the job at all", so it must not inherit the
+    # production read timeout: gemma-4-31b-it blew the gemini profile's 30s and the
+    # run learned nothing except that 30s was not enough. Widen it here, measure the
+    # real latency, and let THAT decide the production timeout.
+    if timeout:
+        real_get_profile = llm_client.get_profile
+
+        def _slow(p, m):
+            return dataclasses.replace(
+                real_get_profile(p, m), request_timeout=timeout,
+                wall_clock_timeout=timeout + 30,
+            )
+
+        llm_client.get_profile = _slow
     started = time.monotonic()
     try:
         result = call_llm(
@@ -160,14 +182,19 @@ def probe(provider: str, model: str, key_env: str) -> None:
         print(f"  FAILED after {time.monotonic() - started:.1f}s: "
               f"{type(exc).__name__}: {str(exc)[:400]}")
         return
+    finally:
+        if timeout:
+            llm_client.get_profile = real_get_profile
 
-    ok, note = _grade(result.get("response") or {})
+    content = result.get("content", "")
+    items = _parse_batch_response(content, expected=len(SAMPLE_EVENTS))
+    ok, note = _grade(items)
     print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
-    print("  --- parsed response ---")
-    print(json.dumps(result.get("response"), indent=2, ensure_ascii=False)[:4000])
+    print("  --- what Pass C would extract ---")
+    print(json.dumps(items, indent=2, ensure_ascii=False)[:5000])
     if not ok:
         print("  --- raw content ---")
-        print(str(result.get("content"))[:2000])
+        print(str(content)[:2500])
 
 
 def main() -> int:
@@ -176,6 +203,8 @@ def main() -> int:
                     help="comma-separated provider:model[:KEY_ENV] (KEY_ENV defaults per provider)")
     ap.add_argument("--list-gemini", action="store_true",
                     help="print exact model ids the Gemini key can see, then exit")
+    ap.add_argument("--timeout", type=float, default=120.0,
+                    help="read timeout for the probe, overriding the model profile")
     args = ap.parse_args()
 
     if args.list_gemini:
@@ -191,7 +220,7 @@ def main() -> int:
         parts = spec.strip().split(":")
         provider, model = parts[0], parts[1]
         key_env = parts[2] if len(parts) > 2 else default_key.get(provider, "")
-        probe(provider, model, key_env)
+        probe(provider, model, key_env, timeout=args.timeout)
     return 0
 
 
