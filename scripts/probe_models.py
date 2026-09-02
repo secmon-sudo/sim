@@ -327,6 +327,17 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
                 break
     if mangled:
         problems.append(f"mangled codes: {', '.join(sorted(mangled))}")
+    # Source URLs the model altered. validate_sitrep() checks every cited URL against
+    # the payload's allowed_urls and rewrites what it cannot match, so a model that
+    # silently drops a path turns a real citation into an unresolvable one. Caught on
+    # minimax-m2.7, which wrote apnews.com for apnews.com/b and aviationweek.com for
+    # aviationweek.com/c — the domain survives, the article does not.
+    allowed = set(re.findall(r"https?://[^\s\"'),]+",
+                             json.dumps(SAMPLE_SITREP_PAYLOAD, ensure_ascii=False)))
+    cited = set(re.findall(r"https?://[^\s\"'),]+", stripped))
+    altered = cited - allowed
+    if altered:
+        problems.append(f"altered URLs: {', '.join(sorted(altered)[:4])}")
     note = f"{words} words" + ("; " + "; ".join(problems) if problems else "")
     return not problems, note
 
