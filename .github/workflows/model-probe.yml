@@ -14,10 +14,10 @@ on:
         description: 'payload_extras JSON, ör. {"reasoning_effort":"none"}'
         type: string
         default: ""
-      list_gemini:
-        description: "Sadece Gemini anahtarının gördüğü model kimliklerini listele"
-        type: boolean
-        default: false
+      catalogues:
+        description: "Katalogu listelenecek sağlayıcılar (gemini,groq)"
+        type: string
+        default: "gemini,groq"
 
 env:
   GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
@@ -50,15 +50,13 @@ jobs:
           # behind it were silently never tested.
           set -o pipefail
           mkdir -p logs
-          # The catalogue always runs first: the rate-limit dashboard names models by
-          # display name ("Gemma 4 31B") and the API wants a slug, so a probe against a
-          # guessed id fails for the boring reason and tells us nothing about the model.
-          # Listing alongside the probe means one dispatch answers both questions.
-          python -m scripts.probe_models --list-gemini 2>&1 | tee logs/probe.txt || true
-          if [ "${{ inputs.list_gemini }}" != "true" ] && [ -n "${{ inputs.models }}" ]; then
-            python -m scripts.probe_models --models "${{ inputs.models }}" \
-              --extras '${{ inputs.extras }}' 2>&1 | tee -a logs/probe.txt
-          fi
+          # Catalogues run first and always: dashboards and deprecation emails name
+          # models by display name ("Gemma 4 31B", "Qwen3.8-27B") while the API wants a
+          # slug, so a probe against a guessed id fails for the boring reason and says
+          # nothing about the model. One dispatch answers both questions.
+          python -m scripts.probe_models --list "${{ inputs.catalogues }}" \
+            --models "${{ inputs.models }}" --extras '${{ inputs.extras }}' \
+            2>&1 | tee logs/probe.txt
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -10,8 +10,8 @@ candidate and prints what came back, so the choice is made on output.
 Runs where the keys live (GitHub Actions, see model-probe.yml). Prints a verdict
 per model and dumps raw content, since a malformed reply is the interesting case.
 
-  python -m scripts.probe_models --models gemini:gemma-4-31b-it,gemini:gemma-4-26b-it
-  python -m scripts.probe_models --list-gemini      # discover exact model ids
+  python -m scripts.probe_models --models groq:qwen/qwen3.8-27b
+  python -m scripts.probe_models --list gemini,groq   # discover exact model ids
 """
 
 import argparse
@@ -79,27 +79,50 @@ SAMPLE_EVENTS = [
 ]
 
 
-def list_gemini_models() -> int:
-    """Ask the Gemini API for the exact model ids this key can see.
+# Where each provider publishes the ids it will actually accept. The rate-limit
+# dashboards and deprecation emails name models by DISPLAY name ("Gemma 4 31B",
+# "Qwen3.8-27B") and the API wants a slug; deriving one from the other is a guess,
+# and a guessed slug is how a slot ends up 404-ing in production (gemma-4-26b-it,
+# 2026-09-02).
+_CATALOGUES = {
+    "gemini": (
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+        "GEMINI_API_KEY",
+    ),
+    "groq": ("https://api.groq.com/openai/v1/models", "GROQ_API_KEY_A"),
+}
 
-    Worth a separate mode: the rate-limit dashboard lists models by DISPLAY name
-    ("Gemma 4 31B"), and the id the API wants is not derivable from it. Guessing
-    the slug is how a slot ends up 404-ing in production.
-    """
-    key = os.environ.get("GEMINI_API_KEY", "")
+
+def list_models(provider: str) -> int:
+    """Print the model ids the key for `provider` can actually see."""
+    url, key_env = _CATALOGUES[provider]
+    key = os.environ.get(key_env, "")
     if not key:
-        print("GEMINI_API_KEY not set")
-        return 1
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}&pageSize=200"
-    with urllib.request.urlopen(url, timeout=45) as r:
-        data = json.loads(r.read())
-    models = data.get("models", [])
-    print(f"=== {len(models)} models visible to GEMINI_API_KEY ===")
-    for m in sorted(models, key=lambda x: x.get("name", "")):
-        name = m.get("name", "").replace("models/", "")
+        print(f"=== {provider}: {key_env} not set, skipping catalogue ===")
+        return 0
+    # Gemini takes the key in the query string, Groq as a bearer header.
+    if provider == "gemini":
+        req = urllib.request.Request(f"{url}&key={key}")
+    else:
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            data = json.loads(r.read())
+    except Exception as exc:
+        print(f"=== {provider}: catalogue fetch failed: {type(exc).__name__}: {exc} ===")
+        return 0
+
+    rows = data.get("models") or data.get("data") or []
+    print(f"\n=== {len(rows)} models visible to {key_env} ({provider}) ===")
+    for m in sorted(rows, key=lambda x: str(x.get("name") or x.get("id"))):
+        name = str(m.get("name") or m.get("id")).replace("models/", "")
         methods = ",".join(m.get("supportedGenerationMethods", []))
-        limit = m.get("inputTokenLimit")
-        print(f"  {name:<44} in={limit} methods={methods}")
+        extra = f" methods={methods}" if methods else ""
+        limit = m.get("inputTokenLimit") or m.get("context_window")
+        owned = m.get("owned_by")
+        if owned:
+            extra += f" owned_by={owned}"
+        print(f"  {name:<44} ctx={limit}{extra}")
     return 0
 
 
@@ -223,16 +246,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default="",
                     help="comma-separated provider:model[:KEY_ENV] (KEY_ENV defaults per provider)")
-    ap.add_argument("--list-gemini", action="store_true",
-                    help="print exact model ids the Gemini key can see, then exit")
+    ap.add_argument("--list", dest="list_providers", default="",
+                    help="comma-separated providers whose catalogue to print (gemini,groq)")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="read timeout for the probe, overriding the model profile")
     ap.add_argument("--extras", default="",
                     help='JSON merged into payload_extras, e.g. \'{"reasoning_effort":"none"}\'')
     args = ap.parse_args()
 
-    if args.list_gemini:
-        return list_gemini_models()
+    for provider in [p for p in args.list_providers.split(",") if p.strip()]:
+        if provider.strip() in _CATALOGUES:
+            list_models(provider.strip())
+        else:
+            print(f"unknown provider for catalogue: {provider}")
+    if not args.models:
+        return 0
 
     default_key = {
         "gemini": "GEMINI_API_KEY",
