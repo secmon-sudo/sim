@@ -16,8 +16,10 @@ per model and dumps raw content, since a malformed reply is the interesting case
 
 import argparse
 import dataclasses
+import difflib
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -27,6 +29,8 @@ from src.core.llm_client import call_llm
 from src.core.llm_router import LLMAccount, LLMRouter
 from src.core.model_profiles import get_profile
 from src.core.token_bucket import TokenBucket
+from src.services.sitrep_generator import NARRATIVE_MAX_TOKENS
+from src.services.sitrep_generator import _SYSTEM_PROMPT as SITREP_SYSTEM_PROMPT
 from src.pipeline.pass_c_classify import (
     BATCH_SYSTEM_SUFFIX,
     CLASSIFICATION_SYSTEM_PROMPT,
@@ -201,8 +205,134 @@ def _grade(items: dict) -> tuple[bool, str]:
     return True, "schema OK"
 
 
+# Fixed SITREP payload in run_sitrep_llm's exact shape, for --prose. The quality
+# router's whole job is Turkish narrative and this harness could only measure Pass C
+# classification, so a slot could pass here and still write unreadable prose in
+# production — which is precisely the open question about a slot that only runs when
+# the rung above it is already dead. Three clusters on purpose: an attack with
+# casualties, an aviation-impact item (the section the prompt says must never be
+# summarized away), and a strategic item, plus a country-scope airspace block, which
+# is the case the prompt has the most rules about ("do not say which FIR").
+SAMPLE_SITREP_PAYLOAD = {
+    "country": "Afganistan (AF)",
+    "window": "2026-09-01 06:00 — 2026-09-02 06:00 UTC",
+    "events": [
+        {
+            "location": "Kabil",
+            "event_type": "drone_attack_critical_infra",
+            "date": "1 Eylül 2026",
+            "verification": "Onaylandı (Çoklu kaynak)",
+            "severity": 95,
+            "snippet": "A drone struck the perimeter of Hamid Karzai International "
+                       "Airport early on Tuesday, killing three ground staff. The "
+                       "aviation authority suspended all departures.",
+            "sources": [
+                {"name": "reuters.com", "url": "https://reuters.com/a",
+                 "title": "Drone attack halts flights at Kabul airport"},
+                {"name": "apnews.com", "url": "https://apnews.com/b",
+                 "title": "Three killed in Kabul airport drone strike"},
+            ],
+            "country_iso": "AF",
+        },
+        {
+            "location": "Kabil",
+            "event_type": "airspace_closure",
+            "date": "1 Eylül 2026",
+            "verification": "Onaylandı (Tek kaynak)",
+            "severity": 70,
+            "snippet": "Turkish Airlines suspended its Istanbul-Kabul route until "
+                       "further notice; two other carriers rerouted around Afghan "
+                       "airspace.",
+            "sources": [{"name": "aviationweek.com", "url": "https://aviationweek.com/c",
+                         "title": "Carriers suspend Kabul routes"}],
+            "country_iso": "AF",
+        },
+    ],
+    "spillover": [],
+    "strategic": [
+        {
+            "location": "Ülke Geneli",
+            "event_type": "travel_advisory",
+            "date": "2 Eylül 2026",
+            "verification": "Onaylandı (Resmî kaynak)",
+            "severity": 55,
+            "snippet": "Several foreign ministries raised their Afghanistan travel "
+                       "advisories to the highest level, citing airport security.",
+            "sources": [{"name": "gov.uk", "url": "https://gov.uk/d",
+                         "title": "Afghanistan travel advice updated"}],
+            "country_iso": "AF",
+        },
+    ],
+    "airspace": {
+        "kapsam": "country",
+        "ulkenin_firlari": [{"kod": "OAKX", "ad": "Kabul FIR", "czib_active": True}],
+        "ulkenin_baslica_havalimanlari": [
+            {"kod": "OAKB", "ad": "Hamid Karzai Intl"},
+            {"kod": "OAKN", "ad": "Kandahar Intl"},
+        ],
+    },
+}
+
+# Turkish function words that no English or machine-translated-from-scratch reply
+# avoids for long. Cheap language check: the failure this catches is a model that
+# silently answers in English, which has happened to non-Turkish-tuned slots.
+_TURKISH_MARKERS = ("ve ", "bir ", "için", "olarak", "ile ", "bu ", "daha")
+
+
+def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
+    """Objective, checkable properties of a narrative — NOT its literary quality.
+
+    Prose quality is a human judgment and this returns none: the text is printed in
+    full for that. What it does check is the handful of things the SITREP pipeline
+    will actually break on, each one a bug that has shipped before: an empty or
+    truncated narrative ([[sitrep truncation]], 25% of two weeks ended mid-sentence),
+    a reply in the wrong language, a missing mandatory heading, and the markdown link
+    syntax the prompt forbids because the source-credit extractor cannot parse it.
+    """
+    problems = []
+    stripped = text.strip()
+    if not stripped:
+        return False, "empty completion"
+    words = len(stripped.split())
+    hits = sum(1 for m in _TURKISH_MARKERS if m in stripped.lower())
+    if hits < 3:
+        problems.append(f"probably not Turkish ({hits}/{len(_TURKISH_MARKERS)} markers)")
+    if "YÖNETİCİ ÖZETİ" not in stripped.upper():
+        problems.append("no 'YÖNETİCİ ÖZETİ' heading")
+    if re.search(r"\[[^\]]+\]\(", stripped):
+        problems.append("markdown links (prompt forbids)")
+    if result.get("finish_reason") == "length":
+        problems.append("truncated (finish_reason=length)")
+    # Corrupted aviation identifiers. The prompt's hardest rule is that FIR and
+    # airport codes may ONLY come from the airspace block, since that block is
+    # computed from the event's coordinates and anything else is the model's own
+    # geography. Caught on the very first --prose run: the payload says OAKX and
+    # laguna wrote OAKWX.
+    #
+    # Deliberately NOT "any uppercase token missing from the payload": the report is
+    # Turkish and the prompt DEMANDS all-caps section headings, so that rule flags
+    # HAVA and every other Turkish word in a heading. What is checkable without a
+    # code list is a NEAR MISS — a token close to a real code but not equal to it,
+    # which is what a fabricated identifier actually looks like. A wholly invented
+    # code that resembles nothing in the payload is left to the human read below.
+    known_codes = {c for c in re.findall(r"\b[A-Z]{4}\b", json.dumps(
+        SAMPLE_SITREP_PAYLOAD.get("airspace", {}), ensure_ascii=False))}
+    mangled = set()
+    for token in set(re.findall(r"\b[A-Z]{3,6}\b", stripped)):
+        if token in known_codes:
+            continue
+        for code in known_codes:
+            if difflib.SequenceMatcher(None, token, code).ratio() >= 0.75:
+                mangled.add(f"{token}(≠{code})")
+                break
+    if mangled:
+        problems.append(f"mangled codes: {', '.join(sorted(mangled))}")
+    note = f"{words} words" + ("; " + "; ".join(problems) if problems else "")
+    return not problems, note
+
+
 def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
-          extras: dict | None = None) -> None:
+          extras: dict | None = None, prose: bool = False) -> None:
     profile = get_profile(provider, model)
     print(f"\n{'=' * 72}\n{provider}/{model}")
     print(f"  profile: json_mode={profile.supports_json_mode} extras={profile.payload_extras} "
@@ -235,13 +365,29 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         llm_client.get_profile = _override
     started = time.monotonic()
     try:
-        result = call_llm(
-            router,
-            prompt=_batch_prompt(SAMPLE_EVENTS),
-            system_prompt=CLASSIFICATION_SYSTEM_PROMPT + BATCH_SYSTEM_SUFFIX,
-            max_tokens=2048,
-            json_mode=True,
-        )
+        if prose:
+            # The REAL narrator prompt and the REAL budget: a 6K-token completion is
+            # what exposes the timeout and truncation behavior that a 2K
+            # classification batch never reaches.
+            result = call_llm(
+                router,
+                prompt=(
+                    "Aşağıdaki veriden Afganistan için 24 saatlik SITREP'i yaz. "
+                    "RAPOR DİLİ: TÜRKÇE (veri İngilizce olsa bile).\n\n"
+                    + json.dumps(SAMPLE_SITREP_PAYLOAD, ensure_ascii=False, indent=1)
+                ),
+                system_prompt=SITREP_SYSTEM_PROMPT,
+                max_tokens=NARRATIVE_MAX_TOKENS,
+                json_mode=False,
+            )
+        else:
+            result = call_llm(
+                router,
+                prompt=_batch_prompt(SAMPLE_EVENTS),
+                system_prompt=CLASSIFICATION_SYSTEM_PROMPT + BATCH_SYSTEM_SUFFIX,
+                max_tokens=2048,
+                json_mode=True,
+            )
     except Exception as exc:
         print(f"  FAILED after {time.monotonic() - started:.1f}s: "
               f"{type(exc).__name__}: {str(exc)[:400]}")
@@ -251,6 +397,14 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
             llm_client.get_profile = real_get_profile
 
     content = result.get("content", "")
+    if prose:
+        ok, note = _grade_prose(content, result)
+        print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
+        # Printed in full and unclipped: the checks above cannot judge whether the
+        # Turkish is any good, and that judgment is the entire reason for this mode.
+        print("  --- narrative as written ---")
+        print(content)
+        return
     # _parse_batch_response RAISES on unparseable content rather than returning
     # empty. An unparseable reply is a probe's most informative outcome, so it must
     # be a graded verdict here, not an exception: letting it propagate killed the
@@ -278,6 +432,9 @@ def main() -> int:
                     help="read timeout for the probe, overriding the model profile")
     ap.add_argument("--extras", default="",
                     help='JSON merged into payload_extras, e.g. \'{"reasoning_effort":"none"}\'')
+    ap.add_argument("--prose", action="store_true",
+                    help="run the REAL Turkish SITREP narrator prompt instead of the "
+                         "Pass C batch — for quality-router slots, whose job is prose")
     args = ap.parse_args()
 
     for provider in [p for p in args.list_providers.split(",") if p.strip()]:
@@ -310,7 +467,8 @@ def main() -> int:
         else:
             model, key_env = rest, default_key.get(provider, "")
         try:
-            probe(provider, model, key_env, timeout=args.timeout, extras=extras)
+            probe(provider, model, key_env, timeout=args.timeout, extras=extras,
+                  prose=args.prose)
         except Exception as exc:
             # One model's crash must not cancel the models queued behind it.
             print(f"  CRASHED: {type(exc).__name__}: {str(exc)[:300]}")
