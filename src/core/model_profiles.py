@@ -87,6 +87,43 @@ OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
     "minimax/minimax-m3:free",
 })
 
+# LLM7 (aggregator, added 2026-09-02) publishes a per-model `json_mode` boolean in
+# https://api.llm7.io/v1/models, so this is a DENYLIST rather than the allowlist used
+# for OpenRouter: there the safe default was "no", here the catalogue answers the
+# question for all 44 models and only these four say no. Read off the catalogue on
+# 2026-09-02. Being wrong is cheap in this direction — llm_client sidelines json mode
+# for a slot that 400s on response_format and retries without it — while being wrong
+# the other way is not: an unconstrained batch reply drifts into malformed JSON
+# mid-object (Nemotron corrupted ~7% of Pass C batches that way).
+LLM7_NO_JSON_MODE_MODELS = frozenset({
+    "gemini-3.7-flash",
+    "glm-5.3-flash",
+    "kimi-k3",
+    "L3-8B-Lunaris-v1-Turbo",
+})
+
+# Checklist item 2 (which knob turns reasoning off) is DELIBERATELY UNANSWERED for
+# LLM7: it is a proxy in front of many upstreams, and whether it forwards, normalizes
+# or silently drops `reasoning_effort` is exactly the aggregator-parameter-fidelity
+# question that got AnyAPI rejected — and the failure is silent (HTTP 200, hidden
+# thinking eats max_tokens, garbage JSON comes back). Guessing a knob here would bake
+# that guess into production. So llm7 slots send NO reasoning extras by default and
+# scripts/probe_models.py --extras is the instrument that settles it per model; the
+# answer belongs in this file afterwards, not before.
+LLM7_REASONING_MODELS = frozenset({
+    "Inkling", "Inkling-Small", "claude-fable-5", "claude-opus-4-8", "claude-opus-5",
+    "claude-sonnet-4-6", "claude-sonnet-5", "deepseek-v4-flash", "deepseek-v4-flash:0731",
+    "gemini-3-flash", "gemini-3.5-flash-low", "glm-5.3", "glm-5.3-flash", "gpt-5.4",
+    "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-oss", "grok-4.6",
+    "kimi-k3", "minimax-m2.7", "minimax-m3",
+})
+
+# LLM7 fronts upstream models over a proxy hop, so a completion that a first-party
+# endpoint finishes in 30s can legitimately take longer here. Read timeout is widened
+# accordingly; slowness stays bounded by wall_clock_timeout, which is the only thing
+# that can bound it (checklist item 5).
+LLM7_REQUEST_TIMEOUT = 60.0
+
 
 @dataclass(frozen=True)
 class ModelProfile:
@@ -114,6 +151,12 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
         # that actually lands, whatever the underlying family accepts natively.
         extras = {"reasoning": {"enabled": False}}
+    elif provider == "llm7":
+        # Also before the family rules, and for the opposite reason: the family knobs
+        # below are facts about first-party endpoints (Groq 400s on reasoning_effort
+        # "none"), and nothing yet establishes that this proxy forwards them at all.
+        # See LLM7_REASONING_MODELS — probe, then fill this in.
+        extras = {}
     elif model.startswith("qwen"):
         extras = {"reasoning_effort": "none"}
     elif "gpt-oss" in model:
@@ -132,14 +175,25 @@ def get_profile(provider: str, model: str) -> ModelProfile:
     # verified list above take response_format.
     if provider == "openrouter":
         supports_json = model in OPENROUTER_JSON_MODE_MODELS
+    elif provider == "llm7":
+        # Per-model, from the provider's own catalogue — see LLM7_NO_JSON_MODE_MODELS
+        # for why this one defaults to yes where OpenRouter defaults to no.
+        supports_json = model not in LLM7_NO_JSON_MODE_MODELS
     else:
         supports_json = provider in ("groq", "gemini", "mistral")
+
+    if provider == "mistral":
+        request_timeout = 180.0
+    elif provider == "llm7":
+        request_timeout = LLM7_REQUEST_TIMEOUT
+    else:
+        request_timeout = 30.0
 
     return ModelProfile(
         supports_json_mode=supports_json,
         payload_extras=extras,
         max_request_tokens=max_request,
-        request_timeout=180.0 if provider == "mistral" else 30.0,
+        request_timeout=request_timeout,
         wall_clock_timeout=(
             MISTRAL_WALL_CLOCK_SECONDS if provider == "mistral"
             else DEFAULT_WALL_CLOCK_SECONDS
