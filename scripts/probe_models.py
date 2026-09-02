@@ -30,6 +30,7 @@ from src.core.token_bucket import TokenBucket
 from src.pipeline.pass_c_classify import (
     BATCH_SYSTEM_SUFFIX,
     CLASSIFICATION_SYSTEM_PROMPT,
+    LLMParseError,
     _batch_prompt,
     _parse_batch_response,
 )
@@ -145,7 +146,8 @@ def _grade(items: list) -> tuple[bool, str]:
     return True, "schema OK"
 
 
-def probe(provider: str, model: str, key_env: str, timeout: float | None = None) -> None:
+def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
+          extras: dict | None = None) -> None:
     profile = get_profile(provider, model)
     print(f"\n{'=' * 72}\n{provider}/{model}")
     print(f"  profile: json_mode={profile.supports_json_mode} extras={profile.payload_extras} "
@@ -159,16 +161,23 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None)
     # production read timeout: gemma-4-31b-it blew the gemini profile's 30s and the
     # run learned nothing except that 30s was not enough. Widen it here, measure the
     # real latency, and let THAT decide the production timeout.
-    if timeout:
-        real_get_profile = llm_client.get_profile
-
-        def _slow(p, m):
+    patched = bool(timeout or extras)
+    real_get_profile = llm_client.get_profile
+    if patched:
+        def _override(p, m):
+            base = real_get_profile(p, m)
             return dataclasses.replace(
-                real_get_profile(p, m), request_timeout=timeout,
-                wall_clock_timeout=timeout + 30,
+                base,
+                request_timeout=timeout or base.request_timeout,
+                wall_clock_timeout=(timeout + 30) if timeout else base.wall_clock_timeout,
+                # Overriding payload_extras is the POINT of a probe: the right
+                # reasoning knob for a new model is what we are trying to find out,
+                # and encoding a guess in model_profiles before measuring it is how
+                # a silently-thinking model reaches production.
+                payload_extras={**base.payload_extras, **(extras or {})},
             )
 
-        llm_client.get_profile = _slow
+        llm_client.get_profile = _override
     started = time.monotonic()
     try:
         result = call_llm(
@@ -183,12 +192,19 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None)
               f"{type(exc).__name__}: {str(exc)[:400]}")
         return
     finally:
-        if timeout:
+        if patched:
             llm_client.get_profile = real_get_profile
 
     content = result.get("content", "")
-    items = _parse_batch_response(content, expected=len(SAMPLE_EVENTS))
-    ok, note = _grade(items)
+    # _parse_batch_response RAISES on unparseable content rather than returning
+    # empty. An unparseable reply is a probe's most informative outcome, so it must
+    # be a graded verdict here, not an exception: letting it propagate killed the
+    # whole run mid-sweep and the models queued behind it were never tested.
+    try:
+        items = _parse_batch_response(content, expected=len(SAMPLE_EVENTS))
+        ok, note = _grade(items)
+    except LLMParseError as exc:
+        items, ok, note = [], False, f"unparseable: {str(exc)[:120]}"
     print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
     print("  --- what Pass C would extract ---")
     print(json.dumps(items, indent=2, ensure_ascii=False)[:5000])
@@ -205,6 +221,8 @@ def main() -> int:
                     help="print exact model ids the Gemini key can see, then exit")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="read timeout for the probe, overriding the model profile")
+    ap.add_argument("--extras", default="",
+                    help='JSON merged into payload_extras, e.g. \'{"reasoning_effort":"none"}\'')
     args = ap.parse_args()
 
     if args.list_gemini:
@@ -216,11 +234,16 @@ def main() -> int:
         "openrouter": "OPENROUTER_API_KEY_A",
         "mistral": "MISTRAL_API_KEY",
     }
+    extras = json.loads(args.extras) if args.extras.strip() else {}
     for spec in [s for s in args.models.split(",") if s.strip()]:
         parts = spec.strip().split(":")
         provider, model = parts[0], parts[1]
         key_env = parts[2] if len(parts) > 2 else default_key.get(provider, "")
-        probe(provider, model, key_env, timeout=args.timeout)
+        try:
+            probe(provider, model, key_env, timeout=args.timeout, extras=extras)
+        except Exception as exc:
+            # One model's crash must not cancel the models queued behind it.
+            print(f"  CRASHED: {type(exc).__name__}: {str(exc)[:300]}")
     return 0
 
 

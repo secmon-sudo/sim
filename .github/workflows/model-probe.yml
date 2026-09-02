@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "provider:model çiftleri, virgülle (ör. gemini:gemma-4-31b-it,gemini:gemma-4-26b-it)"
+        description: "provider:model çiftleri, virgülle (ör. gemini:gemma-4-31b-it,gemini:gemma-4-26b-a4b-it)"
+        type: string
+        default: ""
+      extras:
+        description: 'payload_extras JSON, ör. {"reasoning_effort":"none"}'
         type: string
         default: ""
       list_gemini:
@@ -39,7 +43,12 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Probe
+        shell: bash
         run: |
+          # pipefail: `python ... | tee` reports TEE's exit status, so a crashed
+          # probe was reported as a green job (2026-09-02) and the models queued
+          # behind it were silently never tested.
+          set -o pipefail
           mkdir -p logs
           # The catalogue always runs first: the rate-limit dashboard names models by
           # display name ("Gemma 4 31B") and the API wants a slug, so a probe against a
@@ -47,7 +56,8 @@ jobs:
           # Listing alongside the probe means one dispatch answers both questions.
           python -m scripts.probe_models --list-gemini 2>&1 | tee logs/probe.txt || true
           if [ "${{ inputs.list_gemini }}" != "true" ] && [ -n "${{ inputs.models }}" ]; then
-            python -m scripts.probe_models --models "${{ inputs.models }}" 2>&1 | tee -a logs/probe.txt
+            python -m scripts.probe_models --models "${{ inputs.models }}" \
+              --extras '${{ inputs.extras }}' 2>&1 | tee -a logs/probe.txt
           fi
 
       - uses: actions/upload-artifact@v4
