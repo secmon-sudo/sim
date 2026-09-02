@@ -25,9 +25,9 @@ PROVIDER_ENDPOINTS = {
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     # Google AI Studio's OpenAI-compatibility layer — same chat/completions shape.
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    # Quality-tier providers (2026-07-17): both expose OpenAI-compatible chat/completions.
+    # Quality-tier provider (2026-07-17): OpenAI-compatible chat/completions.
+    # Cerebras removed 2026-09-02 when its free tier ended (HTTP 402 every run).
     "mistral": "https://api.mistral.ai/v1/chat/completions",
-    "cerebras": "https://api.cerebras.ai/v1/chat/completions",
 }
 
 
@@ -84,6 +84,45 @@ def reset_json_mode_sidelines() -> None:
     """Clear the runtime json-mode denylist (test isolation only)."""
     with _JSON_MODE_LOCK:
         _JSON_MODE_SIDELINED.clear()
+
+
+#: Cap on the provider error text copied into the log — enough for any real
+#: message ("Model not found or no access to it"), short enough that a provider
+#: echoing the prompt back cannot flood the run log.
+ERROR_DETAIL_MAX_CHARS = 300
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """One-line reason a provider rejected a request, for the rotation log.
+
+    Providers agree on the shape more than the wording: OpenAI-compatible APIs
+    nest it under `error.message`, some return a bare `message`, and a proxy in
+    front of any of them can return plain text or HTML. Try the structured forms,
+    fall back to the raw body, and never let a diagnostic raise — this runs on a
+    path that is already handling a failure.
+    """
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            detail = None
+            if isinstance(err, dict):
+                detail = err.get("message") or err.get("code") or err.get("type")
+            elif isinstance(err, str):
+                detail = err
+            detail = detail or body.get("message") or body.get("detail")
+            if detail:
+                return " ".join(str(detail).split())[:ERROR_DETAIL_MAX_CHARS]
+        text = json.dumps(body)
+    except Exception:
+        try:
+            text = response.text or ""
+        except Exception:
+            # Reading the body can fail too (stream consumed, decode error). A
+            # diagnostic that raises would replace a rotation with a crash, so the
+            # fallback has a fallback.
+            return "<unreadable body>"
+    return " ".join(text.split())[:ERROR_DETAIL_MAX_CHARS] or "<empty body>"
 
 
 def _parse_retry_after(response: httpx.Response) -> float | None:
@@ -416,10 +455,18 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
                 hard_error=is_hard_error,
             )
             last_error = e
+            # Log the provider's own explanation on deterministic 4xx. Without it a
+            # dead slot is indistinguishable from a dead key: Cerebras' 402 and
+            # OpenRouter's 404 on a retired slug both read as a bare status code, and
+            # diagnosing Mistral's 403 (2026-09-02) meant guessing between "no model
+            # access", "no billing plan" and "bad key" from no evidence at all. Only
+            # on hard errors — 429s are ordinary and their bodies would be noise —
+            # and truncated, since a provider error body can carry the whole prompt.
             logger.warning(
-                "LLM %s failed (HTTP %d), rotating...",
+                "LLM %s failed (HTTP %d)%s, rotating...",
                 acct.display_name,
                 status,
+                f": {_error_detail(e.response)}" if is_hard_error else "",
             )
 
         except Exception as e:

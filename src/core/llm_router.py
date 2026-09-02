@@ -332,14 +332,18 @@ def build_llm_router() -> LLMRouter:
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
             bucket=openrouter_a_free_bucket,
         ),
-        # ② OpenRouter-A Secondary — gpt-oss ailesi: prompt'larımızın Groq'ta
-        # kanıtlandığı model ailesi; Nemotron endpoint'i tökezlerse sıfır uyum
-        # maliyetiyle devralır. ① ile AYNI hesap kotasını (bucket) paylaşır.
-        # NOT: gpt-oss-120b:free 2026-07-17'de OpenRouter'dan kaldırıldı (HTTP
-        # 404) — free katmanda ailenin kalan tek üyesi 20b.
+        # ② OpenRouter-A Secondary — Nemotron endpoint'i tökezlerse devralan
+        # bağımsız aile. ① ile AYNI hesap kotasını (bucket) paylaşır.
+        # NOT: bu slot önce gpt-oss-120b:free idi (2026-07-17'de kaldırıldı, HTTP
+        # 404), sonra gpt-oss-20b:free. 2026-09-02'de OpenRouter kataloğunda free
+        # gpt-oss ailesinin SON üyesi de kalktı — 421 modellik listede ne
+        # 20b:free ne 120b:free var, yalnız ücretli slug'lar duruyor. Slot her
+        # koşuda 38 kez 404 alıyordu. GLM 5.2 free katmanda kalan, response_format
+        # + structured_outputs ilan eden en geniş bağlamlı (256K) alternatif.
+        # Reasoning modeli → model_profiles'ta reasoning kilidi ŞART.
         LLMAccount(
             provider="openrouter", account_id="A",
-            model="openai/gpt-oss-20b:free",
+            model="z-ai/glm-5.2:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
             bucket=openrouter_a_free_bucket,
@@ -379,10 +383,12 @@ def build_llm_router() -> LLMRouter:
         # ⑦ OpenRouter-B Mirror — cross-key yedek. Hesap fonsuz → 50 istek/gün.
         # (Eski Hermes-3-405B slotu kaldırıldı: key A'nın kotası artık hesap
         # genelinde paylaşıldığından üçüncü bir key-A free slotu kota eklemiyordu.
-        # 120b:free'nin kaldırılmasıyla (2026-07-17) 20b:free'ye düşürüldü.)
+        # 120b:free'nin kaldırılmasıyla (2026-07-17) 20b:free'ye, o da katalogdan
+        # kalkınca (2026-09-02) ② ile aynı GLM 5.2'ye düşürüldü. Key B fonsuz
+        # olduğu için buraya ücretli bir slug konamaz — free kalmak zorunda.)
         LLMAccount(
             provider="openrouter", account_id="B",
-            model="openai/gpt-oss-20b:free",
+            model="z-ai/glm-5.2:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_B", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_UNFUNDED,
             bucket=TokenBucket(
@@ -473,16 +479,20 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Mistral large (best Turkish of the free options) → Cerebras
-    gpt-oss-120b (fast, 1M tokens/day) → the full main cascade as fallback, so a
-    missing key or provider outage degrades to exactly the pre-2026-07-17 behavior.
+    Cascade: Mistral large (best Turkish of the free options) → the full main
+    cascade as fallback, so a missing key or provider outage degrades to exactly
+    the pre-2026-07-17 behavior.
+
+    Cerebras (gpt-oss-120b) sat between the two until 2026-09-02, when its free
+    tier ended: every run answered HTTP 402 (payment required) exactly once before
+    rotating away, so the slot had stopped being a quality tier and become a fixed
+    per-run round-trip. Removed rather than re-pointed at the paid tier — the whole
+    router exists to buy prose quality at zero cost, and Mistral already covers it.
 
     Limits read off the providers' dashboards (2026-07-17):
       - Mistral free tier: per-model rate limits only — mistral-large-2512 at
         250K TPM / 0.07 RPS (~4 RPM). No daily request cap shown; rpd is set to a
         generous bound just to keep the TokenBucket day-accounting meaningful.
-      - Cerebras free tier: 5 requests/min, 2400/day; 30K tokens/min, 1M/day.
-        The 30K TPM window also acts as the per-request ceiling (model_profiles).
     """
     quality_slots = [
         LLMAccount(
@@ -493,18 +503,10 @@ def build_quality_router() -> LLMRouter:
             bucket=TokenBucket(rate_per_minute=4, daily_limit=2000, burst=2,
                                tpm_limit=250_000),
         ),
-        LLMAccount(
-            provider="cerebras", account_id="A",
-            model="gpt-oss-120b",
-            api_key=os.environ.get("CEREBRAS_API_KEY", ""),
-            rpm=5, rpd=2400,
-            bucket=TokenBucket(rate_per_minute=5, daily_limit=2400, burst=2,
-                               tpm_limit=30_000),
-        ),
     ]
     active = [s for s in quality_slots if s.api_key]
     if not active:
-        logger.warning("Quality router: no MISTRAL_API_KEY/CEREBRAS_API_KEY set, "
+        logger.warning("Quality router: no MISTRAL_API_KEY set, "
                        "falling back to full router")
         return build_llm_router()
     return LLMRouter(_share_buckets(active) + build_llm_router().accounts)

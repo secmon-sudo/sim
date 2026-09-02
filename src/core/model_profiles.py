@@ -38,9 +38,6 @@ from dataclasses import dataclass, field
 
 # Groq's free-tier TPM window doubles as a hard per-request ceiling (HTTP 413).
 GROQ_MAX_REQUEST_TOKENS = 8000
-# Cerebras free tier caps tokens at 30K/minute — a single request above that can
-# never fit its window, so treat it as the per-request ceiling too.
-CEREBRAS_MAX_REQUEST_TOKENS = 30000
 
 # Wall-clock ceiling for a single request, enforced by llm_client on top of the httpx
 # read timeout (see checklist item 5). A classification batch that outruns this is not
@@ -70,7 +67,24 @@ WALL_CLOCK_REFERENCE_TOKENS = 2312
 # instead of letting the slot die.
 OPENROUTER_JSON_MODE_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "openai/gpt-oss-20b:free",
+    "z-ai/glm-5.2:free",
+})
+
+# OpenRouter slots whose model REASONS BY DEFAULT, where the only knob that turns it
+# off is OpenRouter's normalized `reasoning: {enabled: false}` — reasoning_effort is
+# accepted and then ignored. This is the silent failure class: the request returns
+# HTTP 200 while hidden thinking eats the max_tokens budget and the visible reply is
+# empty or truncated garbage JSON (Nemotron, 2026-07-10). Membership is read off
+# supported_parameters + the model card in https://openrouter.ai/api/v1/models: any
+# model described as a reasoning model belongs here, and a model NOT listed is a
+# claim that it answers directly.
+OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    # GLM 5.2 is described by Z.ai as "a large-scale reasoning model" and advertises
+    # reasoning/reasoning_effort/include_reasoning (checked 2026-09-02 when it
+    # replaced openai/gpt-oss-20b:free, which OpenRouter retired along with the rest
+    # of the free gpt-oss family — the paid slugs remain, the :free ones are gone).
+    "z-ai/glm-5.2:free",
 })
 
 
@@ -96,32 +110,30 @@ class ModelProfile:
 
 def get_profile(provider: str, model: str) -> ModelProfile:
     """Resolve the capability profile for a (provider, model) pair."""
-    if model.startswith("qwen"):
+    if provider == "openrouter" and model in OPENROUTER_REASONING_DISABLED_MODELS:
+        # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
+        # that actually lands, whatever the underlying family accepts natively.
+        extras = {"reasoning": {"enabled": False}}
+    elif model.startswith("qwen"):
         extras = {"reasoning_effort": "none"}
     elif "gpt-oss" in model:
         extras = {"reasoning_effort": "low"}
-    elif "nemotron" in model and provider == "openrouter":
-        extras = {"reasoning": {"enabled": False}}
     else:
         extras = {}
 
     if provider == "groq":
         max_request = GROQ_MAX_REQUEST_TOKENS
-    elif provider == "cerebras":
-        max_request = CEREBRAS_MAX_REQUEST_TOKENS
     else:
         max_request = None
 
     # mistral-large is a plain (non-reasoning) model and Mistral's API accepts
-    # response_format json_object. Cerebras serves gpt-oss with the same
-    # reasoning_effort knob as Groq and supports json_object (verify on first
-    # prod run per the checklist — a 400 would sideline the slot, not break it).
+    # response_format json_object.
     # OpenRouter is per-model rather than per-provider: only the slots on the
     # verified list above take response_format.
     if provider == "openrouter":
         supports_json = model in OPENROUTER_JSON_MODE_MODELS
     else:
-        supports_json = provider in ("groq", "gemini", "mistral", "cerebras")
+        supports_json = provider in ("groq", "gemini", "mistral")
 
     return ModelProfile(
         supports_json_mode=supports_json,

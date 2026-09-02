@@ -381,3 +381,59 @@ class TestReadTimeoutIsNotRetried:
     def test_unrelated_exception_is_not_retried(self):
         from src.core.llm_client import _worth_retrying
         assert _worth_retrying(self._retry_state(ValueError("nope"))) is False
+
+
+class TestErrorDetail:
+    """A dead slot must say WHY. Cerebras' 402, OpenRouter's 404 on a retired slug
+    and Mistral's 403 were indistinguishable bare status codes in the run log
+    (2026-09-02), which is what made diagnosing them guesswork.
+    """
+
+    def _resp(self, payload=None, text=None):
+        r = MagicMock(spec=httpx.Response)
+        if payload is None:
+            r.json.side_effect = ValueError("not json")
+            r.text = text or ""
+        else:
+            r.json.return_value = payload
+            r.text = text or ""
+        return r
+
+    def test_openai_compatible_nested_message(self):
+        detail = llm_client._error_detail(
+            self._resp({"error": {"message": "Model not found or no access to it",
+                                  "type": "invalid_request_error"}})
+        )
+        assert detail == "Model not found or no access to it"
+
+    def test_bare_message_field(self):
+        assert llm_client._error_detail(self._resp({"message": "Insufficient credits"})) \
+            == "Insufficient credits"
+
+    def test_error_as_plain_string(self):
+        assert llm_client._error_detail(self._resp({"error": "quota exceeded"})) \
+            == "quota exceeded"
+
+    def test_falls_back_to_raw_body_when_not_json(self):
+        assert "Forbidden" in llm_client._error_detail(
+            self._resp(payload=None, text="<html>403 Forbidden</html>")
+        )
+
+    def test_collapses_whitespace_and_truncates(self):
+        detail = llm_client._error_detail(
+            self._resp({"error": {"message": "x " * 400}})
+        )
+        assert len(detail) <= llm_client.ERROR_DETAIL_MAX_CHARS
+        assert "\n" not in detail
+
+    def test_empty_body_is_labelled_not_blank(self):
+        assert llm_client._error_detail(self._resp(payload=None, text="")) == "<empty body>"
+
+    def test_never_raises(self):
+        broken = MagicMock(spec=httpx.Response)
+        broken.json.side_effect = RuntimeError("boom")
+        type(broken).text = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+        try:
+            llm_client._error_detail(broken)
+        except Exception as exc:  # pragma: no cover - the point is that this never runs
+            pytest.fail(f"_error_detail raised on a broken response: {exc}")

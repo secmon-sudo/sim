@@ -24,7 +24,6 @@ env:
   GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
   GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
-  CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}

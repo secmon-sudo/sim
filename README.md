@@ -54,19 +54,22 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 
 ```
 ① OR-A    nemotron-3-super-120b:free  (primary — funded key, 1K RPD account-wide)
-② OR-A    gpt-oss-120b:free           (secondary — shares ①'s account quota)
+② OR-A    glm-5.2:free                (secondary — shares ①'s account quota)
 ③ Groq-A  gpt-oss-120b                (smartest Groq slot)
 ④ Groq-A  qwen3.6-27b                 (quality backup)
 ⑤ Groq-B  gpt-oss-120b                (throughput)
 ⑥ Groq-B  qwen3.6-27b                 (burst)
-⑦ OR-B    gpt-oss-120b:free           (cross-key mirror, 50 RPD unfunded)
+⑦ OR-B    glm-5.2:free                (cross-key mirror, 50 RPD unfunded)
 ⑧ Gemini  3.1-flash-lite / 3-flash    (third independent provider, 500+20 RPD)
 ⑨ Groq-A  gpt-oss-20b                 (last-resort; also the bulk router's model)
 ```
 
 _(2026-06-17: Groq retired llama-3.3-70b-versatile, llama-4-scout, qwen3-32b and
 llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore.
-2026-07-09: OpenRouter key A funded → Nemotron 3 Super became primary.)_
+2026-07-09: OpenRouter key A funded → Nemotron 3 Super became primary.
+2026-09-02: OpenRouter dropped the free gpt-oss family entirely — ② and ⑦ had been
+404ing on every call — and Cerebras ended its free tier (HTTP 402), so the quality
+router is now Mistral large → main cascade with no Cerebras stage.)_
 
 **Model capability profiles** (`src/core/model_profiles.py`): every provider/model quirk
 lives here as declarative data — whether the provider accepts

@@ -238,39 +238,48 @@ class TestSharedBuckets:
 
 class TestQualityRouter:
     def _clear_env(self, monkeypatch):
-        for var in ("MISTRAL_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY_A",
+        for var in ("MISTRAL_API_KEY", "OPENROUTER_API_KEY_A",
                     "OPENROUTER_API_KEY_B", "GEMINI_API_KEY"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("GROQ_API_KEY_A", "keyA")
         monkeypatch.setenv("GROQ_API_KEY_B", "keyB")
 
-    def test_cascade_order_with_both_keys(self, monkeypatch):
+    def test_cascade_order_with_quality_key(self, monkeypatch):
+        reset_bucket_registry()
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("MISTRAL_API_KEY", "mk")
+        router = build_quality_router()
+        # quality slot leads the cascade, full main cascade follows as fallback
+        assert router.accounts[0].provider == "mistral"
+        assert router.accounts[0].model == "mistral-large-2512"
+        assert any(a.provider == "groq" for a in router.accounts[1:])
+        reset_bucket_registry()
+
+    def test_cerebras_slot_is_gone(self, monkeypatch):
+        # Cerebras free tier ended 2026-09-02 (HTTP 402 once per run). Even with a
+        # key present the slot must not come back — a paid slot in a zero-cost
+        # router is a silent bill, not a fallback.
         reset_bucket_registry()
         self._clear_env(monkeypatch)
         monkeypatch.setenv("MISTRAL_API_KEY", "mk")
         monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
         router = build_quality_router()
-        # quality slots lead the cascade, full main cascade follows as fallback
-        assert router.accounts[0].provider == "mistral"
-        assert router.accounts[0].model == "mistral-large-2512"
-        assert router.accounts[1].provider == "cerebras"
-        assert router.accounts[1].model == "gpt-oss-120b"
-        assert any(a.provider == "groq" for a in router.accounts[2:])
+        assert all(a.provider != "cerebras" for a in router.accounts)
         reset_bucket_registry()
 
     def test_falls_back_to_main_router_without_keys(self, monkeypatch):
         reset_bucket_registry()
         self._clear_env(monkeypatch)
         router = build_quality_router()
-        assert all(a.provider not in ("mistral", "cerebras") for a in router.accounts)
+        assert all(a.provider != "mistral" for a in router.accounts)
         assert any(a.provider == "groq" for a in router.accounts)
         reset_bucket_registry()
 
-    def test_single_key_still_prepends(self, monkeypatch):
+    def test_quality_key_prepends_ahead_of_main_cascade(self, monkeypatch):
         reset_bucket_registry()
         self._clear_env(monkeypatch)
-        monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
+        monkeypatch.setenv("MISTRAL_API_KEY", "mk")
         router = build_quality_router()
-        assert router.accounts[0].provider == "cerebras"
-        assert all(a.provider != "mistral" for a in router.accounts)
+        assert router.accounts[0].provider == "mistral"
+        assert len(router.accounts) > 1
         reset_bucket_registry()
