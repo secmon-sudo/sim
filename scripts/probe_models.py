@@ -119,30 +119,36 @@ def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     ])
 
 
-def _grade(items: list) -> tuple[bool, str]:
-    """Did Pass C's own parser get usable items out of the reply?
+def _grade(items: dict) -> tuple[bool, str]:
+    """Did Pass C's own parser get a usable item for every report?
 
-    Grades what production extracts, not what the model literally sent: the
-    parser has a salvage path for partly-corrupt batches, so hand-rolling a
-    stricter check here would fail models that Pass C would actually accept —
-    and pass ones it would not. `content` is the field pass_c reads; `response`
-    is the raw provider envelope, which is what an earlier version of this
-    graded, reporting FAIL for a flawless reply.
+    `_parse_batch_response` returns dict[report_number, item] — NOT a list. An
+    earlier version of this iterated it, which walks the KEYS, and duly reported
+    "#1 not an object" for four flawless classifications. Grade the values, and
+    check the report numbers are the ones we asked about.
+
+    Grading the parser's output rather than the raw text is deliberate: the parser
+    salvages partly-corrupt batches, so a stricter hand-rolled check would fail
+    replies Pass C would happily accept.
     """
     if not items:
         return False, "parser recovered nothing"
-    if len(items) != len(SAMPLE_EVENTS):
-        return False, f"{len(items)} items for {len(SAMPLE_EVENTS)} reports"
-    missing = []
-    for i, item in enumerate(items, 1):
+    expected = set(range(1, len(SAMPLE_EVENTS) + 1))
+    got = {int(k) for k in items}
+    if got != expected:
+        missing = sorted(expected - got)
+        return False, f"{len(items)}/{len(SAMPLE_EVENTS)} reports (missing {missing})"
+    problems = []
+    for num in sorted(got):
+        item = items[num] if num in items else items[str(num)]
         if not isinstance(item, dict):
-            missing.append(f"#{i} not an object")
+            problems.append(f"#{num} is {type(item).__name__}")
             continue
         for field in ("event_type", "relevance_score"):
             if field not in item:
-                missing.append(f"#{i} missing {field}")
-    if missing:
-        return False, "; ".join(missing[:6])
+                problems.append(f"#{num} missing {field}")
+    if problems:
+        return False, "; ".join(problems[:6])
     return True, "schema OK"
 
 
