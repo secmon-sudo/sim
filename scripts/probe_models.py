@@ -428,8 +428,9 @@ def main() -> int:
                     help="comma-separated provider:model[:KEY_ENV] (KEY_ENV defaults per provider)")
     ap.add_argument("--list", dest="list_providers", default="",
                     help="comma-separated providers whose catalogue to print (gemini,groq)")
-    ap.add_argument("--timeout", type=float, default=120.0,
-                    help="read timeout for the probe, overriding the model profile")
+    ap.add_argument("--timeout", type=float, default=None,
+                    help="read timeout for the probe, overriding the model profile "
+                         "(default 120s, or 300s with --prose)")
     ap.add_argument("--extras", default="",
                     help='JSON merged into payload_extras, e.g. \'{"reasoning_effort":"none"}\'')
     ap.add_argument("--prose", action="store_true",
@@ -454,6 +455,10 @@ def main() -> int:
         "pollinations": "POLLINATIONS_API_KEY",
     }
     extras = json.loads(args.extras) if args.extras.strip() else {}
+    # A 6K-token narrative is a different order of work than a 2K classification
+    # batch, and mistral's own production profile already allows 180s for it — a
+    # probe that timed out at 120s would report "too slow" about the harness.
+    timeout = args.timeout or (300.0 if args.prose else 120.0)
     for spec in [s for s in args.models.split(",") if s.strip()]:
         # Model ids may themselves contain colons (llm7's "deepseek-v4-flash:0731"),
         # so the optional KEY_ENV is recognized by SHAPE rather than by position:
@@ -467,7 +472,7 @@ def main() -> int:
         else:
             model, key_env = rest, default_key.get(provider, "")
         try:
-            probe(provider, model, key_env, timeout=args.timeout, extras=extras,
+            probe(provider, model, key_env, timeout=timeout, extras=extras,
                   prose=args.prose)
         except Exception as exc:
             # One model's crash must not cancel the models queued behind it.

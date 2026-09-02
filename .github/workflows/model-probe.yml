@@ -18,6 +18,10 @@ on:
         description: "Katalogu listelenecek sağlayıcılar (gemini,groq,llm7)"
         type: string
         default: "gemini,groq,llm7"
+      prose:
+        description: "Pass C yerine GERÇEK Türkçe SITREP anlatıcısını koştur (kalite router slotları için)"
+        type: boolean
+        default: false
 
 env:
   GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
@@ -58,6 +62,7 @@ jobs:
           # nothing about the model. One dispatch answers both questions.
           python -m scripts.probe_models --list "${{ inputs.catalogues }}" \
             --models "${{ inputs.models }}" --extras '${{ inputs.extras }}' \
+            ${{ inputs.prose && '--prose' || '' }} \
             2>&1 | tee logs/probe.txt
 
       - uses: actions/upload-artifact@v4
