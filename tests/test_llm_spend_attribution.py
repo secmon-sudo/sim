@@ -22,6 +22,12 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # heartbeat.py mentions call_llm only inside a class docstring showing usage.
 _NO_CALL_SITES = {"src/core/heartbeat.py"}
 
+# Out-of-pipeline tools: run by hand, a handful of calls, and no DATABASE_URL to
+# log into. Exempt from the spend rollup because they are not a stage — kept as a
+# SEPARATE set from _NO_CALL_SITES so the rule for real stages stays absolute and
+# an exemption has to be argued for explicitly, one entry at a time.
+_NOT_PIPELINE_SPEND = {"scripts/probe_models.py"}
+
 
 def _modules_calling(name: str) -> set[str]:
     """Modules with a real call to `name` — ast, so docstrings don't count."""
@@ -59,7 +65,7 @@ def test_every_llm_calling_module_is_instrumented():
         "src/services/sitrep_generator.py": "src/pipeline/daily_sitrep.py",
         "src/pipeline/pass_c_classify.py": "src/pipeline/pass_c_classify.py",
     }
-    for module in sorted(spenders):
+    for module in sorted(spenders - _NOT_PIPELINE_SPEND):
         accounted = module in loggers or logged_by_caller.get(module) in loggers
         assert accounted, f"{module} calls the model but nothing logs the spend"
 

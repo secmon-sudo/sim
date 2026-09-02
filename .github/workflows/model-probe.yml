@@ -1,0 +1,58 @@
+name: Model Probe
+
+# Manual only. Runs a candidate model through the REAL Pass C classification
+# prompt and uploads the answers, so a new slot is chosen on output rather than
+# on catalog copy. Costs a handful of LLM calls and touches no database.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "provider:model çiftleri, virgülle (ör. gemini:gemma-4-31b-it,gemini:gemma-4-26b-it)"
+        type: string
+        default: ""
+      list_gemini:
+        description: "Sadece Gemini anahtarının gördüğü model kimliklerini listele"
+        type: boolean
+        default: false
+
+env:
+  GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
+  GROQ_API_KEY_B:       ${{ secrets.GROQ_API_KEY_B }}
+  OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
+  OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
+  GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+  GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
+  MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Probe
+        run: |
+          mkdir -p logs
+          # The catalogue always runs first: the rate-limit dashboard names models by
+          # display name ("Gemma 4 31B") and the API wants a slug, so a probe against a
+          # guessed id fails for the boring reason and tells us nothing about the model.
+          # Listing alongside the probe means one dispatch answers both questions.
+          python -m scripts.probe_models --list-gemini 2>&1 | tee logs/probe.txt || true
+          if [ "${{ inputs.list_gemini }}" != "true" ] && [ -n "${{ inputs.models }}" ]; then
+            python -m scripts.probe_models --models "${{ inputs.models }}" 2>&1 | tee -a logs/probe.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-probe-${{ github.run_id }}
+          path: logs/probe.txt
+          retention-days: 7
