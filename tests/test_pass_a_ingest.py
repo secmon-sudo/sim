@@ -142,9 +142,11 @@ class TestConfiguredFeeds:
 
         # Core feeds that must stay in the publisher_feeds list.
         # (feeds.reuters.com was removed from settings — the endpoint was
-        # discontinued by Reuters and always returned errors.)
+        # discontinued by Reuters and always returned errors. reddit.com's
+        # worldnews RSS was removed 2026-09-03 for the same reason: it answers
+        # HTTP 403 to datacenter IPs, so every run paid a fetch and a retry for
+        # a feed that has not returned an item in production.)
         expected_feeds = [
-            "https://www.reddit.com/r/worldnews/new/.rss",
             "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
             "https://www.aljazeera.com/xml/rss/all.xml",
             "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml"

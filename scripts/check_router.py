@@ -28,7 +28,9 @@ def main() -> int:
     key_b = bool(os.environ.get("GROQ_API_KEY_B"))
     print(f"GROQ_API_KEY_B set? {'YES' if key_b else 'NO'}")
     if not key_b:
-        print("WARNING: slots ③/④ and the 2nd bulk slot are silently disabled.")
+        # Slots ③/④ are Groq key A (gpt-oss-120b, qwen3.8-27b); key B carries ⑤/⑥.
+        # Naming ③/④ here sent a reader looking at the wrong pair of slots.
+        print("WARNING: slots ⑤/⑥ and the 2nd bulk slot are silently disabled.")
         return 1
     return 0
 

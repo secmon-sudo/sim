@@ -344,10 +344,7 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
 
 def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
           extras: dict | None = None, prose: bool = False) -> None:
-    profile = get_profile(provider, model)
     print(f"\n{'=' * 72}\n{provider}/{model}")
-    print(f"  profile: json_mode={profile.supports_json_mode} extras={profile.payload_extras} "
-          f"timeout={profile.request_timeout}")
     if not os.environ.get(key_env):
         print(f"  SKIP: {key_env} not set")
         return
@@ -374,6 +371,17 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
             )
 
         llm_client.get_profile = _override
+
+    # Printed AFTER the override is installed, and read through llm_client, so the
+    # line describes the request that is actually about to be sent. It used to be
+    # printed from the unpatched profile at the top of this function, which meant a
+    # run driven by --extras '{"reasoning_effort":"low"}' still reported extras={} —
+    # the one number a reader needs to interpret the result, showing the value the
+    # probe was overriding rather than the value it used.
+    effective = llm_client.get_profile(provider, model)
+    print(f"  profile: json_mode={effective.supports_json_mode} "
+          f"extras={effective.payload_extras} timeout={effective.request_timeout}"
+          + ("  (overridden)" if patched else ""))
     started = time.monotonic()
     try:
         if prose:

@@ -24,6 +24,17 @@ name: Daily Country SITREP
 # ⚠ Dış zamanlama 07:30 UTC olarak KALMALI: Gemini RPD kotası 07:00 UTC'de
 # (Pasifik gece yarısı) sıfırlanır. Eskiden 06:00'daydı ve her gün tükenmiş
 # kotayla koşuyordu. 07:30 = taze kota + ingest/haftalık raporla çakışmama.
+#
+# ⚠⚠ YAZ SAATİ TUZAĞI — KASIM 2026'DA ELLE DEĞİŞTİR. "Pasifik gece yarısı"
+# 07:00 UTC yalnızca PDT (yaz saati) sürerken doğrudur. ABD'de yaz saati
+# 1 Kasım 2026'da bitip PST'ye geçilince Pasifik gece yarısı 08:00 UTC olur ve
+# bu iş sıfırlamadan YARIM SAAT ÖNCE koşmaya başlar — yani tam da 06:00'dan
+# taşınma sebebimiz olan duruma, dünün tükenmiş kotasına geri döner. Hiçbir şey
+# hata vermez; SITREP sessizce enrichment'sız çıkar (bkz. 18 Tem, koşu
+# 29638663050: iki anahtar da tükenmişken üretilen rapordaki olgu hataları).
+# YAPILACAK: cron-job.org'daki job 1 Kasım 2026'da 08:30 UTC'ye alınacak,
+# 8 Mart 2027'de (PDT'ye dönüş) tekrar 07:30'a. Bu dosyada kod tarafı yok —
+# tetikleyici tamamen dışarıda, düzeltme de orada.
 on:
   workflow_dispatch:       # cron-job.org (günlük 07:30 UTC) veya GitHub UI'dan el ile
     inputs:

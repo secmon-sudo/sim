@@ -593,9 +593,13 @@ def build_quality_router() -> LLMRouter:
 def build_bulk_router() -> LLMRouter:
     """Router for low-stakes, high-volume work (e.g. storyline narrative prose).
 
-    Uses gpt-oss-20b — deliberately a model that is NOT in the main cascade — so bulk
-    narrative work keeps its own separate quota buckets and never competes with Pass C
-    classification for the scarce smart-model quota. Stacking the slot across both Groq
+    Uses gpt-oss-20b, which the main cascade touches ONLY as its last-resort rung
+    (build_llm_router's final Groq slot). So bulk narrative work never competes with
+    Pass C for the scarce smart-model quota — gpt-oss-120b and qwen3.8-27b have their
+    own per-(key, model) buckets — but it does share the bucket of that final rung,
+    which is the same sharing _BUCKET_REGISTRY exists to account for honestly. An
+    earlier version of this docstring claimed the model was NOT in the main cascade
+    at all, which the registry comment above already contradicted. Stacking the slot across both Groq
     keys yields ~2K RPD combined, isolated from classification.
 
     History: this used to run on llama-3.1-8b-instant (14.4K RPD), but Groq deprecated it
