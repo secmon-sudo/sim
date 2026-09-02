@@ -15,9 +15,9 @@ on:
         type: string
         default: ""
       catalogues:
-        description: "Katalogu listelenecek sağlayıcılar (gemini,groq)"
+        description: "Katalogu listelenecek sağlayıcılar (gemini,groq,llm7)"
         type: string
-        default: "gemini,groq"
+        default: "gemini,groq,llm7"
 
 env:
   GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
@@ -27,6 +27,8 @@ env:
   GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
   GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
+  LLM7_KEY:             ${{ secrets.LLM7_KEY }}
+  POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
 
 jobs:
   probe:

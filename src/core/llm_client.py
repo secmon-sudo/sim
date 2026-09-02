@@ -28,6 +28,17 @@ PROVIDER_ENDPOINTS = {
     # Quality-tier provider (2026-07-17): OpenAI-compatible chat/completions.
     # Cerebras removed 2026-09-02 when its free tier ended (HTTP 402 every run).
     "mistral": "https://api.mistral.ai/v1/chat/completions",
+    # Aggregator added 2026-09-02 to refill the quality tier Cerebras left empty.
+    # OpenAI-compatible; bearer auth like the rest. Its daily allowance is a TOKEN
+    # budget (~1M), not a request count, which is why it is aimed at the quality
+    # tier and not at Pass C: classify_batch alone is ~81% of SIM's ~1.2M/day and
+    # would drain the whole allowance in a single run.
+    "llm7": "https://api.llm7.io/v1/chat/completions",
+    # Pollinations gateway (2026-09-02). Its "free" models cost 0 pollen but the
+    # gateway still refuses every request while the account balance is exactly 0 —
+    # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
+    # precondition even though usage stays at 0. Anonymous access is 401.
+    "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
 }
 
 

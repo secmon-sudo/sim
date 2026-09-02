@@ -90,6 +90,14 @@ _CATALOGUES = {
         "GEMINI_API_KEY",
     ),
     "groq": ("https://api.groq.com/openai/v1/models", "GROQ_API_KEY_A"),
+    # LLM7 is the only catalogue here that answers the capability checklist itself:
+    # each entry carries json_mode/reasoning/context_window/tier and an hourly
+    # availability percentage. Those are CLAIMS, which is why probing still happens —
+    # but they say which models are worth spending a probe on.
+    "llm7": ("https://api.llm7.io/v1/models", "LLM7_KEY"),
+    # Pollinations publishes 370 entries; the free-tier ones are community-contributed
+    # (an individual's upstream key registered into the router) and marked alpha.
+    "pollinations": ("https://gen.pollinations.ai/models", "POLLINATIONS_API_KEY"),
 }
 
 
@@ -112,16 +120,34 @@ def list_models(provider: str) -> int:
         print(f"=== {provider}: catalogue fetch failed: {type(exc).__name__}: {exc} ===")
         return 0
 
-    rows = data.get("models") or data.get("data") or []
+    # Pollinations returns a bare JSON array; Gemini/Groq/LLM7 wrap it in an object.
+    rows = data if isinstance(data, list) else (data.get("models") or data.get("data") or [])
     print(f"\n=== {len(rows)} models visible to {key_env} ({provider}) ===")
     for m in sorted(rows, key=lambda x: str(x.get("name") or x.get("id"))):
         name = str(m.get("name") or m.get("id")).replace("models/", "")
         methods = ",".join(m.get("supportedGenerationMethods", []))
         extra = f" methods={methods}" if methods else ""
         limit = m.get("inputTokenLimit") or m.get("context_window")
+        # LLM7 nests it: {"tokens": 1048576, "chars": null}. Printing the dict buries
+        # the one number the listing exists to show.
+        if isinstance(limit, dict):
+            limit = limit.get("tokens")
         owned = m.get("owned_by")
         if owned:
             extra += f" owned_by={owned}"
+        # The capability flags LLM7 publishes map 1:1 onto checklist items 1 and 2, so
+        # show them: they are what makes a model worth a probe slot.
+        # usage_based_only is the field that decides whether a key can call the model
+        # AT ALL: LLM7 answers 402 (not 401) for a valid key against a usage-based
+        # model, so the first probe here spent all four of its slots on models the
+        # allowance cannot reach (2026-09-02). Printing it makes that visible before
+        # a probe is queued rather than after.
+        for flag in ("json_mode", "reasoning", "tier", "usage_based_only"):
+            if flag in m:
+                extra += f" {flag}={m[flag]}"
+        avail = m.get("availability_last_hour_percent")
+        if avail is not None:
+            extra += f" avail={avail}%"
         print(f"  {name:<44} ctx={limit}{extra}")
     return 0
 
@@ -267,12 +293,22 @@ def main() -> int:
         "groq": "GROQ_API_KEY_A",
         "openrouter": "OPENROUTER_API_KEY_A",
         "mistral": "MISTRAL_API_KEY",
+        "llm7": "LLM7_KEY",
+        "pollinations": "POLLINATIONS_API_KEY",
     }
     extras = json.loads(args.extras) if args.extras.strip() else {}
     for spec in [s for s in args.models.split(",") if s.strip()]:
-        parts = spec.strip().split(":")
-        provider, model = parts[0], parts[1]
-        key_env = parts[2] if len(parts) > 2 else default_key.get(provider, "")
+        # Model ids may themselves contain colons (llm7's "deepseek-v4-flash:0731"),
+        # so the optional KEY_ENV is recognized by SHAPE rather than by position:
+        # env vars are upper snake case, model ids in these catalogues are not.
+        # Splitting on the last colon unconditionally turned that id into model
+        # "deepseek-v4-flash" with key_env "0731", i.e. a silent SKIP.
+        provider, _, rest = spec.strip().partition(":")
+        head, _, tail = rest.rpartition(":")
+        if head and tail.replace("_", "").isalnum() and tail.isupper():
+            model, key_env = head, tail
+        else:
+            model, key_env = rest, default_key.get(provider, "")
         try:
             probe(provider, model, key_env, timeout=args.timeout, extras=extras)
         except Exception as exc:
