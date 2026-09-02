@@ -192,7 +192,7 @@ AVIATION_EVENT_TYPES = {
     "drone_attack_critical_infra", "drone_airport_attack", "laser_attack",
     "suspicious_package", "evacuation", "aviation_personnel_attack",
     "pilot_attacked", "cabin_crew_attacked", "ground_staff_attacked",
-    "air_traffic_controller_threat",
+    "air_traffic_controller_threat", "gnss_interference",
 }
 
 # Word-boundary aviation vocabulary — used to detect an aviation nexus on events

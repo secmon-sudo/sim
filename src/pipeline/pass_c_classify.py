@@ -347,7 +347,7 @@ Extract the following fields:
    bomb_threat, active_shooter, hijacking, runway_incursion,
    emergency_landing, bird_strike, engine_failure, fire_on_board, depressurization,
    unruly_passenger, drone_incursion, drone_attack_critical_infra, drone_airport_attack,
-   laser_attack, suspicious_package, evacuation, airspace_closure,
+   laser_attack, suspicious_package, evacuation, airspace_closure, gnss_interference,
    security_incident, aviation_personnel_attack, pilot_attacked, cabin_crew_attacked, ground_staff_attacked,
    geopolitical_conflict, military_action, missile_strike, war_escalation, ceasefire_violation, civilian_casualties,
    political_event, civil_unrest, protest, mass_demonstration, riot, general_strike, coup_attempt,
@@ -357,6 +357,12 @@ Extract the following fields:
    travel_advisory, travel_ban, embassy_closure,
    other_aviation_related,
    noise
+
+   USE gnss_interference when GPS/GNSS signals are JAMMED or SPOOFED in a way that
+   affects aircraft or shipping — including reports of navigation loss, false position
+   or false terrain warnings in a named airspace or corridor. The hazard travels with
+   the aircraft rather than sitting at a place, so a route or region is a valid
+   location for it; do not downgrade it to security_incident for lacking a point.
 
    USE airspace_closure when airspace or an airport is CLOSED, SUSPENDED, RESTRICTED
    or flights are HALTED/DIVERTED/REROUTED — this is the single most operationally

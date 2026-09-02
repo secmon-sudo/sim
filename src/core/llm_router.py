@@ -455,6 +455,31 @@ def build_llm_router() -> LLMRouter:
             rpm=15, rpd=500,
             bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
         ),
+        # ⑧c Üçüncü proje (2026-09-03). Aynı gerekçenin devamı: kotanın proje başına
+        # olduğu tahmin değil, kendi 429'umuzun quotaId'siyle sabit —
+        # "GenerateRequestsPerDayPerProjectPerModel-FreeTier". İki model × 500 RPD
+        # ile toplam Gemini kapasitesi 2000 → 3000 RPD.
+        #
+        # GEMINI_API_KEY_3 tanımlı değilse bu iki slot aşağıdaki `if a.api_key`
+        # süzgecinde düşer, yani anahtar oluşturulmadan önce merge etmek güvenli.
+        #
+        # DİKKAT — her kota proje başına DEĞİL: Gemini-3 ailesinin Search grounding
+        # kotası iki mevcut projede de 0/0 çıkmıştı (2026-07-18). Proje çoğaltmak
+        # MODEL RPD'sini çarpar, tier geneli kısıtları çarpmaz.
+        LLMAccount(
+            provider="gemini", account_id="C",
+            model="gemini-3.1-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY_3", ""),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
+        LLMAccount(
+            provider="gemini", account_id="C",
+            model="gemini-3.5-flash-lite",
+            api_key=os.environ.get("GEMINI_API_KEY_3", ""),
+            rpm=15, rpd=500,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=500, burst=DEFAULT_BURST),
+        ),
         LLMAccount(
             provider="gemini", account_id="A",
             # Acil yedek: yalnızca 20 RPD — bucket yerelde durdurur, 429'a sürmez.

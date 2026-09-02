@@ -185,8 +185,22 @@ def build_search_queries(db_conn=None) -> list[dict]:
         '"emergency landing"',
         '"engine failure" flight',
         '"fire on board" flight',
-        '"bird strike" airport',
-        '"depressurization" flight',
+        # '"bird strike" airport' and '"depressurization" flight' were removed
+        # 2026-09-03 after measuring 30 days of what they actually produced:
+        #   bird_strike        49 events, max severity 40, 0 ever above the cap
+        #   depressurization    4 events, max severity 40, 0 ever above the cap
+        # Both sit in pass_d's SAFETY_EVENT_TYPES, so they are capped at 40 AND
+        # dropped from the SITREP narrative — every one of those 53 events paid an
+        # ingest slot and an LLM classification to reach a report that excludes it.
+        #
+        # The rest of this safety group STAYS, and the same measurement is why: the
+        # SAFETY_LIFT_ON_MASS_CASUALTY exemption is not theoretical. emergency_landing
+        # broke the cap 11 times out of 311 (max 100), engine_failure once out of 40
+        # (max 100), and fire_on_board/runway_incursion are not capped at all —
+        # 55 of 57 and 20 of 21 scored above 40, averaging 85 and 77. These queries
+        # are the intake path for the catastrophic case; dropping the whole group,
+        # as a blanket "safety events are discarded anyway" reading suggests, would
+        # close it.
         '"drone incursion" airport',
     ]
     for q in tier3:

@@ -86,6 +86,7 @@ def compute_risk_level(max_severity: int, cluster_count: int,
 # the record, not to compete with the narrative the model should have written.
 _AVIATION_FALLBACK_LABEL = {
     "airspace_closure": "hava sahası/uçuş kesintisi bildirildi",
+    "gnss_interference": "GNSS karıştırma/aldatma bildirildi",
     "drone_airport_attack": "havalimanına İHA saldırısı bildirildi",
     "drone_incursion": "hava sahasında İHA ihlali bildirildi",
     "hijacking": "uçak kaçırma girişimi bildirildi",

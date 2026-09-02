@@ -4458,5 +4458,93 @@
     "city": "ZANZIBAR",
     "lat": -6.1361819,
     "lon": 39.212626
+  },
+  {
+    "name": "Al Udeid Air Base",
+    "type": "Military Base",
+    "city": "AL UDEID",
+    "lat": 25.1173,
+    "lon": 51.315,
+    "icao": "OTBH",
+    "country": "QA",
+    "czib": false,
+    "aliases": ["Udeid", "Al Udeid"]
+  },
+  {
+    "name": "Nevatim Airbase",
+    "type": "Military Base",
+    "city": "NEVATIM",
+    "lat": 31.2083,
+    "lon": 35.0122,
+    "icao": "LLNV",
+    "country": "IL",
+    "czib": false,
+    "aliases": ["Nevatim"]
+  },
+  {
+    "name": "Ain al-Asad Airbase",
+    "type": "Military Base",
+    "city": "AL ANBAR",
+    "lat": 33.7856,
+    "lon": 42.4412,
+    "icao": "ORAA",
+    "country": "IQ",
+    "czib": false,
+    "aliases": ["Al Asad", "Ain al-Asad", "Asad Airbase"]
+  },
+  {
+    "name": "Incirlik Air Base",
+    "type": "Military Base",
+    "city": "ADANA",
+    "lat": 37.0021,
+    "lon": 35.4259,
+    "icao": "LTAG",
+    "country": "TR",
+    "czib": false,
+    "aliases": ["Incirlik"]
+  },
+  {
+    "name": "Bagram Airfield",
+    "type": "Military Base",
+    "city": "PARWAN",
+    "lat": 34.9461,
+    "lon": 69.265,
+    "icao": "OAIX",
+    "country": "AF",
+    "czib": false,
+    "aliases": ["Bagram"]
+  },
+  {
+    "name": "Prince Sultan Air Base",
+    "type": "Military Base",
+    "city": "AL KHARJ",
+    "lat": 24.0627,
+    "lon": 47.5805,
+    "icao": "OEPS",
+    "country": "SA",
+    "czib": false,
+    "aliases": ["Prince Sultan", "PSAB"]
+  },
+  {
+    "name": "Muwaffaq Salti Air Base",
+    "type": "Military Base",
+    "city": "AZRAQ",
+    "lat": 31.8253,
+    "lon": 36.7811,
+    "icao": "OJMF",
+    "country": "JO",
+    "czib": false,
+    "aliases": ["Muwaffaq Salti", "Azraq Air Base"]
+  },
+  {
+    "name": "Khmeimim Air Base",
+    "type": "Military Base",
+    "city": "LATAKIA",
+    "lat": 35.4108,
+    "lon": 35.9486,
+    "icao": "OSLK",
+    "country": "SY",
+    "czib": false,
+    "aliases": ["Khmeimim", "Hmeimim"]
   }
 ]

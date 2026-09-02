@@ -136,6 +136,16 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
         # genuine airports have a 3-letter IATA code and none of them is 'XX', so this
         # test is strictly stronger and loses nothing.
         # Excluded from fuzzy only; an explicit code or alias hit still resolves them.
+        #
+        # The icao_code disjunct (2026-09-03) admits military air bases, which have no
+        # IATA at all and so were taking a generated M-code that this shape test reads
+        # as boilerplate — Incirlik, Bagram, Al Udeid and the rest could be resolved by
+        # an exact code but never by name. Note this is NOT a widening of the shape test
+        # to 4 characters, which is what it looks like from the outside and which would
+        # let every HKB0/HHL5 hotel row straight back in: the synthetic codes carry no
+        # ICAO, so requiring a real one keeps the discriminator intact while naming the
+        # rows that deserve an exception. If a hotel ever arrives with an icao_code
+        # populated, that is the row to fix, not this predicate.
         rows = db_conn.execute(
             """SELECT iata_code,
                       strict_word_similarity(
@@ -144,7 +154,7 @@ def normalize_anchor(raw_text: str, db_conn) -> tuple[str | None, float]:
                       ) AS sim
                FROM anchor_master
                WHERE btrim(regexp_replace(lower(canonical_name), %s, ' ', 'g')) <> ''
-                 AND iata_code ~ '^[A-Z]{3}$'
+                 AND (iata_code ~ '^[A-Z]{3}$' OR icao_code IS NOT NULL)
                ORDER BY sim DESC LIMIT 2""",
             (core, _BOILERPLATE_SQL, _BOILERPLATE_SQL),
         ).fetchall()

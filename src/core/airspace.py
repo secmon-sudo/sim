@@ -78,6 +78,11 @@ AVIATION_SPECIFIC_EVENT_TYPES = {
     "air_traffic_controller_threat", "aviation_personnel_attack",
     "pilot_attacked", "cabin_crew_attacked", "ground_staff_attacked",
     "laser_attack",
+    # GNSS jamming/spoofing is aviation-native and airspace-shaped by definition:
+    # the corridor IS the incident. It reaches AIRSPACE_THREAT_EVENT_TYPES through
+    # the union below, which is what earns it an airspace card even when the event
+    # carries no point coordinate — the country-scope path already handles that.
+    "gnss_interference",
 }
 
 
