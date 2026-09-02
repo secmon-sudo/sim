@@ -27,7 +27,6 @@ import urllib.request
 from src.core import llm_client
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMAccount, LLMRouter
-from src.core.model_profiles import get_profile
 from src.core.token_bucket import TokenBucket
 from src.services.sitrep_generator import NARRATIVE_MAX_TOKENS
 from src.services.sitrep_generator import _SYSTEM_PROMPT as SITREP_SYSTEM_PROMPT
