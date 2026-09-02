@@ -122,7 +122,14 @@ LLM7_REASONING_MODELS = frozenset({
 # endpoint finishes in 30s can legitimately take longer here. Read timeout is widened
 # accordingly; slowness stays bounded by wall_clock_timeout, which is the only thing
 # that can bound it (checklist item 5).
-LLM7_REQUEST_TIMEOUT = 60.0
+# 180s for the same reason mistral gets it (checklist item 4): these slots write the
+# 6K-token SITREP narrative, and a non-streaming completion arrives in one piece, so
+# the read timeout has to cover the WHOLE generation, not a gap between chunks. The
+# 60s that the classification probe justified would cap the narrative at a fraction
+# of its budget — a budget the timeout won't let the model spend is not a budget.
+# Slowness stays bounded by wall_clock_timeout, which scales with the asked-for
+# max_tokens (wall_clock_ceiling): ~155s at a 6K budget, 60s at classification size.
+LLM7_REQUEST_TIMEOUT = 180.0
 
 # Pollinations' catalogue declares tool_calling/reasoning but says NOTHING about
 # response_format, so unlike LLM7 there is no per-model answer to read off. Default to
@@ -134,7 +141,7 @@ LLM7_REQUEST_TIMEOUT = 60.0
 # Every model reachable on the free tier there is community-contributed and flagged
 # alpha: an individual's own upstream key registered into the router. They belong
 # BEHIND first-party slots in a cascade, never in front of them.
-POLLINATIONS_REQUEST_TIMEOUT = 60.0
+POLLINATIONS_REQUEST_TIMEOUT = 180.0  # same narrative-length reasoning as LLM7 above
 
 
 @dataclass(frozen=True)

@@ -492,9 +492,36 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Mistral medium (best Turkish still reachable on this account) → the
-    full main cascade as fallback, so a missing key or provider outage degrades to
-    exactly the pre-2026-07-17 behavior.
+    Cascade: Mistral medium (best Turkish still reachable on this account) → LLM7
+    minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as fallback,
+    so a missing key or provider outage degrades to exactly the pre-2026-07-17
+    behavior.
+
+    The two rungs between exist because Cerebras' removal (below) left Mistral
+    ALONE here, and the fall-through is not a real safety net for this router's
+    work: the main cascade's Groq slots are skipped by the request-size guard at a
+    6K-token budget, so a Mistral outage meant no narrative at all. That is not
+    hypothetical — Daily Country SITREP #47 died on the workflow timeout and #48
+    survived it by 42 seconds during the 2026-08-27 ReadTimeout storm. Both rungs
+    are measured against the real Pass C prompt (scripts/probe_models.py), not
+    chosen from catalog copy:
+      - llm7/minimax-m2.7 — PASS at 14.1s, first-party slot on LLM7's token
+        allowance, which is a TOKEN budget (~1M/day) and so is spent by this
+        router's low volume far more slowly than by anything in Pass A-E.
+      - pollinations/poolside-laguna-s-2.1:free — PASS at 15.9s, and the only one
+        of six free Pollinations models that was usable: glm-fast returned HTTP 200
+        with an empty completion after 96s, nemotron-3-ultra-550b read-timed out
+        twice, two more 503'd. Turkish prose checked separately (11.4s, grammatical,
+        no inverted sentences) — but its usage came back with reasoning_tokens at
+        163 of 386 completion tokens, i.e. hidden thinking takes ~42% of whatever
+        max_tokens the caller asked for. At the 6K SITREP budget that is a real cut
+        in usable narrative, and no reasoning knob is declared for this provider
+        (see model_profiles), so treat its output length as roughly half the ask.
+        It sits LAST on purpose: every free model there is an individual's upstream
+        key registered into a community router and flagged alpha, so it is a
+        zero-cost safety net and never a slot to depend on.
+    Neither is a quality upgrade over Mistral — both are cheaper prose. They are
+    ordered behind it so they only ever run when the rung above is already dead.
 
     Cerebras (gpt-oss-120b) sat between the two until 2026-09-02, when its free
     tier ended: every run answered HTTP 402 (payment required) exactly once before
@@ -529,11 +556,36 @@ def build_quality_router() -> LLMRouter:
             bucket=TokenBucket(rate_per_minute=2, daily_limit=2000, burst=1,
                                tpm_limit=25_000),
         ),
+        # LLM7 publishes no RPM/RPD; the documented allowance is ~1M tokens/day and
+        # this router spends tokens in narrative-sized lumps, not in request counts.
+        # So the limits below are a self-imposed bound to keep day-accounting honest
+        # and to stop a retry storm from draining the allowance the rest of the day,
+        # NOT a mirror of a published server-side limit. burst=1 for the same reason
+        # as Mistral: two concurrent 6K-token narratives are not a load this tier is
+        # sized for. Lowest measured availability of LLM7's four reachable models
+        # (94.4%), which is acceptable for a slot that only runs when Mistral is out.
+        LLMAccount(
+            provider="llm7", account_id="A",
+            model="minimax-m2.7",
+            api_key=os.environ.get("LLM7_KEY", ""),
+            rpm=6, rpd=300,
+            bucket=TokenBucket(rate_per_minute=6, daily_limit=300, burst=1),
+        ),
+        # per_user_rpm=30 is published in the Pollinations catalogue; halved here
+        # because the number describes the community router's own ceiling, not the
+        # upstream key behind it, and that key's owner gets no warning from us.
+        LLMAccount(
+            provider="pollinations", account_id="A",
+            model="YoannDev90/poolside-laguna-s-2.1:free",
+            api_key=os.environ.get("POLLINATIONS_API_KEY", ""),
+            rpm=15, rpd=300,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=300, burst=1),
+        ),
     ]
     active = [s for s in quality_slots if s.api_key]
     if not active:
-        logger.warning("Quality router: no MISTRAL_API_KEY set, "
-                       "falling back to full router")
+        logger.warning("Quality router: no MISTRAL_API_KEY/LLM7_KEY/"
+                       "POLLINATIONS_API_KEY set, falling back to full router")
         return build_llm_router()
     return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
 

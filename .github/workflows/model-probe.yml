@@ -28,6 +28,7 @@ env:
   GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
   MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
   LLM7_KEY:             ${{ secrets.LLM7_KEY }}
+  POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
 
 jobs:
   probe:
