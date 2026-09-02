@@ -124,6 +124,18 @@ LLM7_REASONING_MODELS = frozenset({
 # that can bound it (checklist item 5).
 LLM7_REQUEST_TIMEOUT = 60.0
 
+# Pollinations' catalogue declares tool_calling/reasoning but says NOTHING about
+# response_format, so unlike LLM7 there is no per-model answer to read off. Default to
+# sending it anyway: llm_client already sidelines json mode for a slot that 400s and
+# retries without it, so a wrong "yes" costs one request while a wrong "no" costs
+# malformed batch JSON on every call (the Nemotron 7% corruption). The reasoning knob
+# is unknown for the same reason as LLM7 — probe before declaring it.
+#
+# Every model reachable on the free tier there is community-contributed and flagged
+# alpha: an individual's own upstream key registered into the router. They belong
+# BEHIND first-party slots in a cascade, never in front of them.
+POLLINATIONS_REQUEST_TIMEOUT = 60.0
+
 
 @dataclass(frozen=True)
 class ModelProfile:
@@ -151,7 +163,7 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
         # that actually lands, whatever the underlying family accepts natively.
         extras = {"reasoning": {"enabled": False}}
-    elif provider == "llm7":
+    elif provider in ("llm7", "pollinations"):
         # Also before the family rules, and for the opposite reason: the family knobs
         # below are facts about first-party endpoints (Groq 400s on reasoning_effort
         # "none"), and nothing yet establishes that this proxy forwards them at all.
@@ -179,6 +191,8 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         # Per-model, from the provider's own catalogue — see LLM7_NO_JSON_MODE_MODELS
         # for why this one defaults to yes where OpenRouter defaults to no.
         supports_json = model not in LLM7_NO_JSON_MODE_MODELS
+    elif provider == "pollinations":
+        supports_json = True  # undeclared; verified at runtime, see the note above
     else:
         supports_json = provider in ("groq", "gemini", "mistral")
 
@@ -186,6 +200,8 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         request_timeout = 180.0
     elif provider == "llm7":
         request_timeout = LLM7_REQUEST_TIMEOUT
+    elif provider == "pollinations":
+        request_timeout = POLLINATIONS_REQUEST_TIMEOUT
     else:
         request_timeout = 30.0
 

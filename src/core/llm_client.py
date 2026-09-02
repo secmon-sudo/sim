@@ -34,6 +34,11 @@ PROVIDER_ENDPOINTS = {
     # tier and not at Pass C: classify_batch alone is ~81% of SIM's ~1.2M/day and
     # would drain the whole allowance in a single run.
     "llm7": "https://api.llm7.io/v1/chat/completions",
+    # Pollinations gateway (2026-09-02). Its "free" models cost 0 pollen but the
+    # gateway still refuses every request while the account balance is exactly 0 —
+    # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
+    # precondition even though usage stays at 0. Anonymous access is 401.
+    "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
 }
 
 

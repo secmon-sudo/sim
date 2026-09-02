@@ -95,6 +95,9 @@ _CATALOGUES = {
     # availability percentage. Those are CLAIMS, which is why probing still happens —
     # but they say which models are worth spending a probe on.
     "llm7": ("https://api.llm7.io/v1/models", "LLM7_KEY"),
+    # Pollinations publishes 370 entries; the free-tier ones are community-contributed
+    # (an individual's upstream key registered into the router) and marked alpha.
+    "pollinations": ("https://gen.pollinations.ai/models", "POLLINATIONS_API_KEY"),
 }
 
 
@@ -117,7 +120,8 @@ def list_models(provider: str) -> int:
         print(f"=== {provider}: catalogue fetch failed: {type(exc).__name__}: {exc} ===")
         return 0
 
-    rows = data.get("models") or data.get("data") or []
+    # Pollinations returns a bare JSON array; Gemini/Groq/LLM7 wrap it in an object.
+    rows = data if isinstance(data, list) else (data.get("models") or data.get("data") or [])
     print(f"\n=== {len(rows)} models visible to {key_env} ({provider}) ===")
     for m in sorted(rows, key=lambda x: str(x.get("name") or x.get("id"))):
         name = str(m.get("name") or m.get("id")).replace("models/", "")
@@ -290,6 +294,7 @@ def main() -> int:
         "openrouter": "OPENROUTER_API_KEY_A",
         "mistral": "MISTRAL_API_KEY",
         "llm7": "LLM7_KEY",
+        "pollinations": "POLLINATIONS_API_KEY",
     }
     extras = json.loads(args.extras) if args.extras.strip() else {}
     for spec in [s for s in args.models.split(",") if s.strip()]:
