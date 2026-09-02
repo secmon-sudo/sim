@@ -27,6 +27,7 @@ from src.core.source_credibility import SOURCE_CREDIBILITY
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.core.geo import geo_coords
 from src.core.storyline import (
+    as_naive_utc,
     jaccard_similarity,
     overexposed_tokens,
     should_link_storyline,
@@ -890,7 +891,15 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         # flash detection — treated the strike as having happened on 1 Aug.
         # The fallback is clamped: published_at can be Pass A's end-of-day
         # freshness sentinel, which is not a real clock time.
-        occurred_at_est = row[6] or resolve_occurred_at_fallback(row[11], row[9])
+        # as_naive_utc because the fallback returns a tz-AWARE datetime (it clamps
+        # against `now`) while row[6] and every linking-pool row are naive: the
+        # column is a bare TIMESTAMP. Handing both shapes downstream made storyline
+        # linking silently refuse every candidate and crashed the identical-hint
+        # diagnostic outright — 171 events stranded in 'classified', growing ~13 a
+        # run, until this normalized the two into the one convention.
+        occurred_at_est = as_naive_utc(
+            row[6] or resolve_occurred_at_fallback(row[11], row[9])
+        )
 
         event = {
             "id": str(row[0]),

@@ -73,7 +73,7 @@
   "alert": {
     "suppression_ttl_hours": 4,
     "new_activity_window_hours": 24,
-    "alert_max_age_days": 2,
+    "alert_max_age_days": 0.25,
     "advisory_alert_severity_min": 75,
     "severity_alert_floor": 90,
     "corroboration_alert_min": 2,

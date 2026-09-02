@@ -6,10 +6,33 @@ Bigram-enhanced Jaccard similarity for linking related aviation events.
 """
 
 import re
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Set
 
 from src.core.geo import geo_key
+
+
+def as_naive_utc(dt: datetime | None) -> datetime | None:
+    """Coerce a datetime to the codebase's storage convention: naive, UTC.
+
+    `events.occurred_at_est` is a bare `TIMESTAMP` (no time zone), so every value
+    read back from the database is naive and every consumer is written against
+    that: storyline_clusterer and flash_detector both sort with `datetime.min` as
+    the default key, which a tz-aware element would make un-sortable.
+
+    Mixing the two is a silent correctness bug, not a loud one. Subtracting a
+    naive from an aware datetime raises TypeError, and the time gate below used to
+    swallow that as `return False` — so from 2026-08-31 every event whose incident
+    time came from `resolve_occurred_at_fallback` (which returns an AWARE value)
+    failed the gate against every naive pool row, could never link, and opened a
+    fresh storyline instead. Measured over the 14 days to 2026-09-02: those events
+    landed in single-member storylines 56.9% of the time against 28.0% for
+    classifier-dated ones, on 79% of the corpus.
+    """
+    if dt is None or dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 # Context-independent words and generic incident types that dilute Jaccard signal
 AVIATION_STOPWORDS = {
@@ -387,8 +410,11 @@ def should_link_storyline(
       which only makes the path more permissive, never less.
     """
     # ── Time gate (hard) — guard against None datetimes ──
-    dt_a = event_a.get("occurred_at_est")
-    dt_b = event_b.get("occurred_at_est")
+    # Normalized, not merely try/excepted: the except below cannot tell "these are
+    # 40 days apart" from "these could not be compared at all", and for a year it
+    # reported the second as the first. See as_naive_utc.
+    dt_a = as_naive_utc(event_a.get("occurred_at_est"))
+    dt_b = as_naive_utc(event_b.get("occurred_at_est"))
     if dt_a is None or dt_b is None:
         return False
     try:
