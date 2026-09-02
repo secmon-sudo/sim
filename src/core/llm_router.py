@@ -52,7 +52,7 @@ CLIENT_ERROR_COOLDOWN_SECONDS = 120
 SLOW_SLOT_COOLDOWN_SECONDS = 1800
 # Max tokens held at once per model slot — smooths the opening burst.
 DEFAULT_BURST = 8
-# Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.6-27b all list 8K).
+# Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.8-27b all list 8K).
 # This — not RPM — is the binding constraint; modeling it stops a burst from tripping 429.
 GROQ_TPM = 8000
 # OpenRouter free-model limits are ACCOUNT-wide, not per model: 20 RPM across all
@@ -360,10 +360,18 @@ def build_llm_router() -> LLMRouter:
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
         ),
-        # ④ Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine)
+        # ④ Groq-A Secondary — kalite yedeği (eski llama-3.3-70b-versatile yerine).
+        # qwen3.6-27b 2026-09-02'de deprecate edildi, 14 Eylül'de kapanıyor ve
+        # sonrasında istekler 3.8'e OTOMATİK yönlendirilecekti. Beklemek yerine
+        # kontrollü geçildi: otomatik yönlendirme, Pass C'nin sınıflandırma modelini
+        # bizim haberimiz olmadan değiştirmek demekti ve model değişimi severity
+        # dağılımını kaydırır. `scripts/probe_models.py` ile ikisi aynı 4 raporda
+        # yan yana ölçüldü: 16 alanın 16'sı BİREBİR aynı (relevance skorları dahil),
+        # 3.8 biraz da hızlı (1718ms vs 1840ms). reasoning_effort="none" kabul
+        # ediliyor, yani model_profiles'taki qwen kuralı aynen geçerli.
         LLMAccount(
             provider="groq", account_id="A",
-            model="qwen/qwen3.6-27b",
+            model="qwen/qwen3.8-27b",
             api_key=os.environ.get("GROQ_API_KEY_A", ""),
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),
@@ -379,7 +387,7 @@ def build_llm_router() -> LLMRouter:
         # ⑥ Groq-B Burst — model çeşitliliği (eski qwen3-32b yerine)
         LLMAccount(
             provider="groq", account_id="B",
-            model="qwen/qwen3.6-27b",
+            model="qwen/qwen3.8-27b",
             api_key=os.environ.get("GROQ_API_KEY_B", ""),
             rpm=30, rpd=1000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=1000, burst=DEFAULT_BURST, tpm_limit=GROQ_TPM),

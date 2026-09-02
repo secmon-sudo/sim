@@ -56,9 +56,9 @@ SIM is a multi-stage pipeline that collects, classifies, scores, and archives se
 ① OR-A    nemotron-3-super-120b:free  (primary — funded key, 1K RPD account-wide)
 ② OR-A    minimax-m3:free             (secondary — shares ①'s account quota)
 ③ Groq-A  gpt-oss-120b                (smartest Groq slot)
-④ Groq-A  qwen3.6-27b                 (quality backup)
+④ Groq-A  qwen3.8-27b                 (quality backup)
 ⑤ Groq-B  gpt-oss-120b                (throughput)
-⑥ Groq-B  qwen3.6-27b                 (burst)
+⑥ Groq-B  qwen3.8-27b                 (burst)
 ⑦ OR-B    minimax-m3:free             (cross-key mirror, 50 RPD unfunded)
 ⑧ Gemini  3.1-flash-lite / 3-flash    (third independent provider, 500+20 RPD)
 ⑨ Groq-A  gpt-oss-20b                 (last-resort; also the bulk router's model)
@@ -72,7 +72,9 @@ llama-3.1-8b-instant on the free tier; no free chat model exceeds 1K RPD anymore
 MiniMax M3, the most-used free model that still supports response_format; Nemotron 3
 Ultra is larger but has no JSON mode, which cost ~7% of Pass C batches when tried.
 mistral-large-2512 left the account's subscription tier (403), so the quality router
-is now mistral-medium-latest → main cascade.)_
+is now mistral-medium-latest → main cascade. Groq deprecated qwen3.6-27b the same
+day (decommission Sep 14, auto-routed to 3.8 after); ④/⑥ were moved deliberately
+after a probe showed the two models agree on every field of every sample report.)_
 
 **Model capability profiles** (`src/core/model_profiles.py`): every provider/model quirk
 lives here as declarative data — whether the provider accepts
