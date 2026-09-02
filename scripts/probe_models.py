@@ -133,7 +133,12 @@ def list_models(provider: str) -> int:
             extra += f" owned_by={owned}"
         # The capability flags LLM7 publishes map 1:1 onto checklist items 1 and 2, so
         # show them: they are what makes a model worth a probe slot.
-        for flag in ("json_mode", "reasoning", "tier"):
+        # usage_based_only is the field that decides whether a key can call the model
+        # AT ALL: LLM7 answers 402 (not 401) for a valid key against a usage-based
+        # model, so the first probe here spent all four of its slots on models the
+        # allowance cannot reach (2026-09-02). Printing it makes that visible before
+        # a probe is queued rather than after.
+        for flag in ("json_mode", "reasoning", "tier", "usage_based_only"):
             if flag in m:
                 extra += f" {flag}={m[flag]}"
         avail = m.get("availability_last_hour_percent")
