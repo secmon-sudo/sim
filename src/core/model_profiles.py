@@ -67,7 +67,7 @@ WALL_CLOCK_REFERENCE_TOKENS = 2312
 # instead of letting the slot die.
 OPENROUTER_JSON_MODE_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "z-ai/glm-5.2:free",
+    "minimax/minimax-m3:free",
 })
 
 # OpenRouter slots whose model REASONS BY DEFAULT, where the only knob that turns it
@@ -80,11 +80,11 @@ OPENROUTER_JSON_MODE_MODELS = frozenset({
 # claim that it answers directly.
 OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
-    # GLM 5.2 is described by Z.ai as "a large-scale reasoning model" and advertises
-    # reasoning/reasoning_effort/include_reasoning (checked 2026-09-02 when it
-    # replaced openai/gpt-oss-20b:free, which OpenRouter retired along with the rest
-    # of the free gpt-oss family — the paid slugs remain, the :free ones are gone).
-    "z-ai/glm-5.2:free",
+    # MiniMax M3 reasons by default (advertises reasoning/reasoning_effort/
+    # include_reasoning) and is tuned for "sustained, multi-step tasks", which is
+    # exactly the shape that spends the budget on hidden thinking. Checked
+    # 2026-09-02 when it took the secondary slots from GLM 5.2.
+    "minimax/minimax-m3:free",
 })
 
 

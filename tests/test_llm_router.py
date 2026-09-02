@@ -251,7 +251,7 @@ class TestQualityRouter:
         router = build_quality_router()
         # quality slot leads the cascade, full main cascade follows as fallback
         assert router.accounts[0].provider == "mistral"
-        assert router.accounts[0].model == "mistral-large-2512"
+        assert router.accounts[0].model == "mistral-medium-latest"
         assert any(a.provider == "groq" for a in router.accounts[1:])
         reset_bucket_registry()
 

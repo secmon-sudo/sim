@@ -16,13 +16,13 @@ class TestJsonMode:
         assert get_profile("gemini", "gemini-3.1-flash-lite").supports_json_mode
 
     def test_quality_tier_providers_support_json_mode(self):
-        assert get_profile("mistral", "mistral-large-2512").supports_json_mode
+        assert get_profile("mistral", "mistral-medium-latest").supports_json_mode
 
     def test_openrouter_verified_free_models_do(self):
         # Re-verified against the models API 2026-09-02: these two advertise
         # response_format + structured_outputs, and json mode is what stops batch
         # replies from drifting into malformed JSON mid-object.
-        assert get_profile("openrouter", "z-ai/glm-5.2:free").supports_json_mode
+        assert get_profile("openrouter", "minimax/minimax-m3:free").supports_json_mode
         assert get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free").supports_json_mode
 
     def test_openrouter_is_per_model_not_per_provider(self):
@@ -44,9 +44,9 @@ class TestReasoningGate:
 
     def test_openrouter_reasoning_models_need_full_toggle(self):
         # reasoning_effort does NOT tame these; they fail silently — HTTP 200 with
-        # hidden thinking eating the budget (Nemotron, 2026-07-10). GLM 5.2 joined
+        # hidden thinking eating the budget (Nemotron, 2026-07-10). MiniMax M3 joined
         # the list on 2026-09-02 as a self-described reasoning model.
-        for model in ("nvidia/nemotron-3-super-120b-a12b:free", "z-ai/glm-5.2:free"):
+        for model in ("nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"):
             assert get_profile("openrouter", model).payload_extras == \
                 {"reasoning": {"enabled": False}}
 
@@ -66,12 +66,12 @@ class TestRequestSizeCeiling:
         assert get_profile("groq", "openai/gpt-oss-20b").max_request_tokens == GROQ_MAX_REQUEST_TOKENS
 
     def test_openrouter_and_gemini_have_no_ceiling(self):
-        assert get_profile("openrouter", "z-ai/glm-5.2:free").max_request_tokens is None
+        assert get_profile("openrouter", "minimax/minimax-m3:free").max_request_tokens is None
         assert get_profile("gemini", "gemini-3.1-flash-lite").max_request_tokens is None
 
     def test_mistral_large_is_plain_model(self):
-        assert get_profile("mistral", "mistral-large-2512").payload_extras == {}
-        assert get_profile("mistral", "mistral-large-2512").max_request_tokens is None
+        assert get_profile("mistral", "mistral-medium-latest").payload_extras == {}
+        assert get_profile("mistral", "mistral-medium-latest").max_request_tokens is None
 
 
 class TestRequestTimeout:
@@ -80,7 +80,7 @@ class TestRequestTimeout:
         # to 180s on 2026-08-10 with the narrative budget (4K → 6K tokens): the
         # timeout has to outlast the budget or the extra tokens are unspendable.
         from src.services.sitrep_generator import NARRATIVE_MAX_TOKENS
-        assert get_profile("mistral", "mistral-large-2512").request_timeout == 180.0
+        assert get_profile("mistral", "mistral-medium-latest").request_timeout == 180.0
         assert NARRATIVE_MAX_TOKENS <= 6000, \
             "raising the narrative budget again needs the mistral timeout raised with it"
 

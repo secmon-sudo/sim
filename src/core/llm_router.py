@@ -338,12 +338,16 @@ def build_llm_router() -> LLMRouter:
         # 404), sonra gpt-oss-20b:free. 2026-09-02'de OpenRouter kataloğunda free
         # gpt-oss ailesinin SON üyesi de kalktı — 421 modellik listede ne
         # 20b:free ne 120b:free var, yalnız ücretli slug'lar duruyor. Slot her
-        # koşuda 38 kez 404 alıyordu. GLM 5.2 free katmanda kalan, response_format
-        # + structured_outputs ilan eden en geniş bağlamlı (256K) alternatif.
-        # Reasoning modeli → model_profiles'ta reasoning kilidi ŞART.
+        # koşuda 38 kez 404 alıyordu. Yerine önce GLM 5.2 kondu (acil, doğrulanmamış),
+        # 2026-09-02'de MiniMax M3'e yükseltildi: free katmanda response_format
+        # destekleyen 7 modelden en çok kullanılanı (4,15T token vs GLM'in 20,6B'si)
+        # ve 1M bağlam. Reasoning modeli → model_profiles'ta reasoning kilidi ŞART.
+        # NOT: nemotron-3-ultra (550B, kataloğun en güçlüsü) BİLEREK seçilmedi —
+        # response_format desteği yok ve JSON mode olmadan Pass C batch'lerinin
+        # ~%7'si cümle ortasında bozuluyordu (2026-08-05/06).
         LLMAccount(
             provider="openrouter", account_id="A",
-            model="z-ai/glm-5.2:free",
+            model="minimax/minimax-m3:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_FUNDED,
             bucket=openrouter_a_free_bucket,
@@ -384,11 +388,12 @@ def build_llm_router() -> LLMRouter:
         # (Eski Hermes-3-405B slotu kaldırıldı: key A'nın kotası artık hesap
         # genelinde paylaşıldığından üçüncü bir key-A free slotu kota eklemiyordu.
         # 120b:free'nin kaldırılmasıyla (2026-07-17) 20b:free'ye, o da katalogdan
-        # kalkınca (2026-09-02) ② ile aynı GLM 5.2'ye düşürüldü. Key B fonsuz
-        # olduğu için buraya ücretli bir slug konamaz — free kalmak zorunda.)
+        # kalkınca (2026-09-02) ② ile aynı modele düşürüldü — bugün MiniMax M3.
+        # Key B fonsuz olduğu için buraya ücretli bir slug konamaz — free kalmak
+        # zorunda.)
         LLMAccount(
             provider="openrouter", account_id="B",
-            model="z-ai/glm-5.2:free",
+            model="minimax/minimax-m3:free",
             api_key=os.environ.get("OPENROUTER_API_KEY_B", ""),
             rpm=OPENROUTER_FREE_RPM, rpd=OPENROUTER_FREE_RPD_UNFUNDED,
             bucket=TokenBucket(
@@ -479,9 +484,9 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Mistral large (best Turkish of the free options) → the full main
-    cascade as fallback, so a missing key or provider outage degrades to exactly
-    the pre-2026-07-17 behavior.
+    Cascade: Mistral medium (best Turkish still reachable on this account) → the
+    full main cascade as fallback, so a missing key or provider outage degrades to
+    exactly the pre-2026-07-17 behavior.
 
     Cerebras (gpt-oss-120b) sat between the two until 2026-09-02, when its free
     tier ended: every run answered HTTP 402 (payment required) exactly once before
@@ -489,19 +494,32 @@ def build_quality_router() -> LLMRouter:
     per-run round-trip. Removed rather than re-pointed at the paid tier — the whole
     router exists to buy prose quality at zero cost, and Mistral already covers it.
 
-    Limits read off the providers' dashboards (2026-07-17):
-      - Mistral free tier: per-model rate limits only — mistral-large-2512 at
-        250K TPM / 0.07 RPS (~4 RPM). No daily request cap shown; rpd is set to a
-        generous bound just to keep the TokenBucket day-accounting meaningful.
+    mistral-large-2512 was the slot until the same day, when it began answering
+    403 "This model is not available in your subscription tier". The account is
+    fine and the slug is current (Mistral Large 3, v25.12) — the MODEL is outside
+    the tier, and mistral-large-2411 retired 2026-05-31, so no "large" is
+    reachable. NB: the rate-limit dashboard still lists mistral-large-2512 with
+    limits, so a model appearing there is NOT evidence of access; only a live call
+    is. That is what the 4xx error-body logging in llm_client is for.
+
+    Limits read off the account's rate-limit dashboard (2026-09-02):
+      - mistral-medium-latest: 25K TPM / 0.83 RPS. TPM is the binding constraint
+        and it is 10x TIGHTER than large's 250K — one 6K-token SITREP narrative
+        plus its prompt is a large fraction of a single minute's budget, so burst
+        is 1: two concurrent full-size calls would exceed the window and 429.
+        rpd is a generous bound, only to keep day-accounting meaningful.
+      - Deliberately NOT ministral-14b/8b/3b: they have 25-50x the TPM headroom
+        (937K/625K/1.3M) but they are small edge models, and prose quality is the
+        only reason this router exists. Throughput was never the constraint here.
     """
     quality_slots = [
         LLMAccount(
             provider="mistral", account_id="A",
-            model="mistral-large-2512",
+            model="mistral-medium-latest",
             api_key=os.environ.get("MISTRAL_API_KEY", ""),
-            rpm=4, rpd=2000,
-            bucket=TokenBucket(rate_per_minute=4, daily_limit=2000, burst=2,
-                               tpm_limit=250_000),
+            rpm=2, rpd=2000,
+            bucket=TokenBucket(rate_per_minute=2, daily_limit=2000, burst=1,
+                               tpm_limit=25_000),
         ),
     ]
     active = [s for s in quality_slots if s.api_key]
