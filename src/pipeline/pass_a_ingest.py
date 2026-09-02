@@ -211,26 +211,88 @@ def _record_corroboration(db_conn, event_id, event_domain: str,
         logger.debug("Corroboration from carrier %s not recorded", dup_domain)
         return False
 
-    entry = json.dumps([{"domain": dup_domain, "url": _citable_url(dup_url),
-                         "title": (dup_title or "")[:200],
-                         "seen_at": datetime.now(timezone.utc).isoformat()}])
-    probe = json.dumps([{"domain": dup_domain}])
+    params = _corroboration_params(event_id, event_domain, dup_domain, dup_url, dup_title)
+    if params is None:
+        return False
     try:
         with db_conn.transaction():
-            result = db_conn.execute(
-                """UPDATE events
-                   SET corroborating_sources = corroborating_sources || %s::jsonb
-                   WHERE id = %s
-                     AND jsonb_array_length(corroborating_sources) < %s
-                     AND NOT corroborating_sources @> %s::jsonb""",
-                (entry, event_id, _MAX_CORROBORATING_SOURCES, probe),
-            )
+            result = db_conn.execute(_CORROBORATION_SQL, params)
             return result.rowcount > 0
     except Exception:
         # Pre-migration DBs lack the column — corroboration is a bonus signal,
         # never worth failing an ingest run over.
         logger.debug("Corroboration record failed for event %s", event_id)
         return False
+
+
+_CORROBORATION_SQL = """UPDATE events
+   SET corroborating_sources = corroborating_sources || %s::jsonb
+   WHERE id = %s
+     AND jsonb_array_length(corroborating_sources) < %s
+     AND NOT corroborating_sources @> %s::jsonb"""
+
+
+def _corroboration_params(event_id, event_domain: str, dup_domain: str,
+                          dup_url: str, dup_title: str) -> tuple | None:
+    """Everything _record_corroboration decides WITHOUT touching the database.
+
+    Split out so the batched path and the single-row path apply exactly the same
+    refusals — an outlet republishing itself, a carrier that is not a witness — and
+    so a future rule can only be added in one place. Returns the UPDATE's parameter
+    tuple, or None when this duplicate must not be recorded at all.
+    """
+    from src.core.sitrep_verify import registrable_domain
+    if event_id is None or not dup_domain:
+        return None
+    if registrable_domain(dup_domain) == registrable_domain(event_domain or ""):
+        return None
+    if not is_independent_publisher(dup_domain):
+        logger.debug("Corroboration from carrier %s not recorded", dup_domain)
+        return None
+    entry = json.dumps([{"domain": dup_domain, "url": _citable_url(dup_url),
+                         "title": (dup_title or "")[:200],
+                         "seen_at": datetime.now(timezone.utc).isoformat()}])
+    probe = json.dumps([{"domain": dup_domain}])
+    return (entry, event_id, _MAX_CORROBORATING_SOURCES, probe)
+
+
+def _flush_corroborations(db_conn, pending: list[tuple]) -> int:
+    """Write a whole run's corroborations in one pipelined round trip.
+
+    Measured 2026-09-03 over 30 runs: this was 90 s/run — 20% of Pass A and 11% of
+    the entire pipeline — spent as ~730 separate UPDATEs against a remote pooler.
+    The round trips were the cost, not the work, which is the same finding and the
+    same fix as load_domain_penalties (210 s/run as a per-item query).
+
+    psycopg3 runs executemany in pipeline mode, so the statements still execute
+    server-side in order, one per duplicate. That ordering is load-bearing: the
+    `NOT corroborating_sources @> probe` guard is what makes a second duplicate from
+    an already-credited domain a no-op, and it only works if the first one's append
+    is already visible. A single UPDATE ... FROM (VALUES ...) would be one round trip
+    too, and WRONG — Postgres applies one row per target, so the second and later
+    duplicates of the same event would be silently dropped, and ~730 duplicates
+    across ~100 events means most of them share a target.
+
+    The trade is durability: corroborations now land at the end of Pass A instead of
+    as they are found, so a mid-loop crash loses them. Acceptable for a signal the
+    module already calls "a bonus signal, never worth failing an ingest run over" —
+    the events themselves are committed as they go, unchanged.
+    """
+    if not pending:
+        return 0
+    try:
+        with db_conn.transaction(), db_conn.cursor() as cur:
+            cur.executemany(_CORROBORATION_SQL, pending, returning=True)
+            recorded = 0
+            while True:
+                if cur.rowcount and cur.rowcount > 0:
+                    recorded += cur.rowcount
+                if not cur.nextset():
+                    break
+            return recorded
+    except Exception:
+        logger.debug("Corroboration flush failed for %d entries", len(pending))
+        return 0
 
 
 def load_domain_penalties(db_conn) -> dict[str, float] | None:
@@ -415,6 +477,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     }
     now_utc = datetime.now(timezone.utc)
     timings: dict[str, float] = {}
+    pending_corroborations: list[tuple] = []
     pass_started = time.perf_counter()
     reset_translation_counter()
 
@@ -608,11 +671,14 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
             dup_event_id, dup_event_domain = recent_meta[dup_idx]
-            with _timed(timings, "corroboration_db"):
-                corroborated = _record_corroboration(db_conn, dup_event_id, dup_event_domain,
-                                                     domain, url, item.get("title", ""))
-            if corroborated:
-                stats["corroborations_recorded"] += 1
+            # CPU-only here; the write is deferred to one pipelined flush after the
+            # loop (see _flush_corroborations). The refusals still run per item, so
+            # a carrier or a self-republish never reaches the batch at all.
+            with _timed(timings, "corroboration_cpu"):
+                params = _corroboration_params(dup_event_id, dup_event_domain,
+                                               domain, url, item.get("title", ""))
+            if params is not None:
+                pending_corroborations.append(params)
             continue
 
         # Get published_at date
@@ -733,6 +799,10 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             logger.exception("Insert error for URL: %s", url[:80])
             continue
 
+
+    with _timed(timings, "corroboration_db"):
+        stats["corroborations_recorded"] = _flush_corroborations(
+            db_conn, pending_corroborations)
 
     if inserted_priorities:
         import statistics
