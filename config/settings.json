@@ -230,7 +230,21 @@
     "airspace_radius_km": 300,
     "airspace_max_clusters": 5,
     "airspace_max_airports": 6,
-    "exclude_safety_events": true
+    "exclude_safety_events": true,
+    "priority_countries": [
+      "IR",
+      "IQ",
+      "KW",
+      "JO",
+      "SA",
+      "AE",
+      "QA",
+      "BH",
+      "OM",
+      "IL",
+      "LB",
+      "YE"
+    ]
   },
   "flash": {
     "verified_confidence_min": 0.66,

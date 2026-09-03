@@ -42,6 +42,20 @@ SITREP_CFG: Dict[str, Any] = _SETTINGS.get("sitrep", {})
 WINDOW_HOURS = int(SITREP_CFG.get("window_hours", 24))
 MAX_COUNTRIES_PER_RUN = int(SITREP_CFG.get("max_countries_per_run", 5))
 MIN_EVENTS_THRESHOLD = int(SITREP_CFG.get("min_events_threshold", 3))
+# Countries that must be narrated FIRST when they qualify. Not about importance in
+# the abstract — about who is left holding the weakest rung when the quality cascade
+# runs out. Measured 3 Sep 2026: five countries at 07:30 saturated Mistral, which
+# 429'd on the fifth; LLM7 then 502'd, and Iraq — a country at the centre of an
+# active war — was narrated by Pollinations, whose hidden reasoning eats roughly 42%
+# of whatever max_tokens it is given. The last country in the order pays for every
+# country before it.
+#
+# Ordering ONLY. This list never admits a country and never excludes one; selection
+# is unchanged, and a country that does not qualify is not narrated whatever this
+# says.
+PRIORITY_COUNTRIES: List[str] = [
+    str(c).strip().upper() for c in SITREP_CFG.get("priority_countries", []) if c
+]
 # How many ranked clusters the narrative prompt is allowed to carry. NOT a cap on
 # the day's record — the appendix, events_json and the stat cards always hold every
 # cluster (see cap_for_prompt). Lowered 25 -> 18 on 2026-08-19 because the model
@@ -1235,4 +1249,20 @@ def select_sitrep_countries(db_conn, window_start: datetime, window_end: datetim
          HIGH_SEVERITY_OVERRIDE, AVIATION_SELECTION_MIN,
          HIGH_SEVERITY_OVERRIDE, AVIATION_SELECTION_MIN, MAX_COUNTRIES_PER_RUN),
     ).fetchall()
-    return [r[0].strip().upper() for r in rows if r[0]]
+    selected = [r[0].strip().upper() for r in rows if r[0]]
+    return prioritise(selected)
+
+
+def prioritise(selected: List[str]) -> List[str]:
+    """Move PRIORITY_COUNTRIES to the front, keeping every other ordering intact.
+
+    A stable partition, deliberately: the query already ranks by protected tier and
+    then by volume, and that ranking is meaningful inside each group. Sorting by the
+    priority list's own order instead would throw away the severity ranking the
+    selection just computed.
+    """
+    if not PRIORITY_COUNTRIES:
+        return selected
+    priority = set(PRIORITY_COUNTRIES)
+    return ([c for c in selected if c in priority]
+            + [c for c in selected if c not in priority])
