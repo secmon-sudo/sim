@@ -375,9 +375,14 @@ BULLETIN_SAMPLE = [
     # confirmed. Both halves of this row were wrong in the first version.
     ("Iran says 18 killed, 142 injured in US strikes since Sunday",
      "us_coalition", "iran", "claimed"),
-    # Multi-target Iranian salvo.
+    # Multi-target Iranian salvo. target=other, not us_coalition: the headline
+    # names COUNTRIES, and "never guess from context" binds the target the same way
+    # it binds the actor. The first version encoded what we know (those are US
+    # bases) instead of what the text says, and all three measured slots disagreed
+    # with it — the same mistake this sample caught once already. The section is
+    # unaffected either way, which is the rule being robust rather than lucky.
     ("Iranian Drone and Missile Attacks Target Kuwait, Jordan, Bahrain and Iraq",
-     "iran", "us_coalition", "confirmed"),
+     "iran", "other", "confirmed"),
 ]
 
 
