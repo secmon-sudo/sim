@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -96,6 +97,19 @@ _VERIFY_PUBLISH_DATE = _INGESTION.get("verify_publish_date", True)
 # priority-scoped: the Aden reprint scored 1 on the ingest triage and would have
 # slipped straight past a priority-gated check.
 _ARTICLE_FETCH_MAX_PER_RUN = _INGESTION.get("article_fetch_max_per_run", 120)
+# Article fetches are the largest phase in Pass A — 145-216s across recent runs for
+# ~120 sequential fetches, most paying TWO round trips because the Google News handle
+# has to resolve before the page loads. They are pure network wait, so they overlap;
+# what does not overlap is the loop's own ordering (see _settle_pending_inserts).
+_ARTICLE_FETCH_WORKERS = _INGESTION.get("article_fetch_workers", 8)
+# How many fetched-but-not-yet-inserted items may be in flight. Every one of them is
+# an insert the dedup corpus cannot see yet, which is why the window is drained the
+# moment that could matter rather than sized generously.
+_ARTICLE_FETCH_WINDOW = _INGESTION.get("article_fetch_window", 8)
+# A wall-clock bound beside the per-request timeout, for the reason resolve_cluster_urls
+# already records: per-request timeouts do not bound total time when the slow path is
+# many requests each landing just under the limit.
+_ARTICLE_FETCH_DEADLINE_S = _INGESTION.get("article_fetch_deadline_s", 240.0)
 _MAX_EVENT_FUTURE_DAYS = _INGESTION.get("max_event_future_days", 1)
 _MAX_EVENTS_PER_DOMAIN = _INGESTION.get("max_events_per_domain", 8)
 # Per-domain overrides of the cap above (eTLD+1 → cap). For high-volume,
@@ -310,6 +324,49 @@ def _corroboration_params(event_id, event_domain: str, dup_domain: str,
                          "seen_at": datetime.now(timezone.utc).isoformat()}])
     probe = json.dumps([{"domain": dup_domain}])
     return (entry, event_id, _MAX_CORROBORATING_SOURCES, probe)
+
+
+# ---------------------------------------------------------------------------
+# Article fetch: parallel, without moving a single decision
+# ---------------------------------------------------------------------------
+#
+# The fetch was the largest phase in Pass A (145-216s over recent runs) and it is
+# pure network wait, so it parallelises — but naively deferring an insert while its
+# fetch is in flight does NOT come free. This run's own inserts are PREPENDED to
+# recent_events, so they are compared first and win the match; an insert still in
+# flight is an insert the next candidates cannot see.
+#
+# That exposure was measured before any of this was written (run 33721288075):
+# of 896 content duplicates, 11 matched an event inserted earlier in the same run
+# and 6 of those matched within the last 8 inserts. Small, but not zero — a window
+# of 8 would have silently changed 6 dedup decisions in one run, roughly 66 a day,
+# each one a duplicate event that should have been merged.
+#
+# So the window is drained rather than gambled with, on every condition that could
+# make its contents matter:
+#   * a candidate that matches something in flight (settle, then re-run dedup)
+#   * an insert that skips the fetch entirely (keeps corpus ORDER exactly sequential,
+#     which decides WHICH event a later duplicate corroborates)
+#   * an item whose canonical_text will grow by its article body (priority >=
+#     _FULL_TEXT_MIN_PRIORITY), because its corpus entry would otherwise be missing
+#     the very text a later candidate might match on
+#   * the window filling, and the end of the loop
+#
+# What is left running in parallel is the common case, and the common case is ~99%
+# of it.
+
+
+def _pending_matches(pending: list, title: str, canonical: str) -> bool:
+    """True when this candidate looks like something already in flight.
+
+    Compared with the same function the settled corpus uses, so the two answers
+    cannot drift apart: the in-flight entries are simply a corpus that has not
+    landed yet.
+    """
+    if not pending:
+        return False
+    corpus = [(p["title"], p["canonical"], "") for p in pending]
+    return find_content_duplicate(corpus, title, canonical) is not None
 
 
 def _flush_corroborations(db_conn, pending: list[tuple]) -> int:
@@ -543,6 +600,11 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # corroboration ALERT floor, and a silent refusal is indistinguishable from
         # a run where nothing was refused.
         "corroborations_refused": 0,
+        # How often a candidate duplicated an item still in flight and the window
+        # had to land before the question could be answered. This is the price of
+        # the parallel fetch being exact rather than approximate; a number that
+        # climbs toward the fetch count means the window is buying nothing.
+        "dedup_window_stalls": 0,
         "content_dup_matched_in_run": 0,
         "content_dup_in_run_within_4": 0,
         "content_dup_in_run_within_8": 0,
@@ -641,13 +703,154 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
 
     inserted = 0
     domain_inserts: dict[str, int] = {}
+    # Fetched-but-not-yet-inserted items, in loop order. Drained by settle_pending().
+    pending_inserts: list[dict] = []
+    executor = ThreadPoolExecutor(max_workers=_ARTICLE_FETCH_WORKERS,
+                                  thread_name_prefix="article-fetch")
+    fetch_deadline = time.monotonic() + _ARTICLE_FETCH_DEADLINE_S
     # Triage-quality telemetry: what priorities made it in vs. got cut. A high
     # priority_dropped_max means the budget/caps are cutting into items the
     # scorer considers important — the signal to revisit cap sizes.
     inserted_priorities: list[int] = []
     dropped_priority_max = 0
+
+    def _finalize_item(item, article, url, url_hash, domain, canonical, raw_text,
+                       pub_dt, from_aggregator, date_verified) -> bool:
+        """Everything the fetch's answer decides, plus the insert. Returns inserted.
+
+        Lifted out of the loop verbatim so the sequential path and the windowed
+        path cannot drift: there is exactly one copy of the reprint rule, the
+        date-provenance rule and the insert. ``article`` is None when this item
+        never earned a fetch, which is the pre-existing behaviour for a run that
+        has spent its fetch budget.
+        """
+        nonlocal inserted
+        if article is not None:
+            # Prefer the publisher's URL: it is what a reader should be handed in
+            # a report, and it makes source_url_hash stable — the same story
+            # reached through two Google News queries carries two different
+            # opaque handles and used to survive as two events.
+            if article["url"] and article["url"] != url:
+                stats["urls_resolved"] += 1
+                url = article["url"]
+                url_hash = compute_url_hash(url)
+
+            page_dt = article["published_at"] if _VERIFY_PUBLISH_DATE else None
+            # A page dated in the future is a broken CMS, not evidence — ignore
+            # it rather than letting it override a sane feed date.
+            if page_dt and page_dt <= now_utc + timedelta(days=_MAX_EVENT_FUTURE_DAYS):
+                age_days = (now_utc - page_dt).total_seconds() / 86400
+                if age_days > _MAX_ARTICLE_AGE_DAYS:
+                    stats["republished_filtered"] += 1
+                    logger.info(
+                        "Reprint dropped: page says %s, feed claimed %s — %s | %s",
+                        page_dt.date(), pub_dt.date() if pub_dt else "?",
+                        domain, item.get("title", "")[:70],
+                    )
+                    return False
+                stats["publish_dates_verified"] += 1
+                pub_dt = page_dt
+            elif from_aggregator:
+                # Publisher blocked the fetch and left no date in the path, so
+                # this row keeps Google's crawl stamp. Counted, not dropped:
+                # dropping every unverifiable aggregator item would cost far more
+                # real coverage than the reprints it would catch. This number is
+                # the size of the remaining exposure — watch it.
+                stats["unverified_aggregator_inserts"] += 1
+                if article["fetch_ok"]:
+                    # We DID read the page and it named no date — the one case where
+                    # Google's stamp stands alone and the freshness gates must not
+                    # treat it as evidence.
+                    date_verified = False
+                else:
+                    # Never read it. Split out from the exposure count above because
+                    # the two need different fixes: a dateless publisher is permanent,
+                    # a failed fetch is a retry away, and only the rate of the second
+                    # tells us whether the fetch layer is degrading.
+                    stats["article_fetch_failed"] += 1
+
+            full_text = article["text"]
+            if full_text:
+                stats["full_text_fetched"] += 1
+                # canonical_text is what Pass C shows the classifier (truncated to
+                # BATCH_TEXT_CHARS), so the body lands in front of the LLM — an RSS
+                # description alone stops at the headline and never says which route
+                # or until when. Still priority-gated: every insert now fetches an
+                # article, and attaching every body would inflate Pass C's token
+                # bill well past what the LLM quotas allow.
+                if (_FETCH_FULL_TEXT
+                        and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY):
+                    canonical = canonicalize_text(f"{canonical} {full_text}")
+
+        # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
+        try:
+            with _timed(timings, "insert_db"), db_conn.transaction():
+                result = db_conn.execute(
+                    """INSERT INTO events (source_url, source_url_hash, source_domain,
+                                           source_title, raw_text, canonical_text, status,
+                                           published_at, date_verified)
+                       SELECT %s, %s, %s, %s, %s, %s, 'raw', %s, %s
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM events WHERE source_url_hash = %s
+                       )
+                       RETURNING id""",
+                    (url, url_hash, domain, item.get("title", ""),
+                     raw_text, canonical, pub_dt, date_verified, url_hash),
+                )
+                new_row = result.fetchone()
+                if new_row:
+                    inserted += 1
+                    stats["events_inserted"] += 1
+                    inserted_priorities.append(item.get("_priority", 0))
+                    domain_inserts[domain] = domain_inserts.get(domain, 0) + 1
+                    # Inline dedup: add to recent_events (and aligned meta) so later
+                    # items in this run are compared — and corroborated — against it
+                    # No anchor yet — Pass C classifies this event later in the run.
+                    recent_events.insert(0, (item.get("title", ""), canonical, ""))
+                    recent_meta.insert(0, (new_row[0], domain))
+                    if len(recent_events) > 2500:
+                        recent_events.pop()
+                        recent_meta.pop()
+                    return True
+                stats["duplicates_skipped"] += 1
+        except Exception:
+            logger.exception("Insert error for URL: %s", url[:80])
+        return False
+
+    def settle_pending() -> None:
+        """Complete every in-flight insert, in the order it was submitted.
+
+        Order matters and is not cosmetic: recent_events is prepended to and
+        find_content_duplicate returns the FIRST match, so the sequence in which
+        entries land decides which event a later duplicate corroborates. Draining
+        in submission order reproduces exactly what the sequential loop produced.
+        """
+        if not pending_inserts:
+            return
+        batch, pending_inserts[:] = list(pending_inserts), []
+        with _timed(timings, "article_fetch"):
+            for entry in batch:
+                try:
+                    entry["article"] = entry["future"].result(
+                        timeout=_ARTICLE_FETCH_DEADLINE_S)
+                except Exception:
+                    # A fetch that never answered says nothing about the publisher,
+                    # so the item is inserted on what the feed gave us — the same
+                    # outcome the sequential path produced for a failed fetch.
+                    logger.debug("Article fetch failed in pool for %s",
+                                 entry["url"][:80])
+                    entry["article"] = {"url": "", "text": "",
+                                        "published_at": None, "fetch_ok": False}
+        for entry in batch:
+            _finalize_item(entry["item"], entry["article"], entry["url"],
+                           entry["url_hash"], entry["domain"], entry["canonical"],
+                           entry["raw_text"], entry["pub_dt"],
+                           entry["from_aggregator"], entry["date_verified"])
+
     for item_idx, item in enumerate(deduped_items):
-        if inserted >= max_events:
+        # In-flight items are inserts that have not landed yet, so the budget has
+        # to count them or the window would overshoot max_events.
+        if inserted + len(pending_inserts) >= max_events:
             leftover = deduped_items[item_idx:]
             if leftover:
                 dropped_priority_max = max(
@@ -731,6 +934,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # Per-domain insert cap — hard ceiling on how much of the run budget a
         # single outlet can claim, on top of the round-robin ordering.
         domain_cap = _PER_DOMAIN_CAPS.get(domain, _MAX_EVENTS_PER_DOMAIN)
+        # The cap counts inserts, and an in-flight item of this domain is an insert
+        # the counter cannot see yet. Settling is exact where adding a provisional
+        # +1 would not be: a fetch can still end in a reprint drop, which consumes
+        # no slot. Cheap because _interleave_by_domain makes a same-domain
+        # collision inside one window rare (domain_capped was 0 in the last run).
+        if any(pend["domain"] == domain for pend in pending_inserts):
+            settle_pending()
         if domain_inserts.get(domain, 0) >= domain_cap:
             stats["domain_capped"] += 1
             dropped_priority_max = max(dropped_priority_max, item.get("_priority", 0))
@@ -741,6 +951,16 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # duplicate IS the multi-source verification evidence).
         with _timed(timings, "content_dedup_cpu"):
             dup_idx = find_content_duplicate(recent_events, item.get("title", ""), canonical)
+            if dup_idx is None and _pending_matches(pending_inserts,
+                                                    item.get("title", ""), canonical):
+                # This candidate duplicates something still in flight. Its event id
+                # does not exist yet, and the fetch could still drop that item as a
+                # reprint, so guessing either way would be wrong — land the window
+                # and ask the real corpus.
+                stats["dedup_window_stalls"] += 1
+                settle_pending()
+                dup_idx = find_content_duplicate(recent_events,
+                                                 item.get("title", ""), canonical)
         if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
             # dup_idx counts back from the head, and this run prepended exactly
@@ -789,103 +1009,55 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # trip. Deliberately placed here, after every cheap filter has run, so
         # the per-run network cost is bounded by how many events we can actually
         # insert rather than by how many items the feeds returned.
-        if (_VERIFY_PUBLISH_DATE or _FETCH_FULL_TEXT) and \
-                stats["full_text_attempted"] < _ARTICLE_FETCH_MAX_PER_RUN:
-            stats["full_text_attempted"] += 1
-            with _timed(timings, "article_fetch"):
-                article = fetch_article(url)
+        #
+        # The fetch is submitted to a pool and the loop moves on; the insert is
+        # completed later by _settle_pending. Everything that could make an
+        # in-flight insert visible to a later decision drains the window first —
+        # see the note above _pending_matches.
+        # The deadline retires the fetch rather than serialising it. Past the bound
+        # the item inserts on what the feed gave us — the same, already-exercised
+        # path a run takes once _ARTICLE_FETCH_MAX_PER_RUN is spent. Falling back to
+        # sequential fetching instead would keep paying the cost the bound exists
+        # to stop.
+        wants_fetch = ((_VERIFY_PUBLISH_DATE or _FETCH_FULL_TEXT)
+                       and stats["full_text_attempted"] < _ARTICLE_FETCH_MAX_PER_RUN
+                       and time.monotonic() < fetch_deadline)
+        # An item whose canonical_text will grow by its article body cannot go in the
+        # window: its corpus entry would be missing the very text a later candidate
+        # might match on, and unlike the ordering questions that is not something
+        # draining later can repair.
+        body_will_grow = (_FETCH_FULL_TEXT
+                          and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY)
 
-            # Prefer the publisher's URL: it is what a reader should be handed in
-            # a report, and it makes source_url_hash stable — the same story
-            # reached through two Google News queries carries two different
-            # opaque handles and used to survive as two events.
-            if article["url"] and article["url"] != url:
-                stats["urls_resolved"] += 1
-                url = article["url"]
-                url_hash = compute_url_hash(url)
-
-            page_dt = article["published_at"] if _VERIFY_PUBLISH_DATE else None
-            # A page dated in the future is a broken CMS, not evidence — ignore
-            # it rather than letting it override a sane feed date.
-            if page_dt and page_dt <= now_utc + timedelta(days=_MAX_EVENT_FUTURE_DAYS):
-                age_days = (now_utc - page_dt).total_seconds() / 86400
-                if age_days > _MAX_ARTICLE_AGE_DAYS:
-                    stats["republished_filtered"] += 1
-                    logger.info(
-                        "Reprint dropped: page says %s, feed claimed %s — %s | %s",
-                        page_dt.date(), pub_dt.date() if pub_dt else "?",
-                        domain, item.get("title", "")[:70],
-                    )
-                    continue
-                stats["publish_dates_verified"] += 1
-                pub_dt = page_dt
-            elif from_aggregator:
-                # Publisher blocked the fetch and left no date in the path, so
-                # this row keeps Google's crawl stamp. Counted, not dropped:
-                # dropping every unverifiable aggregator item would cost far more
-                # real coverage than the reprints it would catch. This number is
-                # the size of the remaining exposure — watch it.
-                stats["unverified_aggregator_inserts"] += 1
-                if article["fetch_ok"]:
-                    # We DID read the page and it named no date — the one case where
-                    # Google's stamp stands alone and the freshness gates must not
-                    # treat it as evidence.
-                    date_verified = False
-                else:
-                    # Never read it. Split out from the exposure count above because
-                    # the two need different fixes: a dateless publisher is permanent,
-                    # a failed fetch is a retry away, and only the rate of the second
-                    # tells us whether the fetch layer is degrading.
-                    stats["article_fetch_failed"] += 1
-
-            full_text = article["text"]
-            if full_text:
-                stats["full_text_fetched"] += 1
-                # canonical_text is what Pass C shows the classifier (truncated to
-                # BATCH_TEXT_CHARS), so the body lands in front of the LLM — an RSS
-                # description alone stops at the headline and never says which route
-                # or until when. Still priority-gated: every insert now fetches an
-                # article, and attaching every body would inflate Pass C's token
-                # bill well past what the LLM quotas allow.
-                if (_FETCH_FULL_TEXT
-                        and item.get("_priority", 0) >= _FULL_TEXT_MIN_PRIORITY):
-                    canonical = canonicalize_text(f"{canonical} {full_text}")
-
-        # Idempotent insert — NOT EXISTS guard, wrapped in savepoint
-        try:
-            with _timed(timings, "insert_db"), db_conn.transaction():
-                result = db_conn.execute(
-                    """INSERT INTO events (source_url, source_url_hash, source_domain,
-                                           source_title, raw_text, canonical_text, status,
-                                           published_at, date_verified)
-                       SELECT %s, %s, %s, %s, %s, %s, 'raw', %s, %s
-                       WHERE NOT EXISTS (
-                           SELECT 1 FROM events WHERE source_url_hash = %s
-                       )
-                       RETURNING id""",
-                    (url, url_hash, domain, item.get("title", ""),
-                     raw_text, canonical, pub_dt, date_verified, url_hash),
-                )
-                new_row = result.fetchone()
-                if new_row:
-                    inserted += 1
-                    stats["events_inserted"] += 1
-                    inserted_priorities.append(item.get("_priority", 0))
-                    domain_inserts[domain] = domain_inserts.get(domain, 0) + 1
-                    # Inline dedup: add to recent_events (and aligned meta) so later
-                    # items in this run are compared — and corroborated — against it
-                    # No anchor yet — Pass C classifies this event later in the run.
-                    recent_events.insert(0, (item.get("title", ""), canonical, ""))
-                    recent_meta.insert(0, (new_row[0], domain))
-                    if len(recent_events) > 2500:
-                        recent_events.pop()
-                        recent_meta.pop()
-                else:
-                    stats["duplicates_skipped"] += 1
-        except Exception:
-            logger.exception("Insert error for URL: %s", url[:80])
+        if not wants_fetch or body_will_grow:
+            # Sequential path. Draining first keeps corpus order identical to the
+            # loop this replaced.
+            settle_pending()
+            article = None
+            if wants_fetch:
+                stats["full_text_attempted"] += 1
+                with _timed(timings, "article_fetch"):
+                    article = fetch_article(url)
+            _finalize_item(item, article, url, url_hash, domain, canonical,
+                           raw_text, pub_dt, from_aggregator, date_verified)
             continue
 
+        stats["full_text_attempted"] += 1
+        pending_inserts.append({
+            "future": executor.submit(fetch_article, url),
+            "item": item, "url": url, "url_hash": url_hash, "domain": domain,
+            "canonical": canonical, "raw_text": raw_text, "pub_dt": pub_dt,
+            "from_aggregator": from_aggregator, "date_verified": date_verified,
+            "title": item.get("title", ""),
+        })
+        if len(pending_inserts) >= _ARTICLE_FETCH_WINDOW:
+            settle_pending()
+        continue
+
+
+    # Nothing may outlive the loop: the last window still holds real inserts.
+    settle_pending()
+    executor.shutdown(wait=True)
 
     with _timed(timings, "corroboration_db"):
         stats["corroborations_recorded"] = _flush_corroborations(
