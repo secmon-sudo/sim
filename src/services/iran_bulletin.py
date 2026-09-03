@@ -132,6 +132,11 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         f'an allied military), "{OTHER_SIDE}" (any other named actor), or '
         f'"{UNATTRIBUTED}" when the text names no actor at all.',
         "",
+        f'target: who or what was ON THE RECEIVING END, with the same four values. '
+        f'"{IRAN_SIDE}" when Iran or Iranian territory was hit, "{US_SIDE}" when US '
+        f'or coalition forces or their bases were hit, "{OTHER_SIDE}" for anyone '
+        f'else, "{UNATTRIBUTED}" when the text names no target.',
+        "",
         f'standing: "{STANDING_CONFIRMED}" when the headline reports the action as '
         f'having happened, "{STANDING_CLAIMED}" when one side claims/alleges/says it '
         f'without confirmation, "{STANDING_DENIED}" when the headline reports it as '
@@ -149,7 +154,11 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         '- In "A denies B\'s claim that it struck C", the actor is B — the party '
         'said to have acted — never A, the one issuing the denial. standing=denied.',
         "",
-        'Reply with JSON only: {"items":[{"n":1,"actor":"...","standing":"..."}]}',
+        '- The target is not the country the story is filed under. "Iran strikes '
+        'bases in Bahrain, Iraq and Jordan" is actor=iran, target=us_coalition.',
+        "",
+        'Reply with JSON only: '
+        '{"items":[{"n":1,"actor":"...","target":"...","standing":"..."}]}',
         "",
     ]
     for i, ev in enumerate(events, 1):
@@ -164,7 +173,8 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, str]]:
         raise ValueError("no JSON object in extraction reply")
     items = json.loads(content[start:end + 1]).get("items", [])
     out: List[Dict[str, str]] = [
-        {"actor": UNATTRIBUTED, "standing": STANDING_UNKNOWN} for _ in range(expected)
+        {"actor": UNATTRIBUTED, "target": UNATTRIBUTED, "standing": STANDING_UNKNOWN}
+        for _ in range(expected)
     ]
     valid_actors = {IRAN_SIDE, US_SIDE, OTHER_SIDE, UNATTRIBUTED}
     valid_standing = {STANDING_CONFIRMED, STANDING_CLAIMED,
@@ -177,12 +187,14 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, str]]:
         if not 0 <= idx < expected:
             continue
         actor = str(item.get("actor", "")).strip().lower()
+        target = str(item.get("target", "")).strip().lower()
         standing = str(item.get("standing", "")).strip().lower()
         # An unrecognised value is treated as absent rather than trusted. The
         # bulletin's sections are built from these, so a hallucinated label would
         # move a real strike into the wrong half of the war.
         out[idx] = {
             "actor": actor if actor in valid_actors else UNATTRIBUTED,
+            "target": target if target in valid_actors else UNATTRIBUTED,
             "standing": standing if standing in valid_standing else STANDING_UNKNOWN,
         }
     return out
@@ -207,9 +219,9 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
                 router=router,
                 prompt=_extraction_prompt(chunk),
                 system_prompt=_EXTRACTION_SYSTEM_PROMPT,
-                # ~40 tokens per item for {"n":N,"actor":"...","standing":"..."},
+                # ~50 tokens per item for {"n":N,"actor":"...","standing":"..."},
                 # plus headroom for a reasoning preamble the bulk slots may emit.
-                max_tokens=40 * len(chunk) + 512,
+                max_tokens=50 * len(chunk) + 512,
             )
             if db_conn is not None:
                 log_llm_telemetry(db_conn, result, router, success=True,
@@ -218,8 +230,8 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
         except Exception:
             logger.warning("Direction extraction failed for a batch of %d; those "
                            "events stay unattributed", len(chunk), exc_info=True)
-            parsed = [{"actor": UNATTRIBUTED, "standing": STANDING_UNKNOWN}
-                      for _ in chunk]
+            parsed = [{"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
+                       "standing": STANDING_UNKNOWN} for _ in chunk]
         for ev, fields in zip(chunk, parsed):
             ev.update(fields)
     return events
@@ -228,11 +240,20 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
 def assign_section(event: Dict[str, Any]) -> str:
     """Which of the bulletin's three sections this event belongs in.
 
-    country_iso says where it landed and the extracted actor says who acted, and
-    the pair is what the section headings mean. The two asymmetries are deliberate:
+    Direction is the pair (actor, target), both read from the headline. country_iso
+    is a FALLBACK and nothing more.
 
-      * a strike on Iranian soil BY Iran is not section 1 — internal security
-        incidents are not part of the war's exchange, so they fall to regional;
+    It used to be the primary signal, on the assumption that it records where an
+    event landed. Measured against the first real bulletin, that assumption is
+    false: Pass C files "Iran strikes bases in Bahrain, Iraq and Jordan" under IR,
+    because Iran is the dominant country in the text, not because Iran was hit. 29
+    of one window's 74 "regional" events were Iranian strikes on neighbours sitting
+    in the wrong section — 16% of the bulletin, all of it the section-2 material the
+    report exists to show.
+
+    Two asymmetries stay, for the same reasons as before:
+      * an exchange needs two different sides — Iran acting on Iran is an internal
+        security incident, not part of the war, and falls to regional;
       * an event whose actor could not be established never enters a directional
         section, because putting it there would assert the very thing that could
         not be read.
@@ -240,9 +261,22 @@ def assign_section(event: Dict[str, Any]) -> str:
     actor = event.get("actor", UNATTRIBUTED)
     if actor in (UNATTRIBUTED, OTHER_SIDE):
         return SECTION_REGIONAL
-    if event.get("country_iso") == "IR":
-        return SECTION_ON_IRAN if actor == US_SIDE else SECTION_REGIONAL
-    return SECTION_FROM_IRAN if actor == IRAN_SIDE else SECTION_REGIONAL
+
+    target = event.get("target", UNATTRIBUTED)
+    if target == UNATTRIBUTED:
+        # Nothing was named on the receiving end, so fall back to where the event
+        # was filed. This is the old rule, kept only for the case it was right for.
+        target = IRAN_SIDE if event.get("country_iso") == "IR" else OTHER_SIDE
+
+    if actor == target:
+        # One side acting on itself is not an exchange: air defence over its own
+        # territory, an internal incident, a domestic announcement.
+        return SECTION_REGIONAL
+    if actor == US_SIDE and target == IRAN_SIDE:
+        return SECTION_ON_IRAN
+    if actor == IRAN_SIDE:
+        return SECTION_FROM_IRAN
+    return SECTION_REGIONAL
 
 
 def group_into_sections(events: List[Dict[str, Any]]

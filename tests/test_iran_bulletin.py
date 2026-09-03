@@ -18,8 +18,11 @@ from src.services import iran_bulletin as ib
 
 
 class TestSectionAssignment:
-    def _ev(self, country, actor, standing=ib.STANDING_CONFIRMED):
-        return {"country_iso": country, "actor": actor, "standing": standing}
+    def _ev(self, country, actor, standing=ib.STANDING_CONFIRMED, target=None):
+        ev = {"country_iso": country, "actor": actor, "standing": standing}
+        if target is not None:
+            ev["target"] = target
+        return ev
 
     def test_us_strike_on_iranian_soil_is_section_one(self):
         assert ib.assign_section(self._ev("IR", ib.US_SIDE)) == ib.SECTION_ON_IRAN
@@ -78,8 +81,10 @@ class TestExtractionParsing:
             {"n": 1, "actor": "iran", "standing": "claimed"},
             {"n": 2, "actor": "us_coalition", "standing": "confirmed"}]})
         out = ib._parse_extraction(body, 2)
-        assert out[0] == {"actor": ib.IRAN_SIDE, "standing": ib.STANDING_CLAIMED}
-        assert out[1] == {"actor": ib.US_SIDE, "standing": ib.STANDING_CONFIRMED}
+        assert out[0]["actor"] == ib.IRAN_SIDE
+        assert out[0]["standing"] == ib.STANDING_CLAIMED
+        assert out[1]["actor"] == ib.US_SIDE
+        assert out[1]["standing"] == ib.STANDING_CONFIRMED
 
     def test_tolerates_prose_around_the_json(self):
         """Bulk slots emit a reasoning preamble; the JSON still has to be found."""
@@ -93,7 +98,8 @@ class TestExtractionParsing:
         body = json.dumps({"items": [{"n": 1, "actor": "russia_side",
                                       "standing": "probably"}]})
         out = ib._parse_extraction(body, 1)
-        assert out[0] == {"actor": ib.UNATTRIBUTED, "standing": ib.STANDING_UNKNOWN}
+        assert out[0] == {"actor": ib.UNATTRIBUTED, "target": ib.UNATTRIBUTED,
+                          "standing": ib.STANDING_UNKNOWN}
 
     def test_a_short_reply_leaves_the_rest_unattributed(self):
         body = json.dumps({"items": [{"n": 1, "actor": "iran",
@@ -319,3 +325,55 @@ class TestBuildBulletin:
         assert captured["json_mode"] is False
         assert out["status"] == "ok"
         assert out["narrative"].startswith("YÖNETİCİ ÖZETİ")
+
+
+class TestDirectionUsesTargetNotFiling:
+    """country_iso is a fallback, not the signal. Measured 3 Sep 2026.
+
+    The first real bulletin put 29 of one window's 74 "regional" events in the
+    wrong section — 16% of the report — because assign_section read country_iso as
+    "where it landed". Pass C files "Iran strikes bases in Bahrain, Iraq and
+    Jordan" under IR: Iran is the dominant country in the text, not the country
+    that was hit. Every one of those 29 was section-2 material, which is precisely
+    what the bulletin exists to show.
+    """
+
+    def test_the_headline_that_exposed_it(self):
+        """Iran striking neighbours, filed under IR."""
+        ev = {"country_iso": "IR", "actor": ib.IRAN_SIDE, "target": ib.US_SIDE,
+              "standing": ib.STANDING_CONFIRMED}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+    def test_a_us_strike_on_iran_is_still_section_one(self):
+        ev = {"country_iso": "IR", "actor": ib.US_SIDE, "target": ib.IRAN_SIDE}
+        assert ib.assign_section(ev) == ib.SECTION_ON_IRAN
+
+    def test_one_side_acting_on_itself_is_not_an_exchange(self):
+        """Air defence over its own territory, an internal incident."""
+        ev = {"country_iso": "IR", "actor": ib.IRAN_SIDE, "target": ib.IRAN_SIDE}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_target_beats_country_iso_when_they_disagree(self):
+        filed_in_iran = {"country_iso": "IR", "actor": ib.IRAN_SIDE,
+                         "target": ib.OTHER_SIDE}
+        assert ib.assign_section(filed_in_iran) == ib.SECTION_FROM_IRAN
+
+    def test_a_missing_target_falls_back_to_the_filing(self):
+        """The old rule survives for exactly the case it was right for."""
+        assert ib.assign_section(
+            {"country_iso": "IR", "actor": ib.US_SIDE}) == ib.SECTION_ON_IRAN
+        assert ib.assign_section(
+            {"country_iso": "JO", "actor": ib.IRAN_SIDE}) == ib.SECTION_FROM_IRAN
+
+    def test_an_unreadable_actor_still_never_gets_a_direction(self):
+        for target in (ib.IRAN_SIDE, ib.US_SIDE, ib.OTHER_SIDE):
+            ev = {"country_iso": "IR", "actor": ib.UNATTRIBUTED, "target": target}
+            assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_a_third_party_exchange_is_regional(self):
+        ev = {"country_iso": "LB", "actor": ib.OTHER_SIDE, "target": ib.US_SIDE}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_a_us_strike_on_a_third_country_is_not_section_one(self):
+        ev = {"country_iso": "IQ", "actor": ib.US_SIDE, "target": ib.OTHER_SIDE}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL

@@ -352,32 +352,32 @@ BULLETIN_SAMPLE = [
     # The first version of this row said confirmed, contradicting the prompt's own
     # wording, and all four probed models correctly disagreed with it.
     ("Iran fires drones and missiles in response to US strikes, Iranian "
-     "semi-official media says", "iran", "claimed"),
+     "semi-official media says", "iran", "us_coalition", "claimed"),
     # Both actors named, US is the subject.
     ("US launches strikes on Iran's IRGC targets after attacks on commercial "
-     "vessels in Strait of Hormuz", "us_coalition", "confirmed"),
+     "vessels in Strait of Hormuz", "us_coalition", "iran", "confirmed"),
     # One-sided assertion. Direction is real, standing is not.
     ("IRGC claims elimination of US personnel in Jordan base strike",
-     "iran", "claimed"),
+     "iran", "us_coalition", "claimed"),
     # Asserted AND negated. Any regex reads this as an Iranian strike.
     ("Military denies Iran's claims that it struck a US base in Jordan as "
-     "strikes resume", "iran", "denied"),
+     "strikes resume", "iran", "us_coalition", "denied"),
     # No actor at all. Guessing one here is the worst outcome available. The two
     # axes are independent and this row is where that shows: the strike plainly
     # happened (confirmed), it is only the attribution that is missing.
     ("Liberian-flagged tanker hit by three unidentified projectiles near Strait "
-     "of Hormuz", "unattributed", "confirmed"),
+     "of Hormuz", "unattributed", "other", "confirmed"),
     # A threat is not an action, even though it names an actor and a verb.
     ("Trump threatens more strikes as death toll in Iran rises to 18",
-     "us_coalition", "unknown"),
+     "us_coalition", "iran", "unknown"),
     # Casualty report: the ACTOR is whoever struck, while "Iran says" only names
     # the source — and a belligerent sourcing a casualty count is claimed, not
     # confirmed. Both halves of this row were wrong in the first version.
     ("Iran says 18 killed, 142 injured in US strikes since Sunday",
-     "us_coalition", "claimed"),
+     "us_coalition", "iran", "claimed"),
     # Multi-target Iranian salvo.
     ("Iranian Drone and Missile Attacks Target Kuwait, Jordan, Bahrain and Iraq",
-     "iran", "confirmed"),
+     "iran", "us_coalition", "confirmed"),
 ]
 
 
@@ -387,23 +387,34 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
     Actor is graded harder than standing: a wrong actor files a strike in the wrong
     half of the war, while a wrong standing only mislabels its provenance.
     """
-    actor_hits = standing_hits = 0
+    actor_hits = target_hits = standing_hits = 0
     misses = []
-    for i, (headline, want_actor, want_standing) in enumerate(BULLETIN_SAMPLE):
+    for i, row in enumerate(BULLETIN_SAMPLE):
+        headline, want_actor, want_target, want_standing = row
         got = items[i] if i < len(items) else {}
         got_actor = str(got.get("actor", "")).lower()
+        got_target = str(got.get("target", "")).lower()
         got_standing = str(got.get("standing", "")).lower()
         if got_actor == want_actor:
             actor_hits += 1
         else:
             misses.append(f"#{i + 1} actor {got_actor or '-'}!={want_actor}")
+        # Target is graded as hard as actor: the two together ARE the direction,
+        # and reading either one wrong files a strike in the wrong half of the war.
+        # This axis exists because country_iso could not supply it — it filed
+        # "Iran strikes bases in Bahrain, Iraq and Jordan" under Iran.
+        if got_target == want_target:
+            target_hits += 1
+        else:
+            misses.append(f"#{i + 1} target {got_target or '-'}!={want_target}")
         if got_standing == want_standing:
             standing_hits += 1
         elif got_actor == want_actor:
             misses.append(f"#{i + 1} standing {got_standing or '-'}!={want_standing}")
     n = len(BULLETIN_SAMPLE)
-    ok = actor_hits == n and standing_hits >= n - 1
-    note = f"actor {actor_hits}/{n}, standing {standing_hits}/{n}"
+    ok = actor_hits == n and target_hits == n and standing_hits >= n - 1
+    note = (f"actor {actor_hits}/{n}, target {target_hits}/{n}, "
+            f"standing {standing_hits}/{n}")
     if misses:
         note += " — " + "; ".join(misses[:4])
     return ok, note
@@ -470,12 +481,12 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         elif bulletin:
             # The REAL extraction prompt from the bulletin module, so a change to
             # the prompt is testable without re-deriving it here.
-            events = [{"title": h} for h, _, _ in BULLETIN_SAMPLE]
+            events = [{"title": row[0]} for row in BULLETIN_SAMPLE]
             result = call_llm(
                 router,
                 prompt=iran_bulletin._extraction_prompt(events),
                 system_prompt=iran_bulletin._EXTRACTION_SYSTEM_PROMPT,
-                max_tokens=40 * len(events) + 512,
+                max_tokens=50 * len(events) + 512,
                 json_mode=True,
             )
         else:
@@ -504,10 +515,10 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         print(f"  latency={result.get('latency_ms')}ms  "
               f"verdict={'PASS' if ok else 'FAIL'} ({note})")
         print("  --- direction as extracted ---")
-        for i, (headline, _, _) in enumerate(BULLETIN_SAMPLE):
+        for i, row in enumerate(BULLETIN_SAMPLE):
             got = items[i] if i < len(items) else {}
-            print(f"    {got.get('actor', '-'):<13} {got.get('standing', '-'):<10} "
-                  f"{headline[:70]}")
+            print(f"    {got.get('actor', '-'):<13} → {got.get('target', '-'):<13} "
+                  f"{got.get('standing', '-'):<10} {row[0][:56]}")
         if not ok:
             print("  --- raw content ---")
             print(str(content)[:2000])
