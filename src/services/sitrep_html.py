@@ -206,12 +206,21 @@ def _section_header(title: str, icon: str = "") -> str:
 
 
 def _stat_card(value: str, caption: str, color: str) -> str:
+    """One statistic. The caption has to survive being a single long word.
+
+    "Doğrulanmamış" is thirteen characters, uppercased, letter-spaced, inside a
+    64px box with no way to break: it rendered straight out of its card on a
+    phone. min-width carries the longest caption in use, and overflow-wrap lets
+    anything longer break rather than escape.
+    """
     return (
-        f'<div style="flex:1;min-width:64px;background:#0f1729;border:1px solid #1e293b;'
-        f'border-radius:10px;padding:10px 8px;text-align:center">'
+        f'<div style="flex:1 1 84px;min-width:84px;background:#0f1729;'
+        f'border:1px solid #1e293b;border-radius:10px;padding:10px 6px;'
+        f'text-align:center;overflow:hidden">'
         f'<div style="font-size:22px;font-weight:700;color:{color}">{_esc(value)}</div>'
-        f'<div style="font-size:10px;letter-spacing:.5px;color:#8b9cb8;'
-        f'text-transform:uppercase;margin-top:2px">{_esc(caption)}</div></div>'
+        f'<div style="font-size:9.5px;letter-spacing:.2px;color:#8b9cb8;'
+        f'text-transform:uppercase;margin-top:2px;line-height:1.25;'
+        f'overflow-wrap:anywhere;hyphens:auto">{_esc(caption)}</div></div>'
     )
 
 
@@ -260,8 +269,8 @@ def _highlights(clusters: List[Dict[str, Any]], top_n: int = 3) -> str:
             f'{_esc(_event_type_label(c.get("event_type") or ""))}</span></div>'
             f'<div style="font-size:11px;color:#5b6b8a;margin:2px 0 6px">'
             f'{_esc(str(c.get("date") or ""))}</div>'
-            f'<div>{_severity_meter(c.get("severity") or 0)}'
-            f'<span style="margin-left:10px">{badge}</span></div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'
+            f'{_severity_meter(c.get("severity") or 0)}{badge}</div>'
             f"</div></div>"
         )
     return (
@@ -280,7 +289,7 @@ def _appendix_row(cluster: Dict[str, Any]) -> str:
     ]
     chips = f'<div style="margin-top:4px">{_source_chips(sources)}</div>' if sources else ""
     label = cluster.get("verification")
-    badge = f'<span style="margin-left:6px">{_badge(label)}</span>' if label else ""
+    badge = _badge(label) if label else ""
     snippet = (cluster.get("snippet") or "")[:220]
     meta = " · ".join(
         str(v) for v in (cluster.get("date"),
@@ -290,8 +299,10 @@ def _appendix_row(cluster: Dict[str, Any]) -> str:
     meter = f'<div style="margin-top:4px">{_severity_meter(sev)}</div>' if sev else ""
     return (
         f'<div style="border-bottom:1px solid #1e293b;padding:10px 2px">'
-        f'<div style="font-size:13px;line-height:1.5">'
-        f'<span style="font-weight:600;color:#e2e8f0">{_esc(cluster.get("location") or "—")}</span>'
+        f'<div style="font-size:13px;line-height:1.5;display:flex;'
+        f'flex-wrap:wrap;gap:6px;align-items:center">'
+        f'<span style="font-weight:600;color:#e2e8f0;overflow-wrap:anywhere">'
+        f'{_esc(cluster.get("location") or "—")}</span>'
         f'{badge}</div>'
         f'<div style="font-size:11px;color:#5b6b8a;margin-top:2px">{_esc(meta)}</div>'
         f'<div style="margin-top:4px;font-size:12px;color:#8b9cb8;line-height:1.5">{_esc(snippet)}</div>'
@@ -563,12 +574,13 @@ def render_sitrep_html(country_name: str, country_iso: str,
             exec_paragraphs.append(line)
         elif saw_section and len(line) <= 60 and not line.endswith((".", ":", "!", "?")):
             body_parts.append(
-                f'<h3 style="margin:18px 0 2px;font-size:14px;color:#7db3ff">'
-                f'📍 {_esc(line)}</h3>'
+                f'<h3 style="margin:18px 0 2px;font-size:14px;color:#7db3ff;'
+                f'overflow-wrap:anywhere">📍 {_esc(line)}</h3>'
             )
         else:
             body_parts.append(
-                f'<p style="margin:10px 0;line-height:1.65;color:#cbd5e1">'
+                f'<p style="margin:10px 0;line-height:1.65;color:#cbd5e1;'
+                f'overflow-wrap:anywhere">'
                 f"{_linkify(_esc(line))}</p>"
             )
     _flush_exec()
@@ -580,7 +592,7 @@ def render_sitrep_html(country_name: str, country_iso: str,
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(report_title.title())} — {_esc(country_name)} — {_esc(window_end[:10])}</title>
 </head>
-<body style="margin:0;background:#0a0f1c;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px">
+<body style="margin:0;background:#0a0f1c;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;overflow-x:hidden">
 <div style="max-width:720px;margin:0 auto;padding:0 16px 40px">
 
 <div style="background:linear-gradient(135deg,#0c1a3a 0%,#12275c 100%);border:1px solid #1e3a6e;border-radius:0 0 16px 16px;padding:22px 18px 18px;margin:0 -4px">
