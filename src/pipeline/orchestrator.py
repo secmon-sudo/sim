@@ -441,6 +441,28 @@ if __name__ == "__main__":
                     pass
                 close_pool()
         sys.exit(0 if success else 1)
+    elif "--iran-bulletin" in sys.argv:
+        # Directional bulletin for the Iran theatre, alongside the daily SITREP.
+        # Its own router (build_bulletin_router) rather than the quality cascade:
+        # the extraction slots are measured for this task, and the quality slots
+        # are saturated by five country SITREPs at the same hour.
+        logger.info("Iran theatre bulletin triggered via CLI.")
+        db_conn = None
+        success = False
+        try:
+            db_conn = get_connection()
+            from src.pipeline.iran_bulletin_run import run_iran_bulletin
+            success = run_iran_bulletin(db_conn).get("success", False)
+        except Exception:
+            logger.exception("CLI Iran bulletin run failed")
+        finally:
+            if db_conn:
+                try:
+                    put_connection(db_conn)
+                except Exception:
+                    pass
+                close_pool()
+        sys.exit(0 if success else 1)
     else:
         result = run_pipeline()
         sys.exit(0 if result.get("success") else 1)

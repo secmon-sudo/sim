@@ -1,0 +1,92 @@
+name: Iran Theatre Bulletin
+
+# Directional bulletin for the Iran theatre: strikes ON Iran, strikes FROM Iran,
+# regional moves. Runs beside the daily SITREP rather than inside it, because the
+# two answer different questions — the SITREP is per country, this one is per
+# direction — and because a bulletin that fails must not take a SITREP with it.
+#
+# A separate REPOSITORY was considered and rejected: the bulletin reads SIM's
+# database and reasons with SIM's router, narration rules and label vocabulary, so
+# a second repo would fork all of it. This file buys the isolation that was
+# actually wanted — own cadence, own failure, own deletion when the war ends.
+#
+# Deliberately dispatched a few minutes AFTER the SITREP rather than with it: the
+# quality slots are saturated by five country SITREPs at 07:30 (measured 3 Sep
+# 2026 — Mistral 429'd on the fifth country and Iraq fell to the last rung).
+# This job uses the measured bulletin router, not the quality cascade, but there is
+# no reason to make them contend for the same minute.
+on:
+  workflow_dispatch:       # cron-job.org (günlük 08:00 UTC) veya GitHub UI'dan el ile
+
+concurrency:
+  group: iran-bulletin
+  cancel-in-progress: false
+
+env:
+  GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
+  GROQ_API_KEY_B:       ${{ secrets.GROQ_API_KEY_B }}
+  OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
+  OPENROUTER_API_KEY_B: ${{ secrets.OPENROUTER_API_KEY_B }}
+  GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+  GEMINI_API_KEY_2:     ${{ secrets.GEMINI_API_KEY_2 }}
+  GEMINI_API_KEY_3:     ${{ secrets.GEMINI_API_KEY_3 }}
+  # The two GEMINI keys above are still live — the main LLM router uses Gemini
+  # slots. What is gone is Search grounding: Google retired the last free-tier
+  # model that supported it (gemini-2.5-flash-lite, 2026-07-09), and the
+  # enrichment pass that depended on it was removed on 2026-08-01 along with its
+  # SITREP_GEMINI_MODEL* vars. Restoring web enrichment means picking a new
+  # search provider, not re-adding these.
+  MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
+  LLM7_KEY:             ${{ secrets.LLM7_KEY }}
+  POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+  DATABASE_URL:         ${{ secrets.DATABASE_URL }}
+  TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
+  R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+  R2_PUBLIC_URL_BASE:   ${{ secrets.R2_PUBLIC_URL_BASE }}
+
+jobs:
+  bulletin_run:
+    runs-on: ubuntu-latest
+    # One extraction pass (~12 batched calls) plus one narrative. The SITREP needs
+    # 35 minutes for five countries; this is a single report, so the budget is the
+    # slowest measured extraction slot times the batch count plus narrative room.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run DB migrations
+        run: |
+          python -c "
+          import os, glob, psycopg
+          db_url = os.environ['DATABASE_URL']
+          conn = psycopg.connect(db_url, autocommit=True)
+          for sql_file in sorted(glob.glob('db/migrations/*.sql')):
+              print(f'Running {sql_file}...')
+              with open(sql_file) as f:
+                  try:
+                      conn.execute(f.read())
+                      print(f'  OK')
+                  except Exception as e:
+                      print(f'  SKIP ({e})')
+          conn.close()
+          print('Migrations complete')
+          "
+
+      - name: Run Iran theatre bulletin
+        run: python -m src.pipeline.orchestrator --iran-bulletin

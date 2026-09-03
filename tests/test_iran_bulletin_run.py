@@ -1,0 +1,163 @@
+"""Iran bulletin run: dispatch, persistence, and what happens when they fail.
+
+The report is dispatched before it is stored, so the tests that matter are the
+ones about partial failure: a Telegram outage must not lose the record, and a
+storage failure must not lose a report already in someone's hands.
+"""
+
+import pathlib
+
+import pytest
+
+from src.pipeline import iran_bulletin_run as run
+from src.services import iran_bulletin as ib
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+class _Conn:
+    def __init__(self, fail_on_insert=False):
+        self.inserted = []
+        self._fail = fail_on_insert
+
+    def transaction(self):
+        conn = self
+
+        class _Tx:
+            def __enter__(self_inner):
+                return conn
+
+            def __exit__(self_inner, *exc):
+                return False
+
+        return _Tx()
+
+    def execute(self, sql, params=None):
+        if self._fail:
+            raise RuntimeError("db down")
+        self.inserted.append((sql, params))
+        return self
+
+
+def _result(n_on=1, n_from=1, n_reg=0):
+    def _ev(country, actor, i):
+        return {"title": f"headline {i}", "country_iso": country, "actor": actor,
+                "standing": ib.STANDING_CONFIRMED, "severity": 90 - i,
+                "domain": f"outlet{i}.com", "url": f"https://outlet{i}.com/{i}",
+                "corroborating_sources": [{}] if i % 2 else []}
+
+    events = ([_ev("IR", ib.US_SIDE, i) for i in range(n_on)]
+              + [_ev("JO", ib.IRAN_SIDE, 10 + i) for i in range(n_from)]
+              + [_ev("OM", ib.UNATTRIBUTED, 20 + i) for i in range(n_reg)])
+    return {"events": events, "sections": ib.group_into_sections(events),
+            "narrative": "YÖNETİCİ ÖZETİ\nDurum böyle.", "status": "ok",
+            "model": "qwen/qwen3.8-27b"}
+
+
+@pytest.fixture
+def _quiet(monkeypatch):
+    monkeypatch.setattr(run, "upload_report_to_r2", lambda *a, **k: "https://r2/x")
+    monkeypatch.setattr(run, "send_sitrep_telegram", lambda **k: "msg-1")
+    monkeypatch.setattr(run, "build_bulletin_router", lambda: object())
+
+
+class TestRun:
+    def test_an_empty_window_dispatches_nothing(self, monkeypatch, _quiet):
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: {
+            "status": "empty", "events": [], "sections": ib.group_into_sections([]),
+            "narrative": ""})
+
+        def _must_not_send(**k):
+            raise AssertionError("an empty window must not page anyone")
+
+        monkeypatch.setattr(run, "send_sitrep_telegram", _must_not_send)
+        conn = _Conn()
+        out = run.run_iran_bulletin(conn)
+        assert out == {"success": True, "status": "empty", "events": 0}
+        assert conn.inserted, "an empty run is still a run and must be recorded"
+
+    def test_a_completed_run_reports_its_section_split(self, monkeypatch, _quiet):
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result(2, 3, 1))
+        out = run.run_iran_bulletin(_Conn())
+        assert out["events"] == 6
+        assert out["sections"][ib.SECTION_TITLES[ib.SECTION_ON_IRAN]] == 2
+        assert out["sections"][ib.SECTION_TITLES[ib.SECTION_FROM_IRAN]] == 3
+        assert out["sections"][ib.SECTION_TITLES[ib.SECTION_REGIONAL]] == 1
+
+    def test_a_telegram_outage_does_not_fail_the_run(self, monkeypatch, _quiet):
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+
+        def _boom(**k):
+            raise RuntimeError("telegram down")
+
+        monkeypatch.setattr(run, "send_sitrep_telegram", _boom)
+        conn = _Conn()
+        out = run.run_iran_bulletin(conn)
+        assert out["success"] is True
+        assert conn.inserted, "the report still has to be stored"
+
+    def test_an_r2_outage_still_dispatches(self, monkeypatch, _quiet):
+        sent = {}
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+
+        def _boom(*a, **k):
+            raise RuntimeError("r2 down")
+
+        monkeypatch.setattr(run, "upload_report_to_r2", _boom)
+        monkeypatch.setattr(run, "send_sitrep_telegram",
+                            lambda **k: sent.update(k) or "msg-1")
+        out = run.run_iran_bulletin(_Conn())
+        assert out["success"] is True
+        assert sent["r2_url"] is None
+        assert sent["html_doc"], "the document is the report; it must still go"
+
+    def test_a_storage_outage_does_not_lose_a_dispatched_report(
+            self, monkeypatch, _quiet):
+        """_save swallows: the report is already in someone's hands."""
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        out = run.run_iran_bulletin(_Conn(fail_on_insert=True))
+        assert out["success"] is True
+
+    def test_extraction_failure_is_recorded_not_raised(self, monkeypatch, _quiet):
+        def _boom(*a):
+            raise RuntimeError("all measured slots exhausted")
+
+        monkeypatch.setattr(run, "build_bulletin", _boom)
+        conn = _Conn()
+        out = run.run_iran_bulletin(conn)
+        assert out["success"] is False
+        assert conn.inserted
+
+
+class TestRenderAdapter:
+    def test_corroborated_events_carry_the_multi_source_label(self):
+        from src.core.sitrep_verify import LABEL_MULTI, LABEL_SINGLE
+        clusters = run._clusters_for_render(_result(2, 2, 0))
+        labels = {c["verification"] for c in clusters}
+        assert labels <= {LABEL_MULTI, LABEL_SINGLE}
+        assert len(clusters) == 4
+
+    def test_every_section_reaches_the_renderer(self):
+        clusters = run._clusters_for_render(_result(1, 1, 1))
+        assert len(clusters) == 3
+
+
+class TestWiring:
+    def test_the_workflow_invokes_the_orchestrator_flag(self):
+        wf = (REPO / ".github/workflows/iran-bulletin.yml").read_text()
+        assert "--iran-bulletin" in wf
+
+    def test_the_orchestrator_knows_the_flag(self):
+        src = (REPO / "src/pipeline/orchestrator.py").read_text()
+        assert '"--iran-bulletin" in sys.argv' in src
+
+    def test_the_migration_creates_the_table(self):
+        sql = (REPO / "db/migrations/023_iran_bulletins.sql").read_text()
+        assert "CREATE TABLE IF NOT EXISTS iran_bulletins" in sql
+
+    def test_the_bulletin_is_not_filed_under_the_sitrep_table(self):
+        """Every SITREP consumer keys off country_iso; a bulletin has no single
+        country, and a synthetic ISO would put it inside those queries."""
+        src = (REPO / "src/pipeline/iran_bulletin_run.py").read_text()
+        assert "INSERT INTO iran_bulletins" in src
+        assert "INSERT INTO sitreps" not in src
