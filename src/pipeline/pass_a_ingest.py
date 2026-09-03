@@ -475,6 +475,17 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # nothing about the publisher — this counter is how the failure rate stays
         # visible instead of hiding inside the exposure number.
         "article_fetch_failed": 0,
+        # Sizing telemetry for parallelising article_fetch. In-run inserts are
+        # PREPENDED to recent_events (see the insert branch), so they are compared
+        # first and win the match. Any design that defers an insert while its fetch
+        # is in flight hides those entries from the next K candidates, which would
+        # silently change dedup and corroboration outcomes. These counters say how
+        # wide that exposure actually is: how many duplicate hits matched an event
+        # this run inserted, and how recent that event was.
+        "content_dup_matched_in_run": 0,
+        "content_dup_in_run_within_4": 0,
+        "content_dup_in_run_within_8": 0,
+        "content_dup_in_run_within_16": 0,
     }
     now_utc = datetime.now(timezone.utc)
     timings: dict[str, float] = {}
@@ -671,6 +682,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             dup_idx = find_content_duplicate(recent_events, item.get("title", ""), canonical)
         if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
+            # dup_idx counts back from the head, and this run prepended exactly
+            # `inserted` entries, so dup_idx < inserted means the match was made
+            # against an event inserted earlier in THIS run — and dup_idx is then
+            # how many inserts have happened since that one.
+            if dup_idx < inserted:
+                stats["content_dup_matched_in_run"] += 1
+                for window in (4, 8, 16):
+                    if dup_idx < window:
+                        stats[f"content_dup_in_run_within_{window}"] += 1
             dup_event_id, dup_event_domain = recent_meta[dup_idx]
             # CPU-only here; the write is deferred to one pipelined flush after the
             # loop (see _flush_corroborations). The refusals still run per item, so

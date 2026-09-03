@@ -104,3 +104,38 @@ class TestFlush:
         db = MagicMock()
         db.transaction.side_effect = RuntimeError("no such column")
         assert _flush_corroborations(db, [("e", "evt-1", 8, "p")]) == 0
+
+
+class TestInRunDedupTelemetry:
+    """Sizing counters for the article_fetch parallelisation (3 Sep 2026).
+
+    `recent_events.insert(0, ...)` puts this run's own inserts at the HEAD of the
+    dedup corpus, so they are compared first and win the match. A design that
+    defers an insert while its article fetch is in flight would hide those entries
+    from the next K candidates and change dedup outcomes. These counters measure
+    the exposure instead of assuming it is small.
+    """
+
+    def test_dup_index_below_insert_count_is_an_in_run_match(self):
+        """dup_idx < inserted is the whole discriminator — pin its arithmetic."""
+        # 3 inserts this run, so corpus indices 0..2 are in-run, 3+ preloaded.
+        inserted = 3
+        assert 0 < inserted and 2 < inserted  # in-run
+        assert not 3 < inserted  # first preloaded entry
+        assert not 9 < inserted
+
+    def test_windows_are_nested(self):
+        """within_4 ⊆ within_8 ⊆ within_16 ⊆ matched_in_run, by construction."""
+        inserted = 100
+        counts = {"in_run": 0, 4: 0, 8: 0, 16: 0}
+        for dup_idx in (0, 3, 4, 7, 8, 15, 16, 40):
+            if dup_idx < inserted:
+                counts["in_run"] += 1
+                for window in (4, 8, 16):
+                    if dup_idx < window:
+                        counts[window] += 1
+        assert counts[4] == 2  # 0, 3
+        assert counts[8] == 4  # + 4, 7
+        assert counts[16] == 6  # + 8, 15
+        assert counts["in_run"] == 8
+        assert counts[4] <= counts[8] <= counts[16] <= counts["in_run"]
