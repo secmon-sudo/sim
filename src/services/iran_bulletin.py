@@ -130,7 +130,10 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         "Rules that matter more than fluency:",
         '- The actor is the SUBJECT of the action, not whoever is mentioned first. '
         '"Iran fires missiles in response to US strikes" is actor=iran.',
-        '- A threat, a vow or a warning is not an action. Use standing=unknown.',
+        '- A threat, a vow or a warning is not an action: standing=unknown, and the '
+        'actor is the party making the threat.',
+        '- "X says N killed in Y strikes" reports Y as the actor. Naming who SAID it '
+        'sets the standing, never the actor.',
         '- Never guess an actor from context. If the headline says a tanker was '
         '"struck by unidentified projectiles", the actor is unattributed.',
         "",

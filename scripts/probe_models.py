@@ -347,8 +347,12 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
 # clean "X strikes Y" copy tells us nothing; these are the shapes that decide it.
 BULLETIN_SAMPLE = [
     # Both actors named, Iran is the SUBJECT — the first-mentioned-wins failure.
+    # standing=claimed, not confirmed: the headline attributes the whole account to
+    # "Iranian semi-official media", which is the definition of a one-sided claim.
+    # The first version of this row said confirmed, contradicting the prompt's own
+    # wording, and all four probed models correctly disagreed with it.
     ("Iran fires drones and missiles in response to US strikes, Iranian "
-     "semi-official media says", "iran", "confirmed"),
+     "semi-official media says", "iran", "claimed"),
     # Both actors named, US is the subject.
     ("US launches strikes on Iran's IRGC targets after attacks on commercial "
      "vessels in Strait of Hormuz", "us_coalition", "confirmed"),
@@ -358,15 +362,19 @@ BULLETIN_SAMPLE = [
     # Asserted AND negated. Any regex reads this as an Iranian strike.
     ("Military denies Iran's claims that it struck a US base in Jordan as "
      "strikes resume", "iran", "denied"),
-    # No actor at all. Guessing one here is the worst outcome available.
+    # No actor at all. Guessing one here is the worst outcome available. The two
+    # axes are independent and this row is where that shows: the strike plainly
+    # happened (confirmed), it is only the attribution that is missing.
     ("Liberian-flagged tanker hit by three unidentified projectiles near Strait "
-     "of Hormuz", "unattributed", "unknown"),
+     "of Hormuz", "unattributed", "confirmed"),
     # A threat is not an action, even though it names an actor and a verb.
     ("Trump threatens more strikes as death toll in Iran rises to 18",
      "us_coalition", "unknown"),
-    # Casualty report about a strike, actor named only as the attributor's subject.
+    # Casualty report: the ACTOR is whoever struck, while "Iran says" only names
+    # the source — and a belligerent sourcing a casualty count is claimed, not
+    # confirmed. Both halves of this row were wrong in the first version.
     ("Iran says 18 killed, 142 injured in US strikes since Sunday",
-     "us_coalition", "confirmed"),
+     "us_coalition", "claimed"),
     # Multi-target Iranian salvo.
     ("Iranian Drone and Missile Attacks Target Kuwait, Jordan, Bahrain and Iraq",
      "iran", "confirmed"),
