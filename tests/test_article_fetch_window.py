@@ -246,3 +246,43 @@ class TestPendingMatch:
 
     def test_empty_window_matches_nothing(self):
         assert not pa._pending_matches([], "anything at all", "anything at all")
+
+
+class TestDrainAttribution:
+    """Why the window was drained, counted per reason.
+
+    The first parallel production run (33736464695) cut article_fetch from 145.5s
+    to 88.1s but recorded ZERO stalls against 21 in-run duplicate matches — so the
+    window was usually empty when those arrived. It is draining more often than
+    correctness requires, and the remaining time sits behind whichever reason
+    dominates. Guessing which would repeat the mistake this whole change avoided.
+    """
+
+    def _drains(self, stats):
+        return {k: v for k, v in stats.items() if k.startswith("window_drain_")}
+
+    def test_all_four_reasons_are_counted_separately(self, monkeypatch):
+        items = _items()
+        _, stats = _run(monkeypatch, 8, items)
+        assert set(self._drains(stats)) == {
+            "window_drain_full", "window_drain_same_domain",
+            "window_drain_body_grows", "window_drain_no_fetch",
+            "window_drain_stall",
+        }
+
+    def test_a_closed_window_never_reports_a_full_drain(self, monkeypatch):
+        """With a window of 1 every item settles immediately, so 'full' is the
+        only reason that cannot be the interesting one."""
+        _, stats = _run(monkeypatch, 1, _items())
+        assert stats["window_drain_stall"] == 0
+
+    def test_the_stall_drain_tracks_the_stall_counter(self, monkeypatch):
+        """Two names for one event; if they ever disagree the attribution is
+        reading a different code path than the correctness counter."""
+        for window in (1, 8):
+            _, stats = _run(monkeypatch, window, _items())
+            assert stats["window_drain_stall"] == stats["dedup_window_stalls"]
+
+    def test_an_open_window_drains_for_at_least_one_reason(self, monkeypatch):
+        _, stats = _run(monkeypatch, 8, _items())
+        assert sum(self._drains(stats).values()) > 0

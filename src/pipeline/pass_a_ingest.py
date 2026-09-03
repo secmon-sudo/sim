@@ -605,6 +605,16 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # the parallel fetch being exact rather than approximate; a number that
         # climbs toward the fetch count means the window is buying nothing.
         "dedup_window_stalls": 0,
+        # Why the fetch window was drained. The first parallel run cut article_fetch
+        # from 145s to 88s but recorded ZERO stalls against 21 in-run duplicate
+        # matches, which means the window was usually empty when those arrived —
+        # it is being drained more often than correctness requires, and the
+        # remaining time is sitting behind whichever of these dominates.
+        "window_drain_full": 0,
+        "window_drain_same_domain": 0,
+        "window_drain_body_grows": 0,
+        "window_drain_no_fetch": 0,
+        "window_drain_stall": 0,
         "content_dup_matched_in_run": 0,
         "content_dup_in_run_within_4": 0,
         "content_dup_in_run_within_8": 0,
@@ -940,6 +950,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # no slot. Cheap because _interleave_by_domain makes a same-domain
         # collision inside one window rare (domain_capped was 0 in the last run).
         if any(pend["domain"] == domain for pend in pending_inserts):
+            stats["window_drain_same_domain"] += 1
             settle_pending()
         if domain_inserts.get(domain, 0) >= domain_cap:
             stats["domain_capped"] += 1
@@ -958,6 +969,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 # reprint, so guessing either way would be wrong — land the window
                 # and ask the real corpus.
                 stats["dedup_window_stalls"] += 1
+                stats["window_drain_stall"] += 1
                 settle_pending()
                 dup_idx = find_content_duplicate(recent_events,
                                                  item.get("title", ""), canonical)
@@ -1032,6 +1044,9 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         if not wants_fetch or body_will_grow:
             # Sequential path. Draining first keeps corpus order identical to the
             # loop this replaced.
+            if pending_inserts:
+                stats["window_drain_body_grows" if body_will_grow
+                      else "window_drain_no_fetch"] += 1
             settle_pending()
             article = None
             if wants_fetch:
@@ -1051,6 +1066,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             "title": item.get("title", ""),
         })
         if len(pending_inserts) >= _ARTICLE_FETCH_WINDOW:
+            stats["window_drain_full"] += 1
             settle_pending()
         continue
 
