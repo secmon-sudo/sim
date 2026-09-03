@@ -70,15 +70,32 @@ def dump(out_path: str, limit: int, days: int) -> int:
             (days, min(limit, CORPUS_LIMIT)),
         ).fetchall()
 
+        # The real duplicates. events holds only what was INSERTED — a duplicate
+        # was dropped and never became a row — so events-against-events cannot
+        # exercise matching at all. corroborating_sources is where the discarded
+        # side survives: each entry is a duplicate that WAS dropped, recorded
+        # against the event it was merged into. That is ground truth, in
+        # production, for the decision this harness has to protect.
+        pairs = conn.execute(
+            """SELECT ev.id, s->>'title'
+                 FROM events ev, jsonb_array_elements(ev.corroborating_sources) s
+                WHERE ev.ingested_at > NOW() - (%s * INTERVAL '1 day')
+                  AND length(s->>'title') > 20""",
+            (days,),
+        ).fetchall()
+
     corpus = [
         {"id": str(r[0]), "domain": r[1] or "", "title": r[2] or "",
          "canonical": r[3] or "", "anchor": r[4] or ""}
         for r in rows
     ]
+    pair_rows = [{"survivor": str(a), "title": b} for a, b in pairs]
     Path(out_path).write_text(
-        json.dumps({"days": days, "rows": corpus}, ensure_ascii=False),
+        json.dumps({"days": days, "rows": corpus, "pairs": pair_rows},
+                   ensure_ascii=False),
         encoding="utf-8")
-    print(f"dumped {len(corpus)} events from the last {days} days → {out_path}")
+    print(f"dumped {len(corpus)} events and {len(pair_rows)} recorded duplicates "
+          f"from the last {days} days → {out_path}")
     return 0
 
 
@@ -99,15 +116,63 @@ def _verdicts(corpus: list, candidates: list) -> tuple[dict, float]:
     return out, time.perf_counter() - started
 
 
+def _replay_pairs(rows: list, pairs: list, limit: int) -> tuple[dict, float, int]:
+    """Re-run the matcher on duplicates production actually dropped.
+
+    Each pair is a headline that WAS deduped and the event it was merged into, so
+    this mode has something the other does not: a right answer. The verdict is
+    whether the matcher still reaches the same survivor.
+
+    What it does NOT prove, and this matters: corroborating_sources records the
+    duplicate's TITLE and never its canonical_text, so the candidate goes in with
+    its title as both. find_content_duplicate's third signal — body shingles —
+    only engages above 100 characters of body, so this mode exercises the two
+    title signals faithfully and the body signal barely. Pair it with the events
+    mode, which runs full canonical text at production scale, or the coverage
+    claim is overstated.
+    """
+    stored = [(r["title"], r["canonical"], r["anchor"]) for r in rows]
+    ids = [r["id"] for r in rows]
+    known = set(ids)
+    # Only pairs whose survivor is inside this corpus can be judged; a survivor
+    # that aged out would look like a regression that is really a missing row.
+    usable = [p for p in pairs if p["survivor"] in known][:limit]
+    out = {}
+    started = time.perf_counter()
+    for i, pair in enumerate(usable):
+        idx = find_content_duplicate(stored, pair["title"], pair["title"])
+        out[f"{pair['survivor']}#{i}"] = ids[idx] if idx is not None else None
+    return out, time.perf_counter() - started, len(usable)
+
+
 def replay(corpus_path: str, out_path: str | None, against: str | None,
-           stored_n: int, candidate_n: int) -> int:
+           stored_n: int, candidate_n: int, mode: str = "events") -> int:
     data = json.loads(Path(corpus_path).read_text(encoding="utf-8"))
     rows = data["rows"]
-    # Candidates are taken from the OTHER end of the corpus than the stored side,
-    # so the two overlap the way a real run's do — newest items arriving against
-    # an older window — instead of a candidate matching its own row.
-    stored = rows[:stored_n]
-    candidates = rows[-candidate_n:]
+
+    if mode == "pairs":
+        verdicts, seconds, n = _replay_pairs(rows, data.get("pairs", []),
+                                             candidate_n)
+        hits = sum(1 for k, v in verdicts.items()
+                   if v is not None and v == k.split("#")[0])
+        other = sum(1 for v in verdicts.values() if v is not None) - hits
+        print(f"{n} recorded duplicates x {len(rows)} stored, {seconds:.1f}s — "
+              f"{hits} re-matched their survivor, {other} matched a different "
+              f"event, {n - hits - other} no longer match anything")
+        return _finish(verdicts, out_path, against)
+
+    # The dump is ordered newest-first, and production compares TODAY's candidates
+    # against an OLDER window — so candidates come off the front and the stored
+    # side sits directly behind them. Disjoint, so nothing matches its own row,
+    # but adjacent in time, because that is where duplicates actually live.
+    #
+    # The first version had this backwards, taking candidates from the oldest end
+    # against the newest stored events. The two were then 14 days apart and the
+    # replay found 8 duplicates in 800 candidates against production's ~32%: it
+    # exercised the rejection path almost exclusively and would have reported
+    # IDENTICAL while proving nothing about matching, which is the whole question.
+    candidates = rows[:candidate_n]
+    stored = rows[candidate_n:candidate_n + stored_n]
     verdicts, seconds = _verdicts(stored, candidates)
 
     dupes = sum(1 for v in verdicts.values() if v is not None)
@@ -115,6 +180,10 @@ def replay(corpus_path: str, out_path: str | None, against: str | None,
     print(f"{len(candidates)} candidates x {len(stored)} stored "
           f"= {comparisons:,} comparisons, {dupes} duplicates, {seconds:.1f}s")
 
+    return _finish(verdicts, out_path, against)
+
+
+def _finish(verdicts: dict, out_path: str | None, against: str | None) -> int:
     if out_path:
         Path(out_path).write_text(json.dumps(verdicts, ensure_ascii=False),
                                   encoding="utf-8")
@@ -157,11 +226,17 @@ def main() -> int:
     r.add_argument("--against", help="compare verdicts against this baseline")
     r.add_argument("--stored", type=int, default=600)
     r.add_argument("--candidates", type=int, default=800)
+    r.add_argument("--mode", choices=("events", "pairs"), default="events",
+                   help="events: real non-duplicates at production scale, which "
+                        "exercises the REJECTION path and its cost. pairs: "
+                        "duplicates production actually dropped, which is the only "
+                        "mode with a right answer. Run both.")
 
     args = ap.parse_args()
     if args.cmd == "dump":
         return dump(args.out, args.limit, args.days)
-    return replay(args.corpus, args.out, args.against, args.stored, args.candidates)
+    return replay(args.corpus, args.out, args.against, args.stored,
+                  args.candidates, args.mode)
 
 
 if __name__ == "__main__":

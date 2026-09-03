@@ -111,3 +111,75 @@ class TestDumpNeedsCredentials:
                                                                tmp_path):
         monkeypatch.delenv("DATABASE_URL", raising=False)
         assert replay_dedup.dump(str(tmp_path / "x.json"), 100, 14) == 2
+
+
+class TestPairsMode:
+    """The mode with a right answer.
+
+    events holds only what was INSERTED — a duplicate was dropped and never became
+    a row — so replaying events against events cannot exercise matching at all.
+    Measured before this mode existed: 800 real candidates against 600 real stored
+    events found 2 duplicates, against production's ~32%. It ran the rejection path
+    almost exclusively and would have reported IDENTICAL while proving nothing
+    about the decision the harness exists to protect.
+
+    corroborating_sources is where the discarded side survives: 5,902 recorded
+    duplicate-to-survivor pairs over 14 days, each one a headline production
+    actually merged into a named event.
+    """
+
+    def _rows_and_pairs(self):
+        rows = _corpus(40)
+        # Reworded, not copied. A real duplicate is a second outlet's phrasing of
+        # the same story, which is what puts it NEAR the threshold — an identical
+        # string matches at ratio 1.0 and would survive any tightening, so a
+        # fixture built from copies proves the harness works when it does not.
+        pairs = [
+            {"survivor": "e0",
+             "title": rows[0]["title"].replace("hits", "strikes")
+                                      .replace("killing", "leaving") + " dead"},
+            {"survivor": "e1",
+             "title": rows[1]["title"].replace("target", "hit")
+                                      .replace("overnight", "in overnight raid")},
+        ]
+        return rows, pairs
+
+    def test_a_recorded_duplicate_still_reaches_its_survivor(self):
+        rows, pairs = self._rows_and_pairs()
+        verdicts, _, n = replay_dedup._replay_pairs(rows, pairs, 100)
+        assert n == 2
+        assert verdicts["e0#0"] == "e0"
+
+    def test_a_pair_whose_survivor_aged_out_is_skipped_not_failed(self):
+        """A missing row would otherwise read as a regression it is not."""
+        rows, _ = self._rows_and_pairs()
+        pairs = [{"survivor": "gone-from-corpus", "title": rows[0]["title"]}]
+        verdicts, _, n = replay_dedup._replay_pairs(rows, pairs, 100)
+        assert n == 0 and verdicts == {}
+
+    def test_the_limit_is_honoured(self):
+        rows = _corpus(40)
+        pairs = [{"survivor": f"e{i}", "title": rows[i]["title"]} for i in range(20)]
+        _, _, n = replay_dedup._replay_pairs(rows, pairs, 5)
+        assert n == 5
+
+    def test_pairs_mode_notices_a_changed_matcher(self, tmp_path, monkeypatch):
+        rows, pairs = self._rows_and_pairs()
+        corpus = tmp_path / "c.json"
+        corpus.write_text(json.dumps({"days": 14, "rows": rows, "pairs": pairs}),
+                          encoding="utf-8")
+        base = tmp_path / "b.json"
+        assert replay_dedup.replay(str(corpus), str(base), None, 40, 100,
+                                   mode="pairs") == 0
+
+        import src.pipeline.ingest_filters as f
+        monkeypatch.setattr(f, "_TITLE_SIM_THRESHOLD", 0.999)
+        monkeypatch.setattr(f, "_TITLE_TOKEN_THRESHOLD", 0.999)
+        monkeypatch.setattr(f, "_CONTENT_SHINGLE_THRESHOLD", 0.999)
+        assert replay_dedup.replay(str(corpus), None, str(base), 40, 100,
+                                   mode="pairs") == 1
+
+    def test_a_corpus_without_pairs_does_not_crash(self, corpus_file):
+        """Dumps taken before this mode existed carry no pairs key."""
+        assert replay_dedup.replay(str(corpus_file), None, None, 60, 40,
+                                   mode="pairs") == 0
