@@ -13,7 +13,11 @@ previous append is already visible.
 
 from unittest.mock import MagicMock
 
-from src.pipeline.pass_a_ingest import _corroboration_params, _flush_corroborations
+from src.pipeline.pass_a_ingest import (
+    _corroboration_params,
+    _flush_corroborations,
+    _headline_fingerprint,
+)
 
 
 def _cursor(rowcounts):
@@ -139,3 +143,85 @@ class TestInRunDedupTelemetry:
         assert counts[16] == 6  # + 8, 15
         assert counts["in_run"] == 8
         assert counts[4] <= counts[8] <= counts[16] <= counts["in_run"]
+
+
+class TestSyndicatedFilingRefusal:
+    """One newsroom's filing under a second masthead is not corroboration.
+
+    Measured 3 Sep 2026 over 14 days: 865 of 6009 corroboration records (14.4%)
+    were byte-identical headlines after the publisher suffix was stripped, and 12
+    of 12 sampled were real syndication. 413 events were carrying a "Çoklu kaynak"
+    label on that evidence, 62 of them ALERT or CRITICAL cards. Validated against
+    600 production pairs: 600/600 agreement, no divergence in either direction.
+    """
+
+    def _params(self, event_title, dup_title, event_domain="reuters.com",
+                dup_domain="bbc.co.uk"):
+        return _corroboration_params("evt-1", event_domain, dup_domain,
+                                     "https://x/1", dup_title, event_title)
+
+    def test_same_headline_under_two_mastheads_is_refused(self):
+        assert self._params(
+            "Russia strike blows up arms depot near Kyiv, killing 37 - Yahoo News",
+            "Russia strike blows up arms depot near Kyiv, killing 37 - euractiv.com",
+        ) is None
+
+    def test_identical_headline_with_no_suffix_at_all_is_refused(self):
+        assert self._params(
+            "Two injured in blast at train station in southern Germany",
+            "Two injured in blast at train station in southern Germany",
+        ) is None
+
+    def test_own_cctld_edition_is_refused(self):
+        """bbc.com corroborating bbc.co.uk — the registrable-domain guard cannot
+        see this, because the two ARE different registrable domains."""
+        from src.core.sitrep_verify import registrable_domain
+        assert registrable_domain("bbc.com") != registrable_domain("bbc.co.uk")
+        assert self._params(
+            "Airport warns passengers ahead of busy weekend - BBC",
+            "Airport warns passengers ahead of busy weekend - BBC",
+            event_domain="bbc.com", dup_domain="bbc.co.uk",
+        ) is None
+
+    def test_independent_reporting_of_one_event_is_still_recorded(self):
+        """The signal has to be exact: near-identical is what content dedup already
+        selected for, so anything looser would refuse the corroboration worth having."""
+        assert self._params(
+            "Russian missile strikes kill 12 in Kyiv overnight - Reuters",
+            "Death toll from Kyiv missile attack rises to 12, officials say - BBC",
+        ) is not None
+
+    def test_short_headline_match_is_a_coincidence_not_syndication(self):
+        """Under the floor two newsrooms could reach the same words on their own."""
+        assert self._params("Explosions heard in Kyiv",
+                            "Explosions heard in Kyiv") is not None
+
+    def test_case_and_spacing_do_not_defeat_the_match(self):
+        assert self._params(
+            "Drone  attack  kills two children in Russia's Krasnodar - Reuters",
+            "DRONE ATTACK KILLS TWO CHILDREN IN RUSSIA'S KRASNODAR - Devdiscourse",
+        ) is None
+
+    def test_en_and_em_dash_suffixes_are_stripped_too(self):
+        assert self._params(
+            "Iran strikes US base in Erbil, Kurdish officials say – Rudaw",
+            "Iran strikes US base in Erbil, Kurdish officials say — Kurdistan24",
+        ) is None
+
+    def test_missing_event_title_keeps_the_old_behaviour(self):
+        """The parameter is optional: callers that never learned the survivor's
+        headline must still record corroboration exactly as before."""
+        assert _corroboration_params(
+            "evt-1", "reuters.com", "bbc.co.uk", "https://x/1",
+            "Russian missile strikes kill 12 in Kyiv overnight - BBC",
+        ) is not None
+
+    def test_fingerprint_leaves_a_dashless_headline_intact(self):
+        assert _headline_fingerprint("Explosions rock Kyiv city centre") == \
+            "explosions rock kyiv city centre"
+
+    def test_fingerprint_does_not_eat_a_hyphenated_headline_tail(self):
+        """The suffix pattern needs spaces around the dash, so 'Kryvyi Rih' style
+        hyphenation and dashless titles survive."""
+        assert _headline_fingerprint("US-Iran tensions escalate over Hormuz") == \
+            "us-iran tensions escalate over hormuz"
