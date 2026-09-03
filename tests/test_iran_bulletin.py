@@ -174,3 +174,58 @@ class TestExtractionResilience:
 
         monkeypatch.setattr(ib, "log_llm_telemetry", _must_not_run)
         ib.extract_direction(None, [{"title": "x", "country_iso": "JO"}])
+
+
+class TestBulletinRouter:
+    """The extraction router is a MEASURED subset, not the full bulk cascade.
+
+    probe_models --bulletin, 3 Sep 2026, against the real extraction prompt:
+
+        qwen/qwen3.8-27b        actor 8/8   520ms
+        gemini-3.5-flash-lite   actor 8/8  1041ms
+        nemotron-3-super        actor 8/8  2063ms
+        openai/gpt-oss-20b      actor 6/8   976ms   ← excluded
+
+    gpt-oss-20b returns actor=iran for "Iran says 18 killed, 142 injured in US
+    strikes", filing an American strike as an Iranian one. Direction is the one
+    thing this bulletin exists to state.
+    """
+
+    def test_the_inverting_slot_is_not_in_the_allowed_set(self):
+        from src.core.llm_router import BULLETIN_MEASURED_MODELS
+        assert "openai/gpt-oss-20b" not in BULLETIN_MEASURED_MODELS
+
+    def test_measured_order_is_fastest_perfect_first(self):
+        from src.core.llm_router import BULLETIN_MEASURED_MODELS
+        assert BULLETIN_MEASURED_MODELS[0] == "qwen/qwen3.8-27b"
+
+    def test_router_only_ever_contains_measured_models(self, monkeypatch):
+        from src.core import llm_router as lr
+
+        class _Acct:
+            def __init__(self, model):
+                self.model = model
+                self.bucket = None
+
+        class _FakeRouter:
+            accounts = [_Acct("openai/gpt-oss-20b"),
+                        _Acct("nvidia/nemotron-3-super-120b-a12b:free"),
+                        _Acct("qwen/qwen3.8-27b"),
+                        _Acct("some/unmeasured-model")]
+
+        monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
+        out = lr.build_bulletin_router()
+        models = [a.model for a in out.accounts]
+        assert models == ["qwen/qwen3.8-27b",
+                          "nvidia/nemotron-3-super-120b-a12b:free"]
+
+    def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
+        """An absent slot leaves events unattributed and the bulletin says so;
+        falling back to the full cascade would silently reach the inverting one."""
+        from src.core import llm_router as lr
+
+        class _FakeRouter:
+            accounts = []
+
+        monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
+        assert lr.build_bulletin_router().accounts == []

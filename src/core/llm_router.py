@@ -510,6 +510,49 @@ def build_llm_router() -> LLMRouter:
     return LLMRouter(_share_buckets(active))
 
 
+# Slots measured against the bulletin's REAL extraction prompt
+# (scripts/probe_models.py --bulletin, 3 Sep 2026), in the order they scored:
+#
+#   qwen/qwen3.8-27b        actor 8/8  standing 8/8   520ms
+#   gemini-3.5-flash-lite   actor 8/8  standing 8/8  1041ms
+#   nemotron-3-super        actor 8/8  standing 7/8  2063ms
+#   openai/gpt-oss-20b      actor 6/8  standing 7/8   976ms   ← EXCLUDED
+#
+# gpt-oss-20b is excluded for a specific, reproducible failure, not a general
+# impression: on "Iran says 18 killed, 142 injured in US strikes" it returns
+# actor=iran, which files an American strike as an Iranian one. Direction is the
+# single thing this bulletin exists to state, and a slot that inverts it is worse
+# than a slot that is missing — an absent slot leaves the event unattributed and
+# the bulletin says so, while this one asserts the opposite of what happened.
+BULLETIN_MEASURED_MODELS = (
+    "qwen/qwen3.8-27b",
+    "gemini-3.5-flash-lite",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+)
+
+
+def build_bulletin_router() -> LLMRouter:
+    """Router for the Iran bulletin's direction extraction.
+
+    Filtered from build_llm_router() rather than re-declared, so rate limits,
+    shared buckets and key wiring can never drift from the bulk definitions — the
+    only thing this function decides is WHICH slots are allowed.
+
+    Returns an empty router when none of the measured models has a key. That is
+    deliberate: extraction then fails, every event keeps the unattributed default
+    and falls to the regional section, which reports that direction could not be
+    established. Falling back to the full cascade instead would silently reach the
+    one slot that inverts it.
+    """
+    order = {m: i for i, m in enumerate(BULLETIN_MEASURED_MODELS)}
+    accounts = [a for a in build_llm_router().accounts if a.model in order]
+    accounts.sort(key=lambda a: order[a.model])
+    if not accounts:
+        logger.warning("Bulletin router has no measured slot with a key; "
+                       "direction extraction will report unattributed")
+    return LLMRouter(accounts)
+
+
 def build_quality_router() -> LLMRouter:
     """Router for LOW-VOLUME, quality-sensitive prose/judgment work: the SITREP
     narrator, storyline narratives, and the weekly forecast — every text a human
