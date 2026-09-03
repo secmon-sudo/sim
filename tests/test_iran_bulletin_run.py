@@ -161,3 +161,66 @@ class TestWiring:
         src = (REPO / "src/pipeline/iran_bulletin_run.py").read_text()
         assert "INSERT INTO iran_bulletins" in src
         assert "INSERT INTO sitreps" not in src
+
+
+class TestAppendixRowIsNotEmpty:
+    """The first real bulletin drew 182 separator rules with nothing between them.
+
+    _appendix_row reads seven fields — location, snippet, date, event_type,
+    severity, verification and each source's `name` — and the first adapter
+    supplied four. Every row rendered a bold em-dash, an empty meta line, an empty
+    snippet and a chip labelled "kaynak". This pins the whole contract, because the
+    failure was silent: the HTML was well-formed and 271KB of it was blank.
+    """
+
+    def _row(self):
+        return run._clusters_for_render(_result(1, 0, 0))[0]
+
+    def test_every_field_the_renderer_reads_is_supplied(self):
+        row = self._row()
+        for field in ("location", "snippet", "date", "event_type", "severity",
+                      "verification", "sources"):
+            assert field in row, field
+
+    def test_location_is_not_the_placeholder_dash(self):
+        assert self._row()["location"] not in ("", "—", None)
+
+    def test_location_names_the_country_in_turkish_and_the_direction(self):
+        row = self._row()
+        assert "İran" in row["location"]
+        assert "yönelik" in row["location"]
+
+    def test_the_headline_reaches_the_snippet(self):
+        assert self._row()["snippet"] == "headline 0"
+
+    def test_sources_carry_a_name_so_the_chip_is_not_generic(self):
+        source = self._row()["sources"][0]
+        assert source["name"] and source["name"] != "kaynak"
+        assert source["url"]
+
+    def test_standing_rides_in_the_meta_line(self):
+        """The badge already says how many outlets; standing says whether anyone
+        stands behind it, and those are different claims."""
+        assert self._row()["date"] == ib.STANDING_LABELS[ib.STANDING_CONFIRMED]
+
+    def test_every_theatre_country_has_a_turkish_name(self):
+        for iso in ib.THEATRE_ISO:
+            assert ib.THEATRE_NAMES.get(iso), iso
+
+
+class TestReportIdentity:
+    def test_the_attachment_does_not_collide_with_the_iran_sitrep(self, monkeypatch,
+                                                                  _quiet):
+        """Iran gets its own SITREP the same morning into the same chat; the
+        second file to arrive would overwrite the first on the reader's phone."""
+        sent = {}
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "send_sitrep_telegram",
+                            lambda **k: sent.update(k) or "m")
+        run.run_iran_bulletin(_Conn())
+        assert sent["filename_stem"] == "iran_bulletin"
+        assert sent["heading"] == run.REPORT_TITLE
+
+    def test_the_title_is_not_jargon(self):
+        assert "Tiyatro" not in run.REPORT_TITLE
+        assert run.REPORT_TITLE.isupper()

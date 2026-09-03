@@ -399,6 +399,8 @@ def send_sitrep_telegram(
     clusters: List[Dict[str, Any]],
     html_doc: str,
     r2_url: Optional[str] = None,
+    heading: str = "GÜNLÜK DURUM RAPORU (SITREP)",
+    filename_stem: Optional[str] = None,
 ) -> Optional[str]:
     """
     Dispatches a daily country SITREP:
@@ -419,7 +421,7 @@ def send_sitrep_telegram(
         label_counts[lbl] = label_counts.get(lbl, 0) + 1
 
     summary_text = (
-        f"🗺 <b>GÜNLÜK DURUM RAPORU (SITREP)</b>\n"
+        f"🗺 <b>{heading}</b>\n"
         f"🌍 <b>Ülke:</b> {html.escape(country_name)} (<code>{country_iso}</code>)\n"
         f"📅 <b>Dönem:</b> <code>{window_start}</code> — <code>{window_end}</code> UTC\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -450,7 +452,10 @@ def send_sitrep_telegram(
     try:
         file_buffer = io.BytesIO(html_doc.encode("utf-8"))
         date_tag = window_end[:10].replace("-", "")
-        filename = f"sitrep_{country_iso}_{date_tag}.html"
+        # A bulletin must not land under the same name as that country's
+        # SITREP: both arrive in the same chat on the same morning, and the
+        # second download would silently overwrite the first.
+        filename = f"{filename_stem or 'sitrep_' + country_iso}_{date_tag}.html"
 
         api_url_doc = f"https://api.telegram.org/bot{bot_token}/sendDocument"
         resp_doc = send_telegram_document(

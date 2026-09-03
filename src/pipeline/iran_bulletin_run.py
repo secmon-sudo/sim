@@ -30,6 +30,7 @@ from src.services.iran_bulletin import (
     SECTION_REGIONAL,
     SECTION_TITLES,
     STANDING_LABELS,
+    THEATRE_NAMES,
     build_bulletin,
 )
 from src.services.sitrep_html import render_sitrep_html
@@ -38,6 +39,12 @@ from src.services.telegram_report_notifier import send_sitrep_telegram
 logger = logging.getLogger(__name__)
 
 WINDOW_HOURS = 24
+
+# Named after the report it reproduces rather than after a theatre. "İran
+# Tiyatrosu" read as jargon and told a reader nothing about what was inside.
+REPORT_TITLE = "BÖLGESEL ASKERİ VE JEOPOLİTİK GELİŞMELER"
+REPORT_SUBJECT = "İran, Körfez ve Doğu Akdeniz hattı"
+REPORT_SUBJECT_SUFFIX = "12 ülke"
 
 
 def _save(db_conn, window_start, window_end, status: str,
@@ -73,10 +80,23 @@ def _save(db_conn, window_start, window_end, status: str,
         logger.exception("Iran bulletin: could not persist the run")
 
 
+# What each section contributes to an appendix row, so a reader scanning the full
+# log can see the direction without re-reading the headline.
+_SECTION_TAGS = {
+    SECTION_ON_IRAN: "İran\u2019a yönelik",
+    SECTION_FROM_IRAN: "İran\u2019dan",
+    SECTION_REGIONAL: "Bölgesel",
+}
+
+
 def _clusters_for_render(result: Dict[str, Any]) -> list:
-    """Adapt events to the shape render_sitrep_html's stat cards and highlights
-    read. The bulletin's standing vocabulary is mapped onto the SITREP's
-    verification labels so the two reports count the same things the same way.
+    """Adapt events to the record render_sitrep_html's appendix row reads.
+
+    Every field that row reads has to be supplied, and the first version of this
+    function supplied four of seven. The result shipped: 182 appendix rows drew a
+    bold em-dash where `location` should have been, an empty meta line, an empty
+    snippet and a source chip labelled "kaynak" — separator rules with nothing
+    between them. The mapping is spelled out per field for that reason.
     """
     from src.core.sitrep_verify import LABEL_MULTI, LABEL_SINGLE
 
@@ -84,11 +104,27 @@ def _clusters_for_render(result: Dict[str, Any]) -> list:
     for section in (SECTION_ON_IRAN, SECTION_FROM_IRAN, SECTION_REGIONAL):
         for ev in (result.get("sections") or {}).get(section, []):
             corroborated = len(ev.get("corroborating_sources") or []) > 0
+            iso = ev.get("country_iso") or ""
+            standing = STANDING_LABELS.get(ev.get("standing"), "")
+            occurred = ev.get("occurred_at")
             clusters.append({
-                "headline": ev.get("title"),
+                # The bold line: where it landed, and which way it was going.
+                "location": f"{THEATRE_NAMES.get(iso, iso)} · {_SECTION_TAGS[section]}",
+                # The row's actual content. The headline IS the record here — the
+                # bulletin has no separate summary per event.
+                "snippet": ev.get("title") or "",
+                # The grey meta line. Standing rides here rather than in the badge,
+                # because the badge already carries corroboration and the two are
+                # different claims: one is how many outlets, the other is whether
+                # anybody stands behind it.
+                "date": standing,
+                "event_type": ev.get("event_type") or "",
                 "severity": ev.get("severity") or 0,
                 "verification": LABEL_MULTI if corroborated else LABEL_SINGLE,
-                "sources": [{"domain": ev.get("domain"), "url": ev.get("url")}],
+                # `name` is what the chip prints; without it every source read
+                # "kaynak" and the publisher was invisible.
+                "sources": [{"name": ev.get("domain"), "url": ev.get("url")}],
+                "occurred_at": occurred,
             })
     return clusters
 
@@ -120,9 +156,10 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
 
     clusters = _clusters_for_render(result)
     html_doc = render_sitrep_html(
-        country_name="İran Tiyatrosu", country_iso="IR",
+        country_name=REPORT_SUBJECT, country_iso="IR",
         window_start=str(window_start)[:16], window_end=str(window_end)[:16],
         report_text=result["narrative"], clusters=clusters,
+        report_title=REPORT_TITLE, subject_suffix=REPORT_SUBJECT_SUFFIX,
     )
 
     stamp = window_end.strftime("%Y%m%d")
@@ -136,9 +173,14 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
 
     try:
         send_sitrep_telegram(
-            country_iso="IR", country_name="İran Tiyatrosu Bülteni",
+            country_iso="IR", country_name=REPORT_SUBJECT,
             window_start=str(window_start)[:16], window_end=str(window_end)[:16],
             clusters=clusters, html_doc=html_doc, r2_url=r2_url,
+            heading=REPORT_TITLE,
+            # Not sitrep_IR_*: Iran gets its own country SITREP on the same
+            # morning, into the same chat, and the second file to arrive would
+            # overwrite the first on the reader's phone.
+            filename_stem="iran_bulletin",
         )
     except Exception:
         logger.exception("Iran bulletin: Telegram dispatch failed")

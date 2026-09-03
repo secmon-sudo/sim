@@ -475,8 +475,17 @@ def render_sitrep_html(country_name: str, country_iso: str,
                        window_start: str, window_end: str,
                        report_text: str, clusters: List[Dict[str, Any]],
                        aviation_clusters: Optional[List[Dict[str, Any]]] = None,
-                       airspace: Optional[Dict[str, Any]] = None) -> str:
-    """Self-contained mobile-first HTML for the SITREP."""
+                       airspace: Optional[Dict[str, Any]] = None,
+                       report_title: str = "GÜNLÜK DURUM RAPORU",
+                       subject_suffix: Optional[str] = None) -> str:
+    """Self-contained mobile-first HTML for the SITREP.
+
+    ``report_title`` and ``subject_suffix`` are parameters rather than a forked
+    renderer: the Iran bulletin needs its own masthead and carries no single
+    country, but every other decision this function makes — the shape parsing, the
+    label counts, the severity meter, the appendix row — is identical for both
+    reports, and two copies of that would drift.
+    """
     counts = {LABEL_OFFICIAL: 0, LABEL_MULTI: 0, LABEL_SINGLE: 0}
     for c in clusters:
         if c.get("verification") in counts:
@@ -533,15 +542,15 @@ def render_sitrep_html(country_name: str, country_iso: str,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SITREP — {_esc(country_name)} — {_esc(window_end[:10])}</title>
+<title>{_esc(report_title.title())} — {_esc(country_name)} — {_esc(window_end[:10])}</title>
 </head>
 <body style="margin:0;background:#0a0f1c;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px">
 <div style="max-width:720px;margin:0 auto;padding:0 16px 40px">
 
 <div style="background:linear-gradient(135deg,#0c1a3a 0%,#12275c 100%);border:1px solid #1e3a6e;border-radius:0 0 16px 16px;padding:22px 18px 18px;margin:0 -4px">
   <div style="font-size:10px;letter-spacing:3px;color:#7db3ff;text-transform:uppercase">SIM · Security Incident Monitor</div>
-  <h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:.5px">GÜNLÜK DURUM RAPORU</h1>
-  <div style="font-size:17px;font-weight:600;color:#93c5fd">{_esc(country_name)} <span style="color:#5b6b8a;font-size:13px">({_esc(country_iso)})</span></div>
+  <h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:.5px">{_esc(report_title)}</h1>
+  <div style="font-size:17px;font-weight:600;color:#93c5fd">{_esc(country_name)} <span style="color:#5b6b8a;font-size:13px">({_esc(subject_suffix if subject_suffix is not None else country_iso)})</span></div>
   <div style="margin-top:10px;font-size:12px;color:#8b9cb8">📅 {_esc(window_start)} — {_esc(window_end)} UTC · 24 saatlik pencere</div>
 </div>
 

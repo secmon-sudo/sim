@@ -53,6 +53,16 @@ logger = logging.getLogger(__name__)
 # stops appearing simply contributes nothing instead of forcing a code change.
 THEATRE_ISO = ("IR", "IQ", "KW", "JO", "SA", "AE", "QA", "BH", "OM", "IL", "LB", "YE")
 
+# Turkish names for the theatre, as a constant. get_country_name() would need a
+# database round trip per event — 182 of them in the first real run — and returns
+# whatever anchor_master holds, which is English. The set is fixed and small, so
+# the table is both cheaper and correct for a Turkish report.
+THEATRE_NAMES = {
+    "IR": "İran", "IQ": "Irak", "KW": "Kuveyt", "JO": "Ürdün",
+    "SA": "Suudi Arabistan", "AE": "BAE", "QA": "Katar", "BH": "Bahreyn",
+    "OM": "Umman", "IL": "İsrail", "LB": "Lübnan", "YE": "Yemen",
+}
+
 # Which side an actor belongs to. The bulletin's sections need a SIDE, not a name:
 # "IRGC", "Revolutionary Guards" and "Iran" all place an event in section 2.
 IRAN_SIDE = "iran"
