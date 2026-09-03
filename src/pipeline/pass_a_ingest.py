@@ -63,6 +63,7 @@ from src.pipeline.ingest_sources import (  # noqa: F401
     reset_translation_counter,
     translate_to_english_if_needed,
     translation_call_count,
+    translation_failure_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -818,6 +819,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     measured = sum(timings.values())
     block = {k: round(v, 1) for k, v in sorted(timings.items())}
     block["translations_performed"] = translation_call_count()
+    block["translations_failed"] = translation_failure_count()
     block["measured_total"] = round(measured, 1)
     block["pass_a_total"] = round(elapsed, 1)
     block["unaccounted"] = round(elapsed - measured, 1)

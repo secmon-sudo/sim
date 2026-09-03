@@ -14,6 +14,7 @@ counter.
 
 import time
 
+from src.pipeline import ingest_sources as ing
 from src.pipeline import pass_a_ingest as pa
 from src.pipeline.ingest_sources import (
     reset_translation_counter,
@@ -65,3 +66,75 @@ class TestTranslationCounter:
     def test_reset_clears(self):
         reset_translation_counter()
         assert translation_call_count() == 0
+
+
+class TestTranslationProviderChain:
+    """Added 2 Sep 2026: Google answered the long-standing ``client=gtx`` route
+    with a 429 abuse page from every IP. The failure path returns the ORIGINAL
+    text, so eight production runs translated 0/12..0/28 items while every
+    counter and the run's exit status stayed green. The chain exists so one
+    route dying is survivable; the failure counter exists so it is visible.
+    """
+
+    def _chain(self, monkeypatch, *behaviours):
+        """Replace the provider rungs with callables, keeping their names."""
+        names = [name for name, _ in ing._TRANSLATE_PROVIDERS]
+        assert len(behaviours) == len(names)
+        monkeypatch.setattr(
+            ing, "_TRANSLATE_PROVIDERS", tuple(zip(names, behaviours))
+        )
+
+    def test_first_working_rung_wins(self, monkeypatch):
+        def boom(text, target):
+            raise AssertionError("later rungs must not be reached")
+
+        self._chain(monkeypatch, lambda t, tgt: "translated", boom, boom)
+        reset_translation_counter()
+        assert ing.google_translate("צה\"ל תוקף") == "translated"
+        assert ing.translation_failure_count() == 0
+
+    def test_falls_through_a_dead_rung(self, monkeypatch):
+        def dead(text, target):
+            raise RuntimeError("429")
+
+        self._chain(monkeypatch, dead, lambda t, tgt: "from clients5", dead)
+        reset_translation_counter()
+        assert ing.google_translate("צה\"ל תוקף") == "from clients5"
+        assert ing.translation_failure_count() == 0
+
+    def test_empty_response_is_a_failed_rung_not_a_translation(self, monkeypatch):
+        """A 200 carrying nothing must not overwrite the headline with ''."""
+        self._chain(
+            monkeypatch, lambda t, tgt: "", lambda t, tgt: "", lambda t, tgt: "last"
+        )
+        reset_translation_counter()
+        assert ing.google_translate("צה\"ל תוקף") == "last"
+
+    def test_total_outage_returns_the_original_and_is_counted(self, monkeypatch):
+        def dead(text, target):
+            raise RuntimeError("429")
+
+        self._chain(monkeypatch, dead, dead, dead)
+        reset_translation_counter()
+        assert ing.google_translate("צה\"ל תוקף") == "צה\"ל תוקף"
+        assert ing.translation_failure_count() == 1
+
+    def test_reset_clears_failures(self, monkeypatch):
+        def dead(text, target):
+            raise RuntimeError("429")
+
+        self._chain(monkeypatch, dead, dead, dead)
+        reset_translation_counter()
+        ing.google_translate("צה\"ל תוקף")
+        assert ing.translation_failure_count() == 1
+        reset_translation_counter()
+        assert ing.translation_failure_count() == 0
+
+    def test_blank_text_never_reaches_a_provider(self, monkeypatch):
+        def boom(text, target):
+            raise AssertionError("blank text must short-circuit")
+
+        self._chain(monkeypatch, boom, boom, boom)
+        reset_translation_counter()
+        assert ing.google_translate("   ") == "   "
+        assert ing.translation_failure_count() == 0

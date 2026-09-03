@@ -741,28 +741,104 @@ def fetch_full_text(url: str) -> str:
     return fetch_article(url)["text"]
 
 
-def google_translate(text: str, target: str = "en") -> str:
-    """Translate text using public Google Translate endpoint (no credentials needed)."""
-    if not text or not text.strip():
-        return text
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
+def _translate_via_googleapis(text: str, target: str) -> str:
+    """translate.googleapis.com, the nested-list response shape.
+
+    ``client=gtx`` was the long-standing route until Google started answering it
+    with a 429 abuse page (2 Sep 2026, from every IP, not just CI runners).
+    ``dict-chrome-ex`` is the same host and the same response shape, and still
+    segments long HTML-bearing bodies correctly.
+    """
+    resp = httpx.get(
+        "https://translate.googleapis.com/translate_a/single",
+        params={
+            "client": "dict-chrome-ex",
             "sl": "auto",
             "tl": target,
             "dt": "t",
-            "q": text
-        }
-        resp = httpx.get(url, params=params, timeout=10.0)
-        resp.raise_for_status()
-        # The response is a nested JSON list: [[[translated_text, original_text, ...]]]
-        data = resp.json()
-        if data and len(data) > 0 and data[0]:
-            translated_segments = [seg[0] for seg in data[0] if seg and seg[0]]
-            return "".join(translated_segments)
-    except Exception:
-        logger.exception("Failed to translate text: %s", text[:80])
+            "q": text,
+        },
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    # The response is a nested JSON list: [[[translated_text, original_text, ...]]]
+    data = resp.json()
+    if data and len(data) > 0 and data[0]:
+        return "".join(seg[0] for seg in data[0] if seg and seg[0])
+    return ""
+
+
+def _translate_via_clients5(text: str, target: str) -> str:
+    """clients5.google.com, the flat [[text, detected_lang]] response shape."""
+    resp = httpx.get(
+        "https://clients5.google.com/translate_a/t",
+        params={"client": "dict-chrome-ex", "sl": "auto", "tl": target, "q": text},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, list) and data and isinstance(data[0], list) and data[0]:
+        return data[0][0] or ""
+    return ""
+
+
+def _translate_via_mymemory(text: str, target: str) -> str:
+    """MyMemory: keyless, a different operator entirely, so it survives a
+    Google-wide block. Caps a request at 500 bytes, so it is the last rung."""
+    resp = httpx.get(
+        "https://api.mymemory.translated.net/get",
+        params={"q": text[:500], "langpair": f"autodetect|{target}"},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    return (resp.json().get("responseData") or {}).get("translatedText") or ""
+
+
+# Tried in order; the first rung that answers with text wins. Two Google routes
+# rather than one because they fail independently, then an unrelated operator so
+# a Google-wide block still leaves a working rung.
+_TRANSLATE_PROVIDERS = (
+    ("googleapis", _translate_via_googleapis),
+    ("clients5", _translate_via_clients5),
+    ("mymemory", _translate_via_mymemory),
+)
+
+_TRANSLATE_FAILURES = 0
+
+
+def translation_failure_count() -> int:
+    """Translations that exhausted every provider since the last reset.
+
+    Counted because the failure path returns the ORIGINAL text: without this,
+    a total provider outage looks exactly like a run with nothing to translate.
+    """
+    return _TRANSLATE_FAILURES
+
+
+def google_translate(text: str, target: str = "en") -> str:
+    """Translate text to ``target`` through the free provider chain.
+
+    Returns the original text when every provider fails, so ingestion continues
+    on the untranslated headline rather than dropping the item.
+    """
+    global _TRANSLATE_FAILURES
+    if not text or not text.strip():
+        return text
+    errors = []
+    for name, provider in _TRANSLATE_PROVIDERS:
+        try:
+            translated = provider(text, target)
+            if translated:
+                return translated
+            errors.append(f"{name}: empty response")
+        except Exception as exc:  # noqa: BLE001 - any provider fault falls through
+            errors.append(f"{name}: {type(exc).__name__}")
+    _TRANSLATE_FAILURES += 1
+    logger.warning(
+        "Translation failed on every provider (%s): %s",
+        ", ".join(errors),
+        text[:80],
+    )
     return text
 
 
@@ -802,8 +878,9 @@ def translation_call_count() -> int:
 
 
 def reset_translation_counter() -> None:
-    global _TRANSLATE_CALLS
+    global _TRANSLATE_CALLS, _TRANSLATE_FAILURES
     _TRANSLATE_CALLS = 0
+    _TRANSLATE_FAILURES = 0
 
 
 def translate_to_english_if_needed(text: str) -> str:
