@@ -1,0 +1,56 @@
+name: SIM Dedup Corpus Dump
+
+# Captures the real dedup corpus so a change to find_content_duplicate can be
+# proved to move no verdict. Split from the replay itself along the line where the
+# credentials are: the database is only reachable from Actions, while the replay is
+# pure CPU and belongs on the laptop of whoever is making the optimisation.
+#
+#   here                     python -m scripts.replay_dedup dump --out corpus.json
+#   locally, on HEAD         python -m scripts.replay_dedup replay corpus.json --out baseline.json
+#   locally, on the change   python -m scripts.replay_dedup replay corpus.json --against baseline.json
+#
+# The last command exits non-zero if any verdict moved. Download the artifact this
+# job uploads; it is the same corpus for both sides of the comparison, which is the
+# only way the diff means anything.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Kaç günlük korpus (Pass A 14 gün kullanıyor)"
+        type: string
+        default: "14"
+      limit:
+        description: "Satır tavanı (üretimde 2000)"
+        type: string
+        default: "2000"
+
+concurrency:
+  group: dedup-corpus
+  cancel-in-progress: false
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Dump dedup corpus
+        run: >-
+          python -m scripts.replay_dedup dump
+          --out dedup_corpus.json
+          --days "${{ inputs.days }}"
+          --limit "${{ inputs.limit }}"
+      - name: Upload corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: dedup-corpus
+          path: dedup_corpus.json
+          retention-days: 14
