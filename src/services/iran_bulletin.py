@@ -136,6 +136,8 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         'sets the standing, never the actor.',
         '- Never guess an actor from context. If the headline says a tanker was '
         '"struck by unidentified projectiles", the actor is unattributed.',
+        '- In "A denies B\'s claim that it struck C", the actor is B — the party '
+        'said to have acted — never A, the one issuing the denial. standing=denied.',
         "",
         'Reply with JSON only: {"items":[{"n":1,"actor":"...","standing":"..."}]}',
         "",
