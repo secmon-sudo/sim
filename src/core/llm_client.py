@@ -324,6 +324,7 @@ PURPOSES = frozenset({
     "forecast_g2_country",    # weekly: per-country assessment
     "forecast_g3_global",     # weekly: global assessment
     "vocab_audit_judge",      # weekly gate audit, scripts/vocab_audit.py
+    "bulletin_direction",     # Iran bulletin: who acted, and how well it stands up
 })
 
 

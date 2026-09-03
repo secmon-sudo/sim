@@ -22,6 +22,10 @@ on:
         description: "Pass C yerine GERÇEK Türkçe SITREP anlatıcısını koştur (kalite router slotları için)"
         type: boolean
         default: false
+      bulletin:
+        description: "İran bülteninin yön/iddia çıkarımını gerçek tuzaklı manşetlerde koştur"
+        type: boolean
+        default: false
 
 env:
   GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
@@ -64,6 +68,7 @@ jobs:
           python -m scripts.probe_models --list "${{ inputs.catalogues }}" \
             --models "${{ inputs.models }}" --extras '${{ inputs.extras }}' \
             ${{ inputs.prose && '--prose' || '' }} \
+            ${{ inputs.bulletin && '--bulletin' || '' }} \
             2>&1 | tee logs/probe.txt
 
       - uses: actions/upload-artifact@v4

@@ -25,6 +25,7 @@ import time
 import urllib.request
 
 from src.core import llm_client
+from src.services import iran_bulletin
 from src.core.llm_client import call_llm
 from src.core.llm_router import LLMAccount, LLMRouter
 from src.core.token_bucket import TokenBucket
@@ -341,8 +342,68 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
     return not problems, note
 
 
+# Real theatre headlines pulled from production on 3 Sep 2026, chosen because each
+# one is a different way the extraction can go wrong. A prompt that scores well on
+# clean "X strikes Y" copy tells us nothing; these are the shapes that decide it.
+BULLETIN_SAMPLE = [
+    # Both actors named, Iran is the SUBJECT — the first-mentioned-wins failure.
+    ("Iran fires drones and missiles in response to US strikes, Iranian "
+     "semi-official media says", "iran", "confirmed"),
+    # Both actors named, US is the subject.
+    ("US launches strikes on Iran's IRGC targets after attacks on commercial "
+     "vessels in Strait of Hormuz", "us_coalition", "confirmed"),
+    # One-sided assertion. Direction is real, standing is not.
+    ("IRGC claims elimination of US personnel in Jordan base strike",
+     "iran", "claimed"),
+    # Asserted AND negated. Any regex reads this as an Iranian strike.
+    ("Military denies Iran's claims that it struck a US base in Jordan as "
+     "strikes resume", "iran", "denied"),
+    # No actor at all. Guessing one here is the worst outcome available.
+    ("Liberian-flagged tanker hit by three unidentified projectiles near Strait "
+     "of Hormuz", "unattributed", "unknown"),
+    # A threat is not an action, even though it names an actor and a verb.
+    ("Trump threatens more strikes as death toll in Iran rises to 18",
+     "us_coalition", "unknown"),
+    # Casualty report about a strike, actor named only as the attributor's subject.
+    ("Iran says 18 killed, 142 injured in US strikes since Sunday",
+     "us_coalition", "confirmed"),
+    # Multi-target Iranian salvo.
+    ("Iranian Drone and Missile Attacks Target Kuwait, Jordan, Bahrain and Iraq",
+     "iran", "confirmed"),
+]
+
+
+def _grade_bulletin(items: list) -> tuple[bool, str]:
+    """Score the extraction against the traps, and say which ones it fell into.
+
+    Actor is graded harder than standing: a wrong actor files a strike in the wrong
+    half of the war, while a wrong standing only mislabels its provenance.
+    """
+    actor_hits = standing_hits = 0
+    misses = []
+    for i, (headline, want_actor, want_standing) in enumerate(BULLETIN_SAMPLE):
+        got = items[i] if i < len(items) else {}
+        got_actor = str(got.get("actor", "")).lower()
+        got_standing = str(got.get("standing", "")).lower()
+        if got_actor == want_actor:
+            actor_hits += 1
+        else:
+            misses.append(f"#{i + 1} actor {got_actor or '-'}!={want_actor}")
+        if got_standing == want_standing:
+            standing_hits += 1
+        elif got_actor == want_actor:
+            misses.append(f"#{i + 1} standing {got_standing or '-'}!={want_standing}")
+    n = len(BULLETIN_SAMPLE)
+    ok = actor_hits == n and standing_hits >= n - 1
+    note = f"actor {actor_hits}/{n}, standing {standing_hits}/{n}"
+    if misses:
+        note += " — " + "; ".join(misses[:4])
+    return ok, note
+
+
 def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
-          extras: dict | None = None, prose: bool = False) -> None:
+          extras: dict | None = None, prose: bool = False,
+          bulletin: bool = False) -> None:
     print(f"\n{'=' * 72}\n{provider}/{model}")
     if not os.environ.get(key_env):
         print(f"  SKIP: {key_env} not set")
@@ -398,6 +459,17 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
                 max_tokens=NARRATIVE_MAX_TOKENS,
                 json_mode=False,
             )
+        elif bulletin:
+            # The REAL extraction prompt from the bulletin module, so a change to
+            # the prompt is testable without re-deriving it here.
+            events = [{"title": h} for h, _, _ in BULLETIN_SAMPLE]
+            result = call_llm(
+                router,
+                prompt=iran_bulletin._extraction_prompt(events),
+                system_prompt=iran_bulletin._EXTRACTION_SYSTEM_PROMPT,
+                max_tokens=40 * len(events) + 512,
+                json_mode=True,
+            )
         else:
             result = call_llm(
                 router,
@@ -415,6 +487,23 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
             llm_client.get_profile = real_get_profile
 
     content = result.get("content", "")
+    if bulletin:
+        try:
+            items = iran_bulletin._parse_extraction(content, len(BULLETIN_SAMPLE))
+            ok, note = _grade_bulletin(items)
+        except Exception as exc:
+            items, ok, note = [], False, f"unparseable: {str(exc)[:120]}"
+        print(f"  latency={result.get('latency_ms')}ms  "
+              f"verdict={'PASS' if ok else 'FAIL'} ({note})")
+        print("  --- direction as extracted ---")
+        for i, (headline, _, _) in enumerate(BULLETIN_SAMPLE):
+            got = items[i] if i < len(items) else {}
+            print(f"    {got.get('actor', '-'):<13} {got.get('standing', '-'):<10} "
+                  f"{headline[:70]}")
+        if not ok:
+            print("  --- raw content ---")
+            print(str(content)[:2000])
+        return
     if prose:
         ok, note = _grade_prose(content, result)
         print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
@@ -451,6 +540,9 @@ def main() -> int:
                          "(default 120s, or 300s with --prose)")
     ap.add_argument("--extras", default="",
                     help='JSON merged into payload_extras, e.g. \'{"reasoning_effort":"none"}\'')
+    ap.add_argument("--bulletin", action="store_true",
+                    help="run the Iran bulletin's direction/standing extraction "
+                         "against real theatre headlines chosen for their traps")
     ap.add_argument("--prose", action="store_true",
                     help="run the REAL Turkish SITREP narrator prompt instead of the "
                          "Pass C batch — for quality-router slots, whose job is prose")
@@ -491,7 +583,7 @@ def main() -> int:
             model, key_env = rest, default_key.get(provider, "")
         try:
             probe(provider, model, key_env, timeout=timeout, extras=extras,
-                  prose=args.prose)
+                  prose=args.prose, bulletin=args.bulletin)
         except Exception as exc:
             # One model's crash must not cancel the models queued behind it.
             print(f"  CRASHED: {type(exc).__name__}: {str(exc)[:300]}")
