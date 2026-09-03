@@ -229,3 +229,93 @@ class TestBulletinRouter:
 
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
         assert lr.build_bulletin_router().accounts == []
+
+
+class TestNarrativePrompt:
+    """The prompt carries the two rules the measurements made non-negotiable."""
+
+    def _sections(self):
+        return ib.group_into_sections([
+            {"title": "US launches strikes on IRGC targets", "country_iso": "IR",
+             "actor": ib.US_SIDE, "standing": ib.STANDING_CONFIRMED,
+             "severity": 95, "domain": "reuters.com", "corroborating_sources": [{}]},
+            {"title": "IRGC claims elimination of US personnel in Jordan",
+             "country_iso": "JO", "actor": ib.IRAN_SIDE,
+             "standing": ib.STANDING_CLAIMED, "severity": 75,
+             "domain": "farsnews.ir", "corroborating_sources": []},
+        ])
+
+    def _prompt(self):
+        from datetime import datetime, timezone
+        return ib._narrative_prompt(
+            self._sections(),
+            datetime(2026, 9, 2, 7, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 3, 7, 0, tzinfo=timezone.utc))
+
+    def test_it_forbids_inventing_a_time(self):
+        """time_certainty='exact' was 0 across all 12 theatre countries, so any
+        clock detail in the output would be fabricated."""
+        assert "Saat verme" in self._prompt()
+
+    def test_a_one_sided_claim_must_not_be_told_as_fact(self):
+        prompt = self._prompt()
+        assert "Tek taraflı iddia" in prompt
+        assert "gerçekleşmiş gibi anlatma" in prompt
+
+    def test_standing_reaches_the_model_per_event(self):
+        prompt = self._prompt()
+        assert '"durum": "Tek taraflı iddia"' in prompt
+        assert '"durum": "Doğrulandı"' in prompt
+
+    def test_sections_are_upper_case_so_the_renderer_sees_headers(self):
+        """render_sitrep_html is shape-driven: an ALL-CAPS line is a section."""
+        for title in ib.SECTION_TITLES.values():
+            letters = [c for c in title if c.isalpha()]
+            assert letters and all(c == c.upper() for c in letters), title
+
+    def test_every_section_title_appears_even_when_empty(self):
+        prompt = self._prompt()
+        for title in ib.SECTION_TITLES.values():
+            assert title in prompt
+
+
+class TestBuildBulletin:
+    def test_an_empty_window_is_not_an_error(self, monkeypatch):
+        monkeypatch.setattr(ib, "fetch_theatre_events", lambda *a: [])
+
+        def _must_not_run(*a, **k):
+            raise AssertionError("no events means no model call")
+
+        monkeypatch.setattr(ib, "call_llm", _must_not_run)
+        from datetime import datetime, timezone
+        out = ib.build_bulletin(None, None,
+                                datetime(2026, 9, 2, tzinfo=timezone.utc),
+                                datetime(2026, 9, 3, tzinfo=timezone.utc))
+        assert out["status"] == "empty"
+        assert out["narrative"] == ""
+
+    def test_narrative_is_requested_as_prose_not_json(self, monkeypatch):
+        """A reasoning model asked for JSON returns the report inside a string
+        field, and the shape-driven renderer then sees one long line."""
+        captured = {}
+        monkeypatch.setattr(ib, "fetch_theatre_events", lambda *a: [
+            {"title": "US strikes IRGC site", "country_iso": "IR",
+             "corroborating_sources": [], "severity": 90, "domain": "x.com"}])
+        monkeypatch.setattr(ib, "extract_direction",
+                            lambda r, e, db_conn=None: [
+                                x.update(actor=ib.US_SIDE,
+                                         standing=ib.STANDING_CONFIRMED) or x
+                                for x in e])
+
+        def _fake(**kwargs):
+            captured.update(kwargs)
+            return {"content": "YÖNETİCİ ÖZETİ\nBir şeyler oldu."}
+
+        monkeypatch.setattr(ib, "call_llm", _fake)
+        from datetime import datetime, timezone
+        out = ib.build_bulletin(None, None,
+                                datetime(2026, 9, 2, tzinfo=timezone.utc),
+                                datetime(2026, 9, 3, tzinfo=timezone.utc))
+        assert captured["json_mode"] is False
+        assert out["status"] == "ok"
+        assert out["narrative"].startswith("YÖNETİCİ ÖZETİ")

@@ -246,3 +246,114 @@ def group_into_sections(events: List[Dict[str, Any]]
     for bucket in sections.values():
         bucket.sort(key=lambda e: (e.get("severity") or 0), reverse=True)
     return sections
+
+# ---------------------------------------------------------------------------
+# Narrative
+# ---------------------------------------------------------------------------
+#
+# Rendered by sitrep_html.render_sitrep_html, which is shape-driven rather than
+# SITREP-specific: an ALL-CAPS line becomes a section header, a short line that
+# does not end in punctuation becomes a place sub-heading, and a bulleted line
+# becomes a bullet. That is exactly the shape of the report this bulletin
+# reproduces — section, place, facts — so the narrative is written to it and no
+# second renderer is needed.
+
+SECTION_TITLES = {
+    SECTION_ON_IRAN: "İRAN TOPRAKLARINA YÖNELİK SALDIRILAR",
+    SECTION_FROM_IRAN: "İRAN'DAN KOMŞU ÜLKELERE YÖNELİK SALDIRILAR",
+    SECTION_REGIONAL: "BÖLGESEL GELİŞMELER VE STRATEJİK HAMLELER",
+}
+
+# What each standing is called in the report's own source line. The vocabulary is
+# the SITREP's, so a reader moving between the two reports is not asked to learn a
+# second one — and "Doğrulanmamış" is never dressed up as anything stronger.
+STANDING_LABELS = {
+    STANDING_CONFIRMED: "Doğrulandı",
+    STANDING_CLAIMED: "Tek taraflı iddia",
+    STANDING_DENIED: "İddia edildi, yalanlandı",
+    STANDING_UNKNOWN: "Durum belirsiz",
+}
+
+_NARRATIVE_SYSTEM_PROMPT = (
+    "Sen bir güvenlik analistisin. Türkçe, düz ve devrik olmayan cümlelerle "
+    "yazarsın. Sana verilen veride olmayan hiçbir olayı, sayıyı, yeri veya "
+    "tarihi yazmazsın; eksik bilgiyi uydurmak yerine eksik bırakırsın."
+)
+
+
+def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
+                      window_start: datetime, window_end: datetime) -> str:
+    payload = {}
+    for key, title in SECTION_TITLES.items():
+        payload[title] = [
+            {
+                "baslik": ev.get("title", ""),
+                "ulke": ev.get("country_iso"),
+                "fail": ev.get("actor"),
+                "durum": STANDING_LABELS.get(ev.get("standing"), "Durum belirsiz"),
+                "siddet": ev.get("severity"),
+                "yayinci": ev.get("domain"),
+                "bagimsiz_kaynak": len(ev.get("corroborating_sources") or []),
+            }
+            for ev in sections.get(key, [])
+        ]
+    return "\n".join([
+        f"Aşağıdaki veriden {window_start:%d.%m.%Y %H:%M} — {window_end:%d.%m.%Y %H:%M} "
+        "UTC penceresi için bölgesel askeri gelişmeler bültenini yaz.",
+        "",
+        "BİÇİM (renderer bu şekle göre çalışır, birebir uy):",
+        "- Her bölüm başlığını TAMAMI BÜYÜK HARF tek satır olarak yaz.",
+        "- İlk bölüm YÖNETİCİ ÖZETİ olsun: 2-3 paragraf, madde işareti yok.",
+        "- Bir olay kümesinin yerini kısa bir satır olarak yaz (nokta ile bitmesin).",
+        "- Ayrıntıları '- ' ile başlayan maddeler halinde yaz.",
+        "",
+        "KURALLAR:",
+        "- Saat verme. Elimizde olayların saati YOK; 'akşam saatlerinde' gibi "
+        "ifadeler de uydurmadır. Yalnız verilen pencereye atıf yap.",
+        "- Her olayın failini ve durumunu yaz. 'Tek taraflı iddia' veya "
+        "'İddia edildi, yalanlandı' olan bir olayı ASLA gerçekleşmiş gibi anlatma; "
+        "kimin iddia ettiğini söyle.",
+        "- Faili 'unattributed' olan olaylarda fail atfetme.",
+        "- Verideki sayıları değiştirme, yuvarlama, toplama.",
+        "",
+        "VERİ:",
+        json.dumps(payload, ensure_ascii=False, indent=1),
+    ])
+
+
+def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
+                   window_end: datetime, max_tokens: int = 6000) -> Dict[str, Any]:
+    """Fetch, attribute, group and narrate the theatre bulletin.
+
+    Returns the narrative plus the grouped sections, so the caller can render and
+    dispatch without re-deriving either.
+    """
+    events = fetch_theatre_events(db_conn, window_start, window_end)
+    if not events:
+        logger.info("Iran bulletin: no theatre events in window")
+        return {"events": [], "sections": group_into_sections([]), "narrative": "",
+                "status": "empty"}
+
+    extract_direction(router, events, db_conn=db_conn)
+    sections = group_into_sections(events)
+    logger.info(
+        "Iran bulletin: %d events — on Iran %d, from Iran %d, regional %d",
+        len(events), len(sections[SECTION_ON_IRAN]),
+        len(sections[SECTION_FROM_IRAN]), len(sections[SECTION_REGIONAL]),
+    )
+
+    result = call_llm(
+        router=router,
+        prompt=_narrative_prompt(sections, window_start, window_end),
+        system_prompt=_NARRATIVE_SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+        # Prose, never JSON: a reasoning model asked for JSON here returns the
+        # narrative wrapped in a string field and the renderer sees one long line.
+        json_mode=False,
+    )
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, result, router, success=True,
+                          purpose="bulletin_narrative")
+    return {"events": events, "sections": sections,
+            "narrative": result.get("content", ""), "status": "ok",
+            "model": result.get("model")}
