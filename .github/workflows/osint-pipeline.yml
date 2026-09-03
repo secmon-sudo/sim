@@ -2,9 +2,18 @@ name: SIM OSINT Pipeline
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours (unreliable — cron-job.org dispatch is the backstop;
-                           # back-to-back double-triggers are absorbed by the orchestrator's
-                           # 90-min run-spacing guard, see MIN_RUN_SPACING_MINUTES)
+    # Every 6 hours, and deliberately NOT the primary trigger. cron-job.org
+    # dispatches every 3h and is the dependable one; GitHub's scheduler drifts, so
+    # this is the backstop that keeps the pipeline alive if that dispatcher dies.
+    #
+    # It used to run every 2 hours, which made the two co-primaries: 12 GitHub
+    # triggers a day plus 8 dispatches for roughly 11 actual runs. Measured over 40
+    # runs (3 Sep 2026), 10 of them — 25% — were absorbed by the run-spacing guard
+    # after the runner had already booted, checked out and installed dependencies:
+    # 33 minutes of runner time spent to reach an early exit. At 6 hours the total
+    # is 4 + 8 = 12 attempts against ~11 runs, and a cron-job.org outage still
+    # leaves 4 runs a day rather than none.
+    - cron: '0 */6 * * *'
   workflow_dispatch:       # Manual / cron-job.org trigger
     inputs:
       force:
