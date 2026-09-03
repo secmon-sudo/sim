@@ -224,3 +224,47 @@ class TestReportIdentity:
     def test_the_title_is_not_jargon(self):
         assert "Tiyatro" not in run.REPORT_TITLE
         assert run.REPORT_TITLE.isupper()
+
+
+class TestGroupedAppendix:
+    """The full log is split into the same three blocks as the narrative.
+
+    Without it the bulletin's organising idea — direction — survives only in the
+    prose, and the first real run put 182 undivided rows underneath it.
+    """
+
+    def test_every_row_declares_its_section(self):
+        for row in run._clusters_for_render(_result(2, 2, 1)):
+            assert row["group"] in ib.SECTION_TITLES.values()
+
+    def test_the_log_renders_one_block_per_section(self):
+        # Titles are compared ESCAPED: "İRAN'DAN" reaches the page as
+        # "İRAN&#x27;DAN", which is the renderer being correct, not a mismatch.
+        from src.services.sitrep_html import _appendix_groups, _esc
+        html = _appendix_groups(run._clusters_for_render(_result(2, 3, 1)))
+        for title in ib.SECTION_TITLES.values():
+            assert _esc(title) in html
+        # counts are printed beside each block heading
+        assert "(2)" in html and "(3)" in html and "(1)" in html
+
+    def test_an_empty_section_prints_no_block(self):
+        from src.services.sitrep_html import _appendix_groups
+        html = _appendix_groups(run._clusters_for_render(_result(1, 0, 0)))
+        from src.services.sitrep_html import _esc
+        assert _esc(ib.SECTION_TITLES[ib.SECTION_ON_IRAN]) in html
+        assert _esc(ib.SECTION_TITLES[ib.SECTION_FROM_IRAN]) not in html
+
+    def test_a_sitrep_without_groups_is_unchanged(self):
+        """The SITREP is already one country and has nothing to group by."""
+        from src.services.sitrep_html import _appendix_groups, _appendix_row
+        clusters = [{"location": "Kyiv", "snippet": "x", "severity": 50},
+                    {"location": "Lviv", "snippet": "y", "severity": 40}]
+        assert _appendix_groups(clusters) == "".join(
+            _appendix_row(c) for c in clusters)
+
+    def test_block_order_follows_the_narrative_not_the_alphabet(self):
+        from src.services.sitrep_html import _appendix_groups, _esc
+        html = _appendix_groups(run._clusters_for_render(_result(1, 1, 1)))
+        positions = [html.index(_esc(ib.SECTION_TITLES[k])) for k in
+                     (ib.SECTION_ON_IRAN, ib.SECTION_FROM_IRAN, ib.SECTION_REGIONAL)]
+        assert positions == sorted(positions)

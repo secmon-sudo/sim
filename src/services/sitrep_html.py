@@ -299,6 +299,42 @@ def _appendix_row(cluster: Dict[str, Any]) -> str:
     )
 
 
+def _appendix_groups(clusters: List[Dict[str, Any]]) -> str:
+    """The log body: one flat list, or blocks when the clusters name a group.
+
+    The SITREP has nothing to group by — it is already one country — so a cluster
+    without a `group` produces exactly the flat list it always did. The bulletin
+    sets one per section, because its whole organising idea is direction and a
+    182-row undivided list throws that away at the moment a reader most needs it.
+    Order follows first appearance rather than sorting, so the log reads in the
+    same order as the narrative above it.
+    """
+    if not any(c.get("group") for c in clusters):
+        return "".join(_appendix_row(c) for c in clusters)
+
+    order: List[str] = []
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for c in clusters:
+        key = c.get("group") or "DİĞER"
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(c)
+
+    blocks = []
+    for key in order:
+        members = grouped[key]
+        blocks.append(
+            f'<div style="margin:16px 0 2px;padding-top:10px;'
+            f'border-top:1px solid #1e293b;font-size:11px;font-weight:700;'
+            f'letter-spacing:1.1px;color:#7db3ff;text-transform:uppercase">'
+            f'{_esc(key)} <span style="color:#5b6b8a;font-weight:400">'
+            f'({len(members)})</span></div>'
+            + "".join(_appendix_row(c) for c in members)
+        )
+    return "".join(blocks)
+
+
 def _appendix(clusters: List[Dict[str, Any]]) -> str:
     """
     Deterministic full-day log inside a collapsed <details>: every cluster the
@@ -308,7 +344,7 @@ def _appendix(clusters: List[Dict[str, Any]]) -> str:
     """
     if not clusters:
         return ""
-    rows = "".join(_appendix_row(c) for c in clusters)
+    rows = _appendix_groups(clusters)
     return (
         f'<details style="margin-top:30px;background:#0d1526;border:1px solid #1e293b;'
         f'border-radius:12px;padding:0 14px">'

@@ -125,6 +125,10 @@ def _clusters_for_render(result: Dict[str, Any]) -> list:
                 # "kaynak" and the publisher was invisible.
                 "sources": [{"name": ev.get("domain"), "url": ev.get("url")}],
                 "occurred_at": occurred,
+                # Splits the full log into the same three blocks as the
+                # narrative; without it the bulletin's organising idea
+                # survives only in the prose.
+                "group": SECTION_TITLES[section],
             })
     return clusters
 
