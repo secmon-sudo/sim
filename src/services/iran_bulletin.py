@@ -172,15 +172,14 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         f'or coalition forces or their bases were hit, "{OTHER_SIDE}" for anyone '
         f'else, "{UNATTRIBUTED}" when the text names no target.',
         "",
-        f'war_related: true when the headline concerns armed conflict involving '
-        f'Iran or an Iran-aligned force (IRGC, Hezbollah, the Houthis) or the US '
-        f'and its coalition — a strike, an interception, air defence, a '
-        f'blockade, airspace or shipping disruption, an evacuation, a threat, '
+        f'war_related: true when the headline is about ARMED CONFLICT or a '
+        f'military/security operation — a strike, shelling, an interception, air '
+        f'defence, a raid, a blockade, a seizure or release across a front line, '
+        f'airspace or shipping disruption, an evacuation, a military threat, '
         f'diplomacy over the fighting, or casualties from any of it. false when '
-        f'the event merely HAPPENED in one of these countries and none of those '
-        f'parties is in it: ordinary crime, a road or aviation accident, a '
-        f'labour dispute, a domestic political story, or a separate conflict '
-        f'these parties are not part of.',
+        f'the event is not military at all and merely HAPPENED in one of these '
+        f'countries: ordinary crime and policing, a road or aviation accident, a '
+        f'labour or pay dispute, an unrelated domestic political story.',
         "",
         f'standing: "{STANDING_CONFIRMED}" when the headline reports the action as '
         f'having happened, "{STANDING_CLAIMED}" when one side claims/alleges/says it '

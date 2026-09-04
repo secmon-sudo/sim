@@ -409,11 +409,17 @@ BULLETIN_SAMPLE = [
     # The attacker is named ADJECTIVALLY and is nowhere near the subject position.
     # The prompt's "actor is the SUBJECT" rule pushes a model straight to
     # unattributed here, which is how this one reached the regional section.
+    # Target accepts two answers for the same measured reason as #8: Iran's salvos
+    # at the Gulf states were aimed at US bases IN them, so "the country" and "the
+    # coalition" are both defensible readings of what was hit — and the two slots
+    # split on it, qwen answering other and gemini us_coalition on identical input.
+    # The section is FROM_IRAN either way, so the row still discriminates on the
+    # thing it was added for: the ACTOR, named adjectivally and far from the subject.
     ('"Iranian aggression": Kuwait\'s air defense system responds to missile and '
-     "UAV attacks", "iran", "other", "confirmed", True),
+     "UAV attacks", "iran", ("other", "us_coalition"), "confirmed", True),
     # Interception frame, attacker named as an adjective.
     ("Bahrain air defence systems intercept, destroy Iranian drones",
-     "iran", "other", "confirmed", True),
+     "iran", ("other", "us_coalition"), "confirmed", True),
     # The counterpart that keeps the rule honest: SAME frame, no attacker named.
     # A model that has learned "interception means Iran" gets this wrong, and
     # guessing here is worse than the miss above.
@@ -426,20 +432,28 @@ BULLETIN_SAMPLE = [
     # Off-topic and not even violent, but it scored high enough to be narrated.
     ("Iranian professors threaten to suspend academic activity as salaries "
      "remain unpaid", "other", "other", "unknown", False),
-    # This row went in labelled True and the probe overturned it — both models
-    # answered off-topic, and on reflection they are right. The West Bank is a
-    # separate conflict with neither Iran, nor an Iran-aligned force, nor the
-    # coalition in it; it is in the fetch only because Israel is a theatre country.
-    # The field's wording was the thing at fault ("the regional military situation
-    # around it" invited exactly this argument) and now names the parties instead.
+    # These three rows cost the war_related field two rewrites, and the argument
+    # they settled is worth keeping. It was first written as "the Iran-US war or
+    # the regional military situation around it", and the probe called the Ramallah
+    # shooting off-topic. Narrowing it to name the PARTIES (Iran, IRGC, Hezbollah,
+    # the Houthis, the coalition) then made the Lebanon shelling off-topic too,
+    # because the headline does not name Hezbollah and this prompt's whole spine is
+    # that a model must not infer what the text does not say.
+    #
+    # Both rewrites were me drawing the line by belligerent. The line the report
+    # actually needs is MILITARY versus NOT: its masthead says "İran, Körfez ve
+    # Doğu Akdeniz hattı", so the Lebanese and Israeli fronts are its subject by
+    # construction, and what made the 4 Sep bulletin absurd was never a front — it
+    # was a police arrest, a pay dispute and a homicide count sitting between two
+    # missile strikes. Deciding "is this military" needs no world knowledge about
+    # who holds southern Lebanon, which is why a model can hold it steady.
     ('Two Palestinians were killed by IDF fire in the Ramallah area: "They threw '
-     'blocks and stones"', "other", "other", "confirmed", False),
-    # The pair that actually discriminates, and the reason the field cannot be a
-    # crime filter: both are violent deaths in the theatre, one week apart in the
-    # same corpus. Hezbollah is Iran-aligned, so the shelling is this report's
-    # subject; the Nazareth murders are not, and the 4 Sep bulletin printed them.
+     'blocks and stones"', "other", "other", "confirmed", True),
     ("Israeli artillery shelling reported in southern Lebanon",
      "other", "other", "confirmed", True),
+    # The pair that discriminates: both are violent deaths in Israel in the same
+    # corpus, and only one is a military act. A model that answers the same to both
+    # has reduced the field to "is it violent".
     ("Israel's 2026 homicide toll reaches 200 as three men shot to death in "
      "Nazareth in one night", "other", "other", "confirmed", False),
 ]
