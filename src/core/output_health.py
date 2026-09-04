@@ -246,12 +246,73 @@ def check_degradation_counters(conn, window_hours: float) -> List[Finding]:
                     "Degradation counters fired in the last day", listed)]
 
 
+# Roughly what the paid floor spends in a day: 7 calls at 13,040 tokens, 80/20
+# prompt/completion, against Haiku 4.5's $1/$5 per million. Used only to turn a
+# remaining balance into "about this many days left", which is the form a person
+# can act on — "$0.84 remaining" is not.
+FLOOR_USD_PER_DAY = 0.165
+CREDIT_WARN_DAYS = 14.0
+
+
+def check_openrouter_credit(conn, window_hours: float,
+                            warn_days: float = CREDIT_WARN_DAYS) -> List[Finding]:
+    """Is there enough credit left to keep the paid floor standing?
+
+    OpenRouter is prepaid, so the balance is a hard ceiling and nothing can
+    overspend it. That makes the risk not a surprise bill but a surprise
+    SILENCE: the credit runs out, the floor drops away, and the free rungs
+    beneath it quietly take over the reports — which is precisely the failure the
+    paid slot was added on 2026-09-04 to end. A floor that can vanish without
+    saying so is not a floor.
+
+    Takes no database argument beyond the signature every check shares; the
+    balance lives at the provider. Never raises on a network problem — an
+    unreachable billing endpoint is not evidence of anything, and run_checks
+    would report the exception as a finding of its own.
+    """
+    import os
+
+    key = os.environ.get("OPENROUTER_API_KEY_A", "")
+    if not key:
+        return []
+    try:
+        import httpx
+
+        resp = httpx.get("https://openrouter.ai/api/v1/key",
+                         headers={"Authorization": f"Bearer {key}"}, timeout=15)
+        data = (resp.json() or {}).get("data") or {}
+    except Exception as exc:
+        logger.warning("OpenRouter credit check could not reach the API: %s", exc)
+        return []
+
+    limit, usage = data.get("limit"), data.get("usage")
+    if limit is None or usage is None:
+        # An uncapped key reports limit=None. Nothing to warn about, and guessing
+        # a ceiling would produce a daily false alarm.
+        return []
+    try:
+        remaining = float(limit) - float(usage)
+    except (TypeError, ValueError):
+        return []
+    days = remaining / FLOOR_USD_PER_DAY if FLOOR_USD_PER_DAY else 0.0
+    if days > warn_days:
+        return []
+    return [Finding(
+        "openrouter_credit_low",
+        f"OpenRouter kredisi ~{days:.0f} gün sonra bitiyor — bitince ücretli "
+        "zemin sessizce düşer ve raporları ücretsiz slotlar yazmaya başlar",
+        f"kalan ${remaining:.2f} (limit ${float(limit):.2f}, "
+        f"kullanılan ${float(usage):.2f})",
+    )]
+
+
 CHECKS = (
     check_sitrep_citations,
     check_sitrep_truncation,
     check_narrator_changed,
     check_bulletin_attribution,
     check_degradation_counters,
+    check_openrouter_credit,
 )
 
 

@@ -146,6 +146,63 @@ class TestDegradationCounters:
         assert oh.check_degradation_counters(conn, 30.0) == []
 
 
+class TestOpenRouterCredit:
+    """OpenRouter is prepaid, so the balance is a hard ceiling and nothing can
+    overspend it. The risk is not a surprise bill — it is a surprise SILENCE:
+    the credit runs out, the paid floor drops away, and the free rungs beneath
+    quietly take over the reports. That is the exact failure the paid slot was
+    added to end, so a floor that can vanish without saying so is not a floor."""
+
+    def _patch(self, monkeypatch, payload, key="k"):
+        import httpx
+
+        monkeypatch.setenv("OPENROUTER_API_KEY_A", key)
+
+        class _Resp:
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+
+    def test_a_low_balance_is_reported_in_days(self, monkeypatch):
+        # $1.00 left ÷ $0.165/day ≈ 6 days
+        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 9.0}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and out[0].key == "openrouter_credit_low"
+        assert "6 gün" in out[0].message
+        assert "$1.00" in out[0].detail
+
+    def test_a_healthy_balance_says_nothing(self, monkeypatch):
+        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 1.0}})
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
+    def test_an_uncapped_key_is_not_an_alarm(self, monkeypatch):
+        """limit=None means no ceiling; inventing one would fire every day."""
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 3.0}})
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
+    def test_no_key_means_no_check(self, monkeypatch):
+        monkeypatch.delenv("OPENROUTER_API_KEY_A", raising=False)
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
+    def test_a_network_failure_is_not_a_finding(self, monkeypatch):
+        """An unreachable billing endpoint is not evidence of anything, and a
+        raise here would be reported as a check_error instead."""
+        import httpx
+
+        monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+
+        def _boom(*a, **k):
+            raise httpx.ConnectError("down")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
+    def test_junk_values_do_not_crash_the_check(self, monkeypatch):
+        self._patch(monkeypatch, {"data": {"limit": "ten", "usage": 1.0}})
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
+
 class TestRunChecks:
     def test_one_broken_check_does_not_silence_the_others(self):
         """A health check that swallows its own errors stops checking silently,
