@@ -39,6 +39,10 @@ on:
         description: "İran bülteninin yön/iddia çıkarımını gerçek tuzaklı manşetlerde koştur"
         type: boolean
         default: false
+      regression:
+        description: "ÜRETİMDEKİ tüm slotları sına ve başarısızlıkta ops'a sayfala (haftalık cron bunu zaten yapar)"
+        type: boolean
+        default: false
 
 env:
   GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
@@ -94,8 +98,14 @@ jobs:
           path: logs/probe.txt
           retention-days: 7
 
+  # Scheduled always; on a manual dispatch ONLY when asked. It used to run on
+  # every dispatch, which meant probing one candidate model silently re-ran the
+  # whole production cascade behind it — 17 times on 2026-09-04, each one burning
+  # a full set of real LLM calls and paging the ops channel when a known-bad slot
+  # failed. Probing a candidate and auditing production are different jobs and
+  # only one of them should page anybody.
   regression:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || inputs.regression
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
