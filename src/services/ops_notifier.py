@@ -12,8 +12,14 @@ Design rules:
     ping must not mask the original problem.
   - No retry/backoff machinery. If the one POST fails, we log and move on — a
     health ping that hangs is worse than one that is occasionally missed.
-  - Posts to the normal alert channel (TELEGRAM_ALERTS_CHAT_ID); a health ping is
-    rare and important enough that a separate ops channel isn't worth the config.
+  - Posts to TELEGRAM_OPS_CHAT_ID, falling back to the alert channel only when
+    that is unset. This module used to say a separate ops channel "isn't worth
+    the config", and that was true while ops pings meant "the pipeline crashed" —
+    a few a month. On 2026-09-04 they became regular: hourly output-health checks
+    and a weekly slot regression. The first health page duly landed in the
+    channel real users read, in front of them, saying "minimax-m2.7" and
+    "llm_contract_rejected=1". Engineering diagnostics and user-facing alerts are
+    different audiences and now have different chats.
 """
 
 import html
@@ -31,9 +37,19 @@ def send_ops_alert(text: str, *, title: str = "SIM PIPELINE HEALTH") -> bool:
     `text` is treated as plain text and HTML-escaped; `title` becomes a bold header.
     """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
+    # The fallback is deliberate rather than lazy: losing a page about a dead
+    # pipeline is worse than showing one to a reader. But it warns every time,
+    # because the fallback IS the problem it is protecting against.
+    chat_id = os.environ.get("TELEGRAM_OPS_CHAT_ID")
+    if not chat_id:
+        chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
+        if chat_id:
+            logger.warning(
+                "TELEGRAM_OPS_CHAT_ID is not set — sending an engineering page to "
+                "the USER-FACING alert channel. Set it to a private ops chat."
+            )
     if not bot_token or not chat_id:
-        logger.warning("Ops alert skipped: missing TELEGRAM_BOT_TOKEN or TELEGRAM_ALERTS_CHAT_ID")
+        logger.warning("Ops alert skipped: missing TELEGRAM_BOT_TOKEN or a chat id")
         return False
 
     message = f"🛠️ <b>{html.escape(title)}</b>\n" + html.escape(text)

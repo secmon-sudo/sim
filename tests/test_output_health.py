@@ -136,7 +136,26 @@ class TestDegradationCounters:
         ])
         out = oh.check_degradation_counters(conn, 30.0)
         assert out and "llm_contract_rejected=5" in out[0].detail
-        assert "llm_unusable_200=1" in out[0].detail
+        # Below its own threshold, so it must not ride along on another
+        # counter's finding — that is how a page fills up with non-events.
+        assert "llm_unusable_200" not in out[0].detail
+
+    def test_the_guard_working_once_is_not_a_page(self):
+        """A single llm_contract_rejected means the citation guard caught a bad
+        slot and rotated past it — the system working as designed. The first
+        version of this check paged about exactly that, in the channel real
+        users read, and taught them the channel reports non-events."""
+        conn = _Conn([("sitrep_run", {"llm_contract_rejected": 1,
+                                      "llm_unusable_200": 1})])
+        assert oh.check_degradation_counters(conn, 30.0) == []
+
+    def test_a_silent_fail_open_pages_at_one(self):
+        """bulletin_direction_batch_failed has no threshold to hide behind: it
+        fails OPEN, so the report renders perfectly while having stopped saying
+        which way anything was going."""
+        conn = _Conn([("pipeline_run", {"bulletin_direction_batch_failed": 1})])
+        out = oh.check_degradation_counters(conn, 30.0)
+        assert out and "bulletin_direction_batch_failed=1" in out[0].detail
 
     def test_no_counters_is_silence(self):
         assert oh.check_degradation_counters(_Conn([]), 30.0) == []
@@ -301,3 +320,53 @@ class TestPageDeduplication:
         import scripts.deadman_check as dm
 
         assert dm._unreported_findings(None, [], 20.0) == []
+
+
+class TestOpsChannelSeparation:
+    """The first health page landed in the channel real users read, in front of
+    them, saying "minimax-m2.7" and "llm_contract_rejected=1". Engineering
+    diagnostics and user-facing alerts are different audiences."""
+
+    def _sent(self, monkeypatch):
+        import httpx
+
+        from src.services import ops_notifier
+
+        captured = {}
+
+        class _R:
+            status_code = 200
+
+            def json(self):
+                return {"ok": True}
+
+        def _post(url, json=None, timeout=None, **k):
+            captured.update(json or {})
+            return _R()
+
+        monkeypatch.setattr(httpx, "post", _post)
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+        return ops_notifier, captured
+
+    def test_the_ops_chat_is_preferred(self, monkeypatch):
+        notifier, sent = self._sent(monkeypatch)
+        monkeypatch.setenv("TELEGRAM_OPS_CHAT_ID", "-100OPS")
+        monkeypatch.setenv("TELEGRAM_ALERTS_CHAT_ID", "-100USERS")
+        notifier.send_ops_alert("bir şey")
+        assert sent["chat_id"] == "-100OPS"
+
+    def test_it_falls_back_rather_than_losing_a_page(self, monkeypatch):
+        """Losing a page about a dead pipeline is worse than showing one to a
+        reader — but the fallback warns every time, because it IS the problem."""
+        notifier, sent = self._sent(monkeypatch)
+        monkeypatch.delenv("TELEGRAM_OPS_CHAT_ID", raising=False)
+        monkeypatch.setenv("TELEGRAM_ALERTS_CHAT_ID", "-100USERS")
+        notifier.send_ops_alert("bir şey")
+        assert sent["chat_id"] == "-100USERS"
+
+    def test_no_chat_at_all_sends_nothing(self, monkeypatch):
+        notifier, sent = self._sent(monkeypatch)
+        monkeypatch.delenv("TELEGRAM_OPS_CHAT_ID", raising=False)
+        monkeypatch.delenv("TELEGRAM_ALERTS_CHAT_ID", raising=False)
+        assert notifier.send_ops_alert("bir şey") is False
+        assert not sent

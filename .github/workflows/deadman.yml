@@ -23,6 +23,7 @@ env:
   DATABASE_URL:            ${{ secrets.DATABASE_URL }}
   TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
   DEADMAN_MAX_AGE_HOURS:   '3'
   # Age of the newest workflow_dispatch-triggered pipeline run that still counts as a
   # live cron-job.org backstop. 0 disables the check — set that, rather than deleting

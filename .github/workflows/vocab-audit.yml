@@ -56,6 +56,7 @@ env:
   OPENROUTER_API_KEY_B:    ${{ secrets.OPENROUTER_API_KEY_B }}
   TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
 
 jobs:
   audit:

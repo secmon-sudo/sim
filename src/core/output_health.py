@@ -220,10 +220,22 @@ def check_degradation_counters(conn, window_hours: float) -> List[Finding]:
     """The counters the runs themselves recorded.
 
     src/core/counters.py exists so that a fallback path leaves evidence. This is
-    the half of the job that reads it back: a run where every stage succeeded and
-    llm_contract_rejected is 5 produced five reports that were rejected and
-    rewritten — which is the guard WORKING, and still worth knowing, because a
-    slot failing its contract every day is a slot that should be reordered.
+    the half of the job that reads it back.
+
+    Thresholds, not "any non-zero" — that was the first version and it was wrong
+    for a reason worth writing down. A single llm_contract_rejected means the
+    citation guard caught a bad slot and rotated past it, which is the system
+    working exactly as designed; paging about it teaches the reader that this
+    channel reports non-events. The counters below fire only where the number
+    means something the design did NOT already handle:
+
+      * bulletin_direction_batch_failed at ANY count, because it fails open. Those
+        events keep the unattributed default and the report renders perfectly
+        while having quietly stopped saying which way anything was going.
+      * llm_contract_rejected at 3+, which is no longer one bad slot rotated past
+        but a pattern — the same slot failing all day, or most of a run's
+        countries needing a second attempt.
+      * llm_unusable_200 at 5+; below that it is ordinary provider weather.
     """
     rows = _rows(conn, """
         SELECT event_type, value_json->'degradation_counters'
@@ -239,11 +251,15 @@ def check_degradation_counters(conn, window_hours: float) -> List[Finding]:
                 totals[name] = totals.get(name, 0) + int(count)
             except (TypeError, ValueError):
                 continue
-    if not totals:
+    notable = {k: v for k, v in totals.items()
+               if v >= COUNTER_ALARM_THRESHOLDS.get(k, DEFAULT_COUNTER_THRESHOLD)}
+    if not notable:
+        if totals:
+            logger.info("Degradation counters below threshold, not paging: %s", totals)
         return []
-    listed = ", ".join(f"{k}={v}" for k, v in sorted(totals.items()))
+    listed = ", ".join(f"{k}={v}" for k, v in sorted(notable.items()))
     return [Finding("degradation_counters",
-                    "Degradation counters fired in the last day", listed)]
+                    "Degradation counters fired above their thresholds", listed)]
 
 
 # Roughly what the paid floor spends in a day: 8 calls at $0.0055 each
@@ -304,6 +320,16 @@ def check_openrouter_credit(conn, window_hours: float,
         f"kalan ${remaining:.2f} (limit ${float(limit):.2f}, "
         f"kullanılan ${float(usage):.2f})",
     )]
+
+
+# See check_degradation_counters. A counter absent from this table has to reach
+# the default before it is worth a person's attention.
+COUNTER_ALARM_THRESHOLDS = {
+    "bulletin_direction_batch_failed": 1,
+    "llm_contract_rejected": 3,
+    "llm_unusable_200": 5,
+}
+DEFAULT_COUNTER_THRESHOLD = 3
 
 
 CHECKS = (
