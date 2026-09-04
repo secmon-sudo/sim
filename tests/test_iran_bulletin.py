@@ -231,14 +231,17 @@ class TestBulletinRouter:
         class _FakeRouter:
             accounts = [_Acct("openai/gpt-oss-20b"),
                         _Acct("nvidia/nemotron-3-super-120b-a12b:free"),
+                        _Acct("gemini-3.5-flash-lite"),
                         _Acct("qwen/qwen3.8-27b"),
                         _Acct("some/unmeasured-model")]
 
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
         out = lr.build_bulletin_router()
         models = [a.model for a in out.accounts]
-        assert models == ["qwen/qwen3.8-27b",
-                          "nvidia/nemotron-3-super-120b-a12b:free"]
+        # Both exclusions are for the same measured failure — asserting a
+        # direction the text does not carry. nemotron joined gpt-oss-20b on
+        # 2026-09-04: it answers actor=iran to a headline that names no attacker.
+        assert models == ["qwen/qwen3.8-27b", "gemini-3.5-flash-lite"]
 
     def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
         """An absent slot leaves events unattributed and the bulletin says so;

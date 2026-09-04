@@ -516,23 +516,42 @@ def build_llm_router() -> LLMRouter:
 
 
 # Slots measured against the bulletin's REAL extraction prompt
-# (scripts/probe_models.py --bulletin, 3 Sep 2026), in the order they scored:
+# (scripts/probe_models.py --bulletin). Re-measured 2026-09-04 on the sample
+# grown from 8 rows to 16, after the 4 Sep bulletin filed 15 real strikes as
+# "regional" and printed a police arrest between two missile strikes:
 #
-#   qwen/qwen3.8-27b        actor 8/8  standing 8/8   520ms
-#   gemini-3.5-flash-lite   actor 8/8  standing 8/8  1041ms
-#   nemotron-3-super        actor 8/8  standing 7/8  2063ms
-#   openai/gpt-oss-20b      actor 6/8  standing 7/8   976ms   ← EXCLUDED
+#   gemini-3.5-flash-lite   actor 16/16  target 16/16  standing 16/16  war 16/16  ← PASS
+#   qwen/qwen3.8-27b        actor 16/16  target 16/16  standing 16/16  war 15/16  (see below)
+#   nemotron-3-super        actor 14/16  target 16/16  standing 13/16  war 16/16  ← EXCLUDED
+#   openai/gpt-oss-20b      actor  6/8   standing  7/8                            ← EXCLUDED
 #
-# gpt-oss-20b is excluded for a specific, reproducible failure, not a general
-# impression: on "Iran says 18 killed, 142 injured in US strikes" it returns
-# actor=iran, which files an American strike as an Iranian one. Direction is the
-# single thing this bulletin exists to state, and a slot that inverts it is worse
-# than a slot that is missing — an absent slot leaves the event unattributed and
-# the bulletin says so, while this one asserts the opposite of what happened.
+# qwen's figures are from the round before the last three prompt clarifications,
+# and its one war miss is a reference label the probe then talked me out of. Groq
+# has answered 429 on the first call of every probe round since, so it has NOT
+# been re-measured under the final prompt — the changes since only tighten
+# definitions in directions it already answered correctly, but that is an argument
+# and not a measurement. Re-run it.
+#
+# Both exclusions are for a specific reproducible failure, never a general
+# impression, and both are the same class: asserting a direction the text does not
+# carry.
+#   * gpt-oss-20b returns actor=iran on "Iran says 18 killed, 142 injured in US
+#     strikes", filing an American strike as an Iranian one.
+#   * nemotron returns actor=iran on "Kuwait Air Defences Responding To Missile,
+#     Drone Strikes: Kuwaiti Army", which names no attacker at all. It held that
+#     answer across four probe rounds including the one where a concrete
+#     counterweight in the prompt fixed exactly this in gemini. Filling the actor
+#     in from what a model knows about who is fighting in the Gulf is the failure
+#     assign_section's own docstring calls the worst outcome available, and that
+#     headline shape appeared six times in the 4 Sep window alone.
+# Losing the third rung costs nothing observed: over the bulletin's first two days
+# extraction ran 27 times on qwen and 12 on gemini, and never once reached
+# nemotron. And the failure it leaves behind is the honest one — no slot means
+# every event stays unattributed and lands in the regional section, which is the
+# bulletin saying it could not read the direction rather than guessing it.
 BULLETIN_MEASURED_MODELS = (
     "qwen/qwen3.8-27b",
     "gemini-3.5-flash-lite",
-    "nvidia/nemotron-3-super-120b-a12b:free",
 )
 
 
