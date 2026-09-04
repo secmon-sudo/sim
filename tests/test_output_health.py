@@ -238,3 +238,66 @@ class TestFormatting:
 def test_every_check_is_registered_and_callable(check):
     assert callable(check)
     assert check.__doc__, f"{check.__name__} must say what it is for"
+
+
+class TestPageDeduplication:
+    """The dead-man runs several times a day and the health window is 30 hours,
+    so without this one bad SITREP is reported five or six times — same words,
+    same run, until the window rolls past it. An alarm that repeats itself is one
+    people learn to swipe away, and then it is worth less than no alarm."""
+
+    def _conn(self, previous_keys=None):
+        """deadman_check calls conn.execute(...).fetchone() directly (psycopg3
+        style), which is a different shape from the cursor fake above."""
+
+        class _Res:
+            def fetchone(self):
+                if previous_keys is None:
+                    return None
+                return ({"keys": previous_keys},)
+
+        class _C:
+            def execute(self, *a, **k):
+                return _Res()
+
+        return _C()
+
+    def test_a_finding_already_paged_today_is_suppressed(self):
+        import scripts.deadman_check as dm
+
+        conn = self._conn(["sitrep_no_citations"])
+        fresh = dm._unreported_findings(
+            conn, [oh.Finding("sitrep_no_citations", "x")], 20.0)
+        assert fresh == []
+
+    def test_a_new_finding_still_pages_alongside_an_old_one(self):
+        import scripts.deadman_check as dm
+
+        conn = self._conn(["sitrep_no_citations"])
+        fresh = dm._unreported_findings(conn, [
+            oh.Finding("sitrep_no_citations", "eski"),
+            oh.Finding("sitrep_truncated", "yeni"),
+        ], 20.0)
+        assert [f.key for f in fresh] == ["sitrep_truncated"]
+
+    def test_the_count_changing_is_not_a_new_incident(self):
+        """"3 SITREP(s)" becoming "4 SITREP(s)" an hour later is the same
+        incident; keying on the text rather than the key would defeat this."""
+        import scripts.deadman_check as dm
+
+        conn = self._conn(["sitrep_no_citations"])
+        fresh = dm._unreported_findings(
+            conn, [oh.Finding("sitrep_no_citations", "4 SITREP(s) ...")], 20.0)
+        assert fresh == []
+
+    def test_nothing_reported_yet_means_everything_is_fresh(self):
+        import scripts.deadman_check as dm
+
+        fresh = dm._unreported_findings(
+            self._conn(), [oh.Finding("k", "x"), oh.Finding("j", "y")], 20.0)
+        assert len(fresh) == 2
+
+    def test_no_findings_needs_no_query(self):
+        import scripts.deadman_check as dm
+
+        assert dm._unreported_findings(None, [], 20.0) == []

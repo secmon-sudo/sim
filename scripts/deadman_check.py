@@ -199,21 +199,70 @@ def check_dispatch_backstop(db_url: str, max_age_hours: float,
     return False
 
 
-def check_output_health(db_url: str, window_hours: float) -> bool:
+# One page per finding per day. The dead-man runs several times a day and the
+# output-health window is 30 hours, so without this a single bad SITREP is
+# reported five or six times — the same words, about the same run, until the
+# window rolls past it. An alarm that repeats itself is one people learn to
+# swipe away, and then it is worth less than no alarm at all.
+OUTPUT_HEALTH_EVENT = "output_health_alert"
+OUTPUT_HEALTH_COOLDOWN_HOURS = 20.0
+
+
+def _unreported_findings(conn, findings, cooldown_hours: float):
+    """The findings that have not already been paged inside the cooldown.
+
+    Keyed on the finding's `key`, not on its text: "3 SITREP(s) shipped with NO
+    working source link" becoming "4 SITREP(s)" an hour later is the same
+    incident, and re-paging on the count would defeat the whole point.
+    """
+    if not findings:
+        return []
+    row = conn.execute(
+        """SELECT value_json
+             FROM system_telemetry
+            WHERE event_type = %s
+              AND timestamp > NOW() - (%s * INTERVAL '1 hour')
+            ORDER BY timestamp DESC
+            LIMIT 1""",
+        (OUTPUT_HEALTH_EVENT, cooldown_hours),
+    ).fetchone()
+    already = set((row[0] or {}).get("keys") or []) if row else set()
+    return [f for f in findings if f.key not in already]
+
+
+def check_output_health(db_url: str, window_hours: float,
+                        cooldown_hours: float = OUTPUT_HEALTH_COOLDOWN_HOURS) -> bool:
     """Page when a delivered report is empty of the thing that makes it a report.
 
     The dead-man's original question is "did it run". Every LLM failure this
     project has had answered yes and was still a failure — see
     src/core/output_health.py for the four that shipped. Returns True when it
     paged, so a caller (and the tests) can tell "healthy" from "checked nothing".
+
+    Pages at most once per finding per day. A finding that is still true tomorrow
+    pages again, which is right: it means nobody fixed it.
     """
     with psycopg.connect(db_url, connect_timeout=15) as conn:
         findings = run_checks(conn, window_hours)
-    text = format_report(findings)
-    if not text:
-        logger.info("Output health: nothing to report")
-        return False
-    logger.warning("Output health: %d finding(s)", len(findings))
+        fresh = _unreported_findings(conn, findings, cooldown_hours)
+        if not fresh:
+            logger.info("Output health: %d finding(s), all already reported today",
+                        len(findings))
+            return False
+        text = format_report(fresh)
+        # The record of what was paged is written BEFORE the send, and covers the
+        # whole set rather than only what was sent. A Telegram outage must not
+        # turn into a repeat page an hour later.
+        try:
+            conn.execute(
+                "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",
+                (OUTPUT_HEALTH_EVENT,
+                 json.dumps({"keys": sorted({f.key for f in findings})})),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("Output health: could not record the page")
+    logger.warning("Output health: %d finding(s), %d new", len(findings), len(fresh))
     send_ops_alert(text, title="SIM RAPOR SAĞLIĞI")
     return True
 

@@ -350,14 +350,22 @@ class TestQualityCascadeOrder:
         # different host, a different account, and it passed the probe.
         assert "@cf/mistralai/mistral-small-3.1-24b-instruct" in models
 
-    def test_the_cascade_is_exactly_the_measured_five(self, monkeypatch):
+    def test_the_cascade_is_exactly_the_measured_four(self, monkeypatch):
         assert [m for _p, m in self._slots(monkeypatch)] == [
             "google/gemini-3.1-flash-lite",
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
-            "minimax-m2.7",
             "gpt-oss",
         ]
+
+    def test_minimax_is_gone(self, monkeypatch):
+        """It narrated all five SITREPs on 4 Sep and shortened all 108 citation
+        URLs to bare domains, then reproduced it twice in the regression probe.
+        The citation contract already stopped it writing reports; removing it
+        stops it costing a 13.5K-token call every run, and stops it paging the
+        ops channel with the same news every Monday."""
+        models = [m for _p, m in self._slots(monkeypatch)]
+        assert "minimax-m2.7" not in models
 
     def test_the_last_rung_is_an_official_pollinations_model(self, monkeypatch):
         """laguna failed the 2026-09-04 probe by inventing the FIR code OAKWX,

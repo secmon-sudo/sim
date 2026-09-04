@@ -763,21 +763,22 @@ def _quality_slots() -> list:
             rpm=6, rpd=15,
             bucket=TokenBucket(rate_per_minute=6, daily_limit=15, burst=1),
         ),
-        # LLM7 publishes no RPM/RPD; the documented allowance is ~1M tokens/day and
-        # this router spends tokens in narrative-sized lumps, not in request counts.
-        # So the limits below are a self-imposed bound to keep day-accounting honest
-        # and to stop a retry storm from draining the allowance the rest of the day,
-        # NOT a mirror of a published server-side limit. burst=1 for the same reason
-        # as Mistral: two concurrent 6K-token narratives are not a load this tier is
-        # sized for. Lowest measured availability of LLM7's four reachable models
-        # (94.4%), which is acceptable for a slot that only runs when Mistral is out.
-        LLMAccount(
-            provider="llm7", account_id="A",
-            model="minimax-m2.7",
-            api_key=os.environ.get("LLM7_KEY", ""),
-            rpm=6, rpd=300,
-            bucket=TokenBucket(rate_per_minute=6, daily_limit=300, burst=1),
-        ),
+        # ── LLM7 minimax-m2.7, removed 2026-09-04 ────────────────────────
+        #
+        # It was the rung that started all of this. On 4 Sep it narrated all five
+        # country SITREPs after Mistral 429'd every call, and shortened every one
+        # of its 108 citation URLs to a bare domain: 108 blanked links, five
+        # reports that looked perfect and cited nothing. The regression probe then
+        # reproduced it twice from a cold start on the same day
+        # ("altered URLs: https://apnews.com, https://aviationweek.com").
+        #
+        # The citation contract added that morning already catches it, so it was
+        # never going to write another report. But a slot that always fails still
+        # costs a 13.5K-token call on every run before the contract sidelines it,
+        # and it would have paged the ops channel with the same news every Monday
+        # for as long as it sat here. Four rungs above and below it all pass; this
+        # one has nothing left to contribute.
+        #
         # per_user_rpm=30 is published in the Pollinations catalogue; halved here
         # because the number describes the gateway's own ceiling, not the upstream
         # capacity behind it.
