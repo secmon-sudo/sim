@@ -215,6 +215,11 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         'from the receiving end: the actor is whoever FIRED, not whoever intercepted. '
         'If the text does not say whose missiles they were, the actor is '
         f'"{UNATTRIBUTED}" — that is the honest answer, not a reason to guess.',
+        '- Concretely, "Air defences respond to missile and drone strikes" names no '
+        f'attacker at all, so actor="{UNATTRIBUTED}". What you know about who is '
+        'fighting in the region is not in the text and must not be used. Only an '
+        'explicit "Iranian missiles", "Iranian drones" or a named attacker makes '
+        f'it "{IRAN_SIDE}".',
         "",
         '- The target is not the country the story is filed under. "Iran strikes '
         'bases in Bahrain, Iraq and Jordan" is actor=iran, target=us_coalition.',
