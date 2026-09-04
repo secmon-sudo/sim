@@ -92,6 +92,21 @@ class TestExtractionParsing:
                 '"standing":"confirmed"}]}\nHope that helps.')
         assert ib._parse_extraction(body, 1)[0]["actor"] == ib.IRAN_SIDE
 
+    def test_a_trailing_second_object_does_not_lose_the_batch(self):
+        """gemini-3.5-flash-lite failed the direction probe twice on 2026-09-04
+        with "Extra data", having answered every row correctly: it appended a
+        second JSON object after the answer, and the first-brace-to-last-brace
+        span then covered both. One trailing object was costing a whole batch."""
+        body = ('{"items":[{"n":1,"actor":"iran","target":"us_coalition",'
+                '"standing":"confirmed"}]}\n{"note":"analysis complete"}')
+        assert ib._parse_extraction(body, 1)[0]["actor"] == ib.IRAN_SIDE
+
+    def test_a_preamble_before_one_object_still_works(self):
+        """The wide span is what handles this, so the fallback must not replace
+        it — the two shapes need different readings of the same reply."""
+        body = 'Analiz:\n{"items":[{"n":1,"actor":"us_coalition"}]}\nBitti.'
+        assert ib._parse_extraction(body, 1)[0]["actor"] == ib.US_SIDE
+
     def test_an_invented_label_is_treated_as_absent(self):
         """A hallucinated actor would move a real strike into the wrong half of
         the war, so an unrecognised value must not be trusted."""

@@ -229,12 +229,29 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _parse_extraction(content: str, expected: int) -> List[Dict[str, str]]:
-    """Parse the batch reply, tolerating a model that wraps or pads its JSON."""
+def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
+    """Parse the batch reply, tolerating a model that wraps or pads its JSON.
+
+    Two shapes have to survive, and one span cannot cover both. A preamble
+    followed by one object ("Here is my analysis. {...}") needs the widest span
+    from the first brace to the last; a model that emits a SECOND object after
+    the answer ({"items":[...]}\n{"note":"..."}) makes that same span invalid
+    JSON and throws "Extra data". So: decode greedily from the first brace, and
+    if that fails, take the first complete object there instead.
+
+    Measured, not imagined — gemini-3.5-flash-lite failed the direction probe
+    twice in a row on 2026-09-04 with "Extra data: line 1 column 87" and
+    "Extra data: line 7 column 4", having answered every row correctly. A
+    trailing object was costing a whole batch its extraction.
+    """
     start, end = content.find("{"), content.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("no JSON object in extraction reply")
-    items = json.loads(content[start:end + 1]).get("items", [])
+    try:
+        parsed = json.loads(content[start:end + 1])
+    except json.JSONDecodeError:
+        parsed, _ = json.JSONDecoder().raw_decode(content[start:])
+    items = parsed.get("items", [])
     # war_related defaults TRUE on every failure path below. The field decides
     # whether an event is dropped from the report entirely, and a parse failure is
     # not evidence that an event is off-topic — defaulting it false would let one
