@@ -162,12 +162,23 @@ def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     The point is to see THIS model's answer; a cascade would quietly hand the
     prompt to a healthy slot and report a success that says nothing.
     """
+    # Cloudflare puts the account id in the path, so the slot needs the endpoint
+    # too — and a probe with the token but not the id would otherwise POST to a
+    # URL that does not exist and report the model as broken.
+    endpoint = ""
+    if provider == "cloudflare":
+        cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        if not cf_account:
+            print("  NOTE: CLOUDFLARE_ACCOUNT_ID not set; the call will fail")
+        endpoint = ("https://api.cloudflare.com/client/v4/accounts/"
+                    f"{cf_account}/ai/v1/chat/completions")
     return LLMRouter([
         LLMAccount(
             provider=provider, account_id="A", model=model,
             api_key=os.environ.get(key_env, ""),
             rpm=30, rpd=10_000,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=10_000, burst=4),
+            endpoint=endpoint,
         )
     ])
 
@@ -346,35 +357,37 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
 # one is a different way the extraction can go wrong. A prompt that scores well on
 # clean "X strikes Y" copy tells us nothing; these are the shapes that decide it.
 BULLETIN_SAMPLE = [
+    # (headline, actor, target, standing, war_related)
+    #
     # Both actors named, Iran is the SUBJECT — the first-mentioned-wins failure.
     # standing=claimed, not confirmed: the headline attributes the whole account to
     # "Iranian semi-official media", which is the definition of a one-sided claim.
     # The first version of this row said confirmed, contradicting the prompt's own
     # wording, and all four probed models correctly disagreed with it.
     ("Iran fires drones and missiles in response to US strikes, Iranian "
-     "semi-official media says", "iran", "us_coalition", "claimed"),
+     "semi-official media says", "iran", "us_coalition", "claimed", True),
     # Both actors named, US is the subject.
     ("US launches strikes on Iran's IRGC targets after attacks on commercial "
-     "vessels in Strait of Hormuz", "us_coalition", "iran", "confirmed"),
+     "vessels in Strait of Hormuz", "us_coalition", "iran", "confirmed", True),
     # One-sided assertion. Direction is real, standing is not.
     ("IRGC claims elimination of US personnel in Jordan base strike",
-     "iran", "us_coalition", "claimed"),
+     "iran", "us_coalition", "claimed", True),
     # Asserted AND negated. Any regex reads this as an Iranian strike.
     ("Military denies Iran's claims that it struck a US base in Jordan as "
-     "strikes resume", "iran", "us_coalition", "denied"),
+     "strikes resume", "iran", "us_coalition", "denied", True),
     # No actor at all. Guessing one here is the worst outcome available. The two
     # axes are independent and this row is where that shows: the strike plainly
     # happened (confirmed), it is only the attribution that is missing.
     ("Liberian-flagged tanker hit by three unidentified projectiles near Strait "
-     "of Hormuz", "unattributed", "other", "confirmed"),
+     "of Hormuz", "unattributed", "other", "confirmed", True),
     # A threat is not an action, even though it names an actor and a verb.
     ("Trump threatens more strikes as death toll in Iran rises to 18",
-     "us_coalition", "iran", "unknown"),
+     "us_coalition", "iran", "unknown", True),
     # Casualty report: the ACTOR is whoever struck, while "Iran says" only names
     # the source — and a belligerent sourcing a casualty count is claimed, not
     # confirmed. Both halves of this row were wrong in the first version.
     ("Iran says 18 killed, 142 injured in US strikes since Sunday",
-     "us_coalition", "iran", "claimed"),
+     "us_coalition", "iran", "claimed", True),
     # Multi-target Iranian salvo, and the one row that accepts two answers. The
     # headline names COUNTRIES while those countries host US bases, so both readings
     # are defensible — and the models prove it rather than merely suggest it: on two
@@ -385,7 +398,39 @@ BULLETIN_SAMPLE = [
     # is FROM_IRAN under either value — the rule being robust to the ambiguity is
     # itself worth asserting.
     ("Iranian Drone and Missile Attacks Target Kuwait, Jordan, Bahrain and Iraq",
-     "iran", ("other", "us_coalition"), "confirmed"),
+     "iran", ("other", "us_coalition"), "confirmed", True),
+
+    # ── The 2026-09-04 run's own failures, added 2026-09-04 ──
+    #
+    # 15 of that bulletin's 32 "regional" entries were unattributed, and several
+    # were plainly Iranian strikes seen from the receiving end. These four rows are
+    # the shapes that produced them, taken verbatim from the corpus.
+    #
+    # The attacker is named ADJECTIVALLY and is nowhere near the subject position.
+    # The prompt's "actor is the SUBJECT" rule pushes a model straight to
+    # unattributed here, which is how this one reached the regional section.
+    ('"Iranian aggression": Kuwait\'s air defense system responds to missile and '
+     "UAV attacks", "iran", "other", "confirmed", True),
+    # Interception frame, attacker named as an adjective.
+    ("Bahrain air defence systems intercept, destroy Iranian drones",
+     "iran", "other", "confirmed", True),
+    # The counterpart that keeps the rule honest: SAME frame, no attacker named.
+    # A model that has learned "interception means Iran" gets this wrong, and
+    # guessing here is worse than the miss above.
+    ("Kuwait Air Defences Responding To Missile, Drone Strikes: Kuwaiti Army",
+     "unattributed", "other", "confirmed", True),
+    # Off-topic: a domestic crime that happened to occur in a theatre country.
+    # The 4 Sep bulletin printed it between two missile strikes.
+    ("Sharjah Police arrest Kazakh man after two sisters killed",
+     "other", "other", "confirmed", False),
+    # Off-topic and not even violent, but it scored high enough to be narrated.
+    ("Iranian professors threaten to suspend academic activity as salaries "
+     "remain unpaid", "other", "other", "unknown", False),
+    # The discriminating row for war_related: same country and same event type as
+    # the Nazareth homicides the bulletin also carried, opposite answer. A model
+    # that drops this one is filtering by "is it crime", not by "is it the war".
+    ('Two Palestinians were killed by IDF fire in the Ramallah area: "They threw '
+     'blocks and stones"', "other", "other", "confirmed", True),
 ]
 
 
@@ -410,10 +455,10 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
     direction, and reading either wrong files a strike in the wrong half of the
     war, while a wrong standing only mislabels its provenance.
     """
-    actor_hits = target_hits = standing_hits = 0
+    actor_hits = target_hits = standing_hits = war_hits = 0
     misses = []
     for i, row in enumerate(BULLETIN_SAMPLE):
-        headline, want_actor, want_target, want_standing = row
+        headline, want_actor, want_target, want_standing, want_war = row
         got = items[i] if i < len(items) else {}
         got_actor = str(got.get("actor", "")).lower()
         got_target = str(got.get("target", "")).lower()
@@ -436,10 +481,19 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
         elif _ok(got_actor, want_actor):
             misses.append(
                 f"#{i + 1} standing {got_standing or '-'}!={_want_str(want_standing)}")
+        # war_related decides whether the event appears in the report at all, so a
+        # miss here deletes a strike or admits a burglary. Graded as hard as the
+        # direction. `is not False` mirrors the parser: only an explicit false drops.
+        got_war = got.get("war_related") is not False
+        if got_war == want_war:
+            war_hits += 1
+        else:
+            misses.append(f"#{i + 1} war_related {got_war}!={want_war}")
     n = len(BULLETIN_SAMPLE)
-    ok = actor_hits == n and target_hits == n and standing_hits >= n - 1
+    ok = (actor_hits == n and target_hits == n
+          and standing_hits >= n - 1 and war_hits == n)
     note = (f"actor {actor_hits}/{n}, target {target_hits}/{n}, "
-            f"standing {standing_hits}/{n}")
+            f"standing {standing_hits}/{n}, war {war_hits}/{n}")
     if misses:
         note += " — " + "; ".join(misses[:4])
     return ok, note
@@ -542,8 +596,9 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         print("  --- direction as extracted ---")
         for i, row in enumerate(BULLETIN_SAMPLE):
             got = items[i] if i < len(items) else {}
+            war = "war" if got.get("war_related") is not False else "OFF-TOPIC"
             print(f"    {got.get('actor', '-'):<13} → {got.get('target', '-'):<13} "
-                  f"{got.get('standing', '-'):<10} {row[0][:56]}")
+                  f"{got.get('standing', '-'):<10} {war:<9} {row[0][:48]}")
         if not ok:
             print("  --- raw content ---")
             print(str(content)[:2000])
@@ -607,6 +662,7 @@ def main() -> int:
         "mistral": "MISTRAL_API_KEY",
         "llm7": "LLM7_KEY",
         "pollinations": "POLLINATIONS_API_KEY",
+        "cloudflare": "CLOUDFLARE_API_TOKEN",
     }
     extras = json.loads(args.extras) if args.extras.strip() else {}
     # A 6K-token narrative is a different order of work than a 2K classification

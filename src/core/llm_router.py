@@ -85,6 +85,11 @@ class LLMAccount:
     status: ProviderStatus = ProviderStatus.ACTIVE
     cooldown_until: float = 0.0
     daily_errors: int = 0
+    # Overrides PROVIDER_ENDPOINTS for this slot. Every provider so far has one
+    # fixed URL for everybody; Cloudflare Workers AI puts the ACCOUNT ID in the
+    # path, so the endpoint is a property of the account rather than of the
+    # provider and cannot be looked up from a flat table.
+    endpoint: str = ""
 
     @property
     def display_name(self) -> str:
@@ -560,10 +565,20 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Mistral medium (best Turkish still reachable on this account) → LLM7
-    minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as fallback,
-    so a missing key or provider outage degrades to exactly the pre-2026-07-17
-    behavior.
+    Cascade: Mistral medium (best Turkish still reachable on this account) →
+    Cloudflare Workers AI llama-3.3-70b (only when both CLOUDFLARE_* vars are set)
+    → LLM7 minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as
+    fallback, so a missing key or provider outage degrades to exactly the
+    pre-2026-07-17 behavior.
+
+    A word on minimax-m2.7, which sits third and passed its Pass C probe: on
+    2026-09-04 it narrated all five SITREPs and shortened EVERY citation URL to a
+    bare domain, so all 108 were blanked by the allowlist and the reports shipped
+    with no working link — while six other models over the preceding 21 days
+    averaged 0.3 blanked per report. It is not demoted for that, because the fix
+    belongs one layer up: run_sitrep_llm now holds every slot to the citation
+    contract and rotates past whichever one fails it. Ordering is about quality;
+    contracts are about correctness, and a cascade should not encode a contract.
 
     The two rungs between exist because Cerebras' removal (below) left Mistral
     ALONE here, and the fall-through is not a real safety net for this router's
@@ -650,10 +665,41 @@ def build_quality_router() -> LLMRouter:
             bucket=TokenBucket(rate_per_minute=15, daily_limit=300, burst=1),
         ),
     ]
+    # Cloudflare Workers AI, added 2026-09-04 because Mistral is the only slot here
+    # that has ever met the SITREP's citation contract and it 429'd every one of the
+    # five country calls that morning — one narrative is ~13.5K tokens against a 25K
+    # TPM ceiling, so two countries in a minute is already over. A second competent
+    # slot is what that run needed, not a deeper stack of cheap ones.
+    #
+    # Free allocation is 10,000 Neurons/day. At llama-3.3-70b-fp8-fast's published
+    # rate a SITREP-sized call (~11K in, ~3K out) is roughly 900 Neurons, so the six
+    # calls this router makes in a day land near 5,400 — inside the allowance with
+    # room, which is why it is a real slot and not a token gesture. rpd below is a
+    # self-imposed bound to keep a retry storm from spending the day's Neurons in a
+    # minute, NOT a published request limit.
+    #
+    # It is UNPROBED prose (scripts/probe_models.py --bulletin/--prose covers it:
+    # `--models cloudflare:@cf/meta/llama-3.3-70b-instruct-fp8-fast`). It sits here
+    # anyway because the SITREP now holds every model to the citation contract and
+    # rotates past one that fails it — which is exactly the guard that would have
+    # caught minimax. Run the probe before trusting its Turkish.
+    cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+    cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+    if cf_account and cf_token:
+        quality_slots.insert(1, LLMAccount(
+            provider="cloudflare", account_id="A",
+            model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            api_key=cf_token,
+            endpoint=("https://api.cloudflare.com/client/v4/accounts/"
+                      f"{cf_account}/ai/v1/chat/completions"),
+            rpm=6, rpd=60,
+            bucket=TokenBucket(rate_per_minute=6, daily_limit=60, burst=1),
+        ))
+
     active = [s for s in quality_slots if s.api_key]
     if not active:
-        logger.warning("Quality router: no MISTRAL_API_KEY/LLM7_KEY/"
-                       "POLLINATIONS_API_KEY set, falling back to full router")
+        logger.warning("Quality router: no MISTRAL_API_KEY/CLOUDFLARE_API_TOKEN/"
+                       "LLM7_KEY/POLLINATIONS_API_KEY set, falling back to full router")
         return build_llm_router()
     return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
 

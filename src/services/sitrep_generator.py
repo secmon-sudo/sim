@@ -12,7 +12,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.airspace import compact_for_prompt
 from src.core.alerts import REPORT_KIND_NOT_NEWS, aftermath_kind
@@ -1024,11 +1024,40 @@ _SYSTEM_PROMPT = (
 )
 
 
+def cites_a_listed_url(text: str, allowed_urls: List[str]) -> bool:
+    """Did this narrative cite at least one URL the pipeline actually fetched?
+
+    The weakest possible form of the prompt's citation rule, and deliberately so.
+    It is not a quality bar — a good narrative loses a citation now and then to a
+    stray markdown character — it is a check for a model that does not do
+    citations at all.
+
+    That is a real failure mode, not a hypothetical one. On 2026-09-04
+    minimax-m2.7 narrated all five country SITREPs after Mistral 429'd every
+    call, and wrote every source as "Middle East Eye (https://middleeasteye.net)"
+    — the publisher's domain instead of the article link it was handed. All 108
+    citations across the five reports failed the allowlist and were blanked, and
+    the reports shipped looking well-formed with not one working link in them.
+    Over the preceding 21 days six other models averaged 0.3 blanked citations
+    per report, so nothing about the payload or the prompt explains it — the
+    model does. A check this weak fires on that and on nothing else.
+    """
+    if not allowed_urls:
+        return True
+    found = re.findall(r"https?://\S+", text)
+    if not found:
+        return False
+    listed = {_normalize_url(u) for u in allowed_urls if u}
+    return any(_normalize_url(u.rstrip(_URL_TRAILING_PUNCT)) in listed
+               for u in found)
+
+
 def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
                    window_start: datetime, window_end: datetime,
                    field: List[Dict[str, Any]], strategic: List[Dict[str, Any]],
                    spillover: List[Dict[str, Any]],
-                   airspace: Dict[str, Any] = None) -> Dict[str, Any]:
+                   airspace: Dict[str, Any] = None,
+                   allowed_urls: Optional[List[str]] = None) -> Dict[str, Any]:
     """Generate the Turkish SITREP narrative. Returns call_llm's result dict."""
     payload = {
         "country": f"{country_name} ({country_iso})",
@@ -1046,7 +1075,8 @@ def run_sitrep_llm(router: LLMRouter, country_iso: str, country_name: str,
         + json.dumps(payload, ensure_ascii=False, indent=1, default=str)
     )
     return call_llm(router, user_prompt, _SYSTEM_PROMPT,
-                    max_tokens=NARRATIVE_MAX_TOKENS, json_mode=False)
+                    max_tokens=NARRATIVE_MAX_TOKENS, json_mode=False,
+                    accept=lambda text: cites_a_listed_url(text, allowed_urls or []))
 
 
 # A verification label span the model may have editorialized, e.g.

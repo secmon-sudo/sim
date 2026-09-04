@@ -151,15 +151,18 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
                      status="empty", report_text=EMPTY_REPORT_TEXT, clusters=[])
         return {"country_iso": country_iso, "status": "empty", "event_count": 0}
 
+    # Built before the call, not after: it is both the allowlist validate_sitrep
+    # enforces and the contract run_sitrep_llm holds each model to.
+    allowed_urls = [
+        s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
+    ]
+
     try:
         res = run_sitrep_llm(router, country_iso, country_name,
                              window_start, window_end, field, strategic, spillover,
-                             airspace=airspace)
+                             airspace=airspace, allowed_urls=allowed_urls)
         log_llm_telemetry(db_conn, res, router, success=True,
                           purpose="sitrep_country")
-        allowed_urls = [
-            s.get("url") for c in (clusters + spillover) for s in c["sources"] if s.get("url")
-        ]
         report_text = validate_sitrep(res["content"], allowed_urls)
         # A completion cut off at max_tokens still passes every guardrail above —
         # the header is there, the URLs are allowlisted — so it used to ship as a

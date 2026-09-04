@@ -9,7 +9,7 @@ doğrulanmamış)". Normalization never raises the claimed confidence tier.
 import pytest
 
 from src.core.sitrep_verify import LABEL_MULTI, LABEL_OFFICIAL, LABEL_SINGLE
-from src.services.sitrep_generator import validate_sitrep
+from src.services.sitrep_generator import cites_a_listed_url, validate_sitrep
 
 _HDR = "YÖNETİCİ ÖZETİ\nGünün özeti.\n"
 
@@ -167,3 +167,46 @@ class TestUncitedBullets:
         line = "Bu paragrafta kaynak kelimesi geçiyor ama bir madde değil.\n"
         out = validate_sitrep(self.HEADER + line, [])
         assert out.endswith(line.rstrip("\n"))
+
+
+class TestCitationContract:
+    """`cites_a_listed_url` is the check every narrator model is now held to.
+
+    Measured 2026-09-04: minimax-m2.7 wrote every source as "Middle East Eye
+    (https://middleeasteye.net)" — the publisher's domain instead of the article
+    link it was handed — so all 108 citations across five SITREPs were blanked and
+    the reports shipped with no working link. Six other models over the preceding
+    21 days averaged 0.3 blanked per report, so the bar is set where it separates
+    those two populations and nowhere tighter.
+    """
+
+    ALLOWED = ["https://middleeasteye.net/news/iran-strike-12345",
+               "https://apnews.com/article/hormuz-9f2"]
+
+    def test_a_bare_domain_is_not_a_citation(self):
+        assert not cites_a_listed_url(
+            "Kaynak: Middle East Eye (https://middleeasteye.net)", self.ALLOWED)
+
+    def test_the_article_link_passes(self):
+        assert cites_a_listed_url(
+            "Kaynak: MEE (https://middleeasteye.net/news/iran-strike-12345)",
+            self.ALLOWED)
+
+    def test_one_survivor_is_enough(self):
+        """Deliberately weak: this catches a model that does not do citations,
+        not one that lost a link to a stray markdown character."""
+        text = ("Kaynak: X (https://uydurma.example/a), "
+                "Y (https://apnews.com/article/hormuz-9f2)")
+        assert cites_a_listed_url(text, self.ALLOWED)
+
+    def test_trailing_punctuation_does_not_fail_a_good_link(self):
+        assert cites_a_listed_url(
+            "*Kaynak: AP (https://apnews.com/article/hormuz-9f2).*", self.ALLOWED)
+
+    def test_a_narrative_with_no_urls_at_all_fails(self):
+        assert not cites_a_listed_url("Hiçbir kaynak verilmedi.", self.ALLOWED)
+
+    def test_an_empty_allowlist_cannot_be_violated(self):
+        """Nothing was fetched, so nothing can be cited — that is not the
+        narrator's failure and must not cost the country its report."""
+        assert cites_a_listed_url("Hiçbir kaynak verilmedi.", [])

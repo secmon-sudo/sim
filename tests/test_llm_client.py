@@ -77,6 +77,45 @@ def test_call_llm_good_response_passes_through():
     assert router.accounts[0].status == ProviderStatus.ACTIVE
 
 
+# ── Caller acceptance check (SITREP citation contract, 2026-09-04) ──
+#
+# On 2026-09-04 minimax-m2.7 narrated all five country SITREPs after Mistral 429'd
+# every call, and shortened every one of its 108 citation URLs to a bare domain.
+# The transport layer saw five perfectly healthy HTTP 200s. `accept` is how a
+# caller says what "healthy" means for its own work.
+
+
+def test_call_llm_rotates_when_the_caller_rejects_the_content():
+    router = LLMRouter([
+        _acct("llm7-ish", provider="llm7"),
+        _acct("openai/gpt-oss-20b:free"),
+    ])
+    bad = _resp({"choices": [{"message": {"content": "no citations here"},
+                              "finish_reason": "stop"}]})
+    with patch.object(llm_client, "_send_request", side_effect=[bad, _resp(_GOOD)]):
+        result = llm_client.call_llm(router, "prompt",
+                                     accept=lambda text: "{" in text)
+    assert result["model"] == "openai/gpt-oss-20b:free"
+    # Sidelined, not merely skipped: a model that cannot honour the contract for
+    # one country will not honour it for the next four either.
+    assert router.accounts[0].status == ProviderStatus.RATE_LIMITED
+
+
+def test_call_llm_without_an_accept_check_is_unchanged():
+    router = LLMRouter([_acct("m1")])
+    with patch.object(llm_client, "_send_request", return_value=_resp(_GOOD)):
+        assert llm_client.call_llm(router, "prompt")["content"] == '{"ok": 1}'
+
+
+def test_call_llm_raises_when_every_slot_is_rejected():
+    router = LLMRouter([_acct("m1"), _acct("m2", account_id="B")])
+    bad = _resp({"choices": [{"message": {"content": "nope"},
+                              "finish_reason": "stop"}]})
+    with patch.object(llm_client, "_send_request", side_effect=[bad, bad]):
+        with pytest.raises(RuntimeError):
+            llm_client.call_llm(router, "prompt", accept=lambda text: False)
+
+
 # ── Request-size guard + 413 taxonomy (Groq narrator outage, 2026-07-16) ──
 
 _OVERSIZED = "x" * 40_000  # ~10K tokens at 4 chars/token — above Groq's 8K ceiling

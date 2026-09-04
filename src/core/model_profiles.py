@@ -170,7 +170,7 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
         # that actually lands, whatever the underlying family accepts natively.
         extras = {"reasoning": {"enabled": False}}
-    elif provider in ("llm7", "pollinations"):
+    elif provider in ("llm7", "pollinations", "cloudflare"):
         # Also before the family rules, and for the opposite reason: the family knobs
         # below are facts about first-party endpoints (Groq 400s on reasoning_effort
         # "none"), and nothing yet establishes that this proxy forwards them at all.
@@ -200,6 +200,12 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         supports_json = model not in LLM7_NO_JSON_MODE_MODELS
     elif provider == "pollinations":
         supports_json = True  # undeclared; verified at runtime, see the note above
+    elif provider == "cloudflare":
+        # Workers AI documents response_format on its OpenAI-compatible route, but
+        # per model — and this slot exists for PROSE, where json_mode is wrong
+        # anyway. Left off until a probe says otherwise; the 400-retry path in
+        # llm_client is the safety net if a caller ever asks for it.
+        supports_json = False
     else:
         supports_json = provider in ("groq", "gemini", "mistral")
 
@@ -209,6 +215,11 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         request_timeout = LLM7_REQUEST_TIMEOUT
     elif provider == "pollinations":
         request_timeout = POLLINATIONS_REQUEST_TIMEOUT
+    elif provider == "cloudflare":
+        # Same allowance as Mistral, and for the same reason: this slot carries
+        # 6K-token narratives, not classification batches, and a 30s read timeout
+        # would abandon a generation that is progressing normally.
+        request_timeout = 180.0
     else:
         request_timeout = 30.0
 
@@ -218,7 +229,7 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         max_request_tokens=max_request,
         request_timeout=request_timeout,
         wall_clock_timeout=(
-            MISTRAL_WALL_CLOCK_SECONDS if provider == "mistral"
+            MISTRAL_WALL_CLOCK_SECONDS if provider in ("mistral", "cloudflare")
             else DEFAULT_WALL_CLOCK_SECONDS
         ),
     )

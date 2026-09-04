@@ -99,7 +99,7 @@ class TestExtractionParsing:
                                       "standing": "probably"}]})
         out = ib._parse_extraction(body, 1)
         assert out[0] == {"actor": ib.UNATTRIBUTED, "target": ib.UNATTRIBUTED,
-                          "standing": ib.STANDING_UNKNOWN}
+                          "standing": ib.STANDING_UNKNOWN, ib.WAR_RELATED: True}
 
     def test_a_short_reply_leaves_the_rest_unattributed(self):
         body = json.dumps({"items": [{"n": 1, "actor": "iran",
@@ -305,6 +305,86 @@ class TestNarrativePrompt:
         label plus its rule tells it not to attribute at all."""
         assert ib.ACTOR_LABELS[ib.UNATTRIBUTED] in self._prompt()
         assert "fail atfetme" in self._prompt()
+
+
+class TestOffTopicEvents:
+    """The theatre is a list of COUNTRIES, so everything that happens in twelve of
+    them lands in the fetch. On 2026-09-04 the bulletin reported a Nazareth
+    homicide, two sisters killed in Sharjah, an Iranian professors' pay dispute
+    and an IndiGo diversion for a sick pilot — all correctly classified, none of
+    them this report's subject."""
+
+    def _build(self, monkeypatch, events):
+        from datetime import datetime, timezone
+        monkeypatch.setattr(ib, "fetch_theatre_events", lambda *a: events)
+        monkeypatch.setattr(ib, "extract_direction",
+                            lambda router, evs, **k: evs)
+        monkeypatch.setattr(ib, "call_llm",
+                            lambda **k: {"content": "YÖNETİCİ ÖZETİ\nX", "model": "m"})
+        monkeypatch.setattr(ib, "log_llm_telemetry", lambda *a, **k: None)
+        return ib.build_bulletin(None, None,
+                                 datetime(2026, 9, 3, tzinfo=timezone.utc),
+                                 datetime(2026, 9, 4, tzinfo=timezone.utc))
+
+    def _ev(self, title, **kw):
+        base = {"title": title, "country_iso": "IL", "actor": ib.OTHER_SIDE,
+                "target": ib.OTHER_SIDE, "standing": ib.STANDING_CONFIRMED,
+                "severity": 70, "domain": "x.com", "corroborating_sources": []}
+        base.update(kw)
+        return base
+
+    def test_an_off_topic_event_leaves_the_report(self, monkeypatch):
+        out = self._build(monkeypatch, [
+            self._ev("Sharjah Police arrest Kazakh man after two sisters killed",
+                     **{ib.WAR_RELATED: False}),
+            self._ev("Israeli artillery shelling reported in southern Lebanon",
+                     **{ib.WAR_RELATED: True}),
+        ])
+        titles = [e["title"] for e in out["events"]]
+        assert titles == ["Israeli artillery shelling reported in southern Lebanon"]
+
+    def test_a_belligerent_event_survives_the_field(self, monkeypatch):
+        """A single mislabelled field must not be able to delete a strike: if the
+        extractor put Iran or the coalition behind it, it is the war."""
+        out = self._build(monkeypatch, [
+            self._ev("US strike kills key broker in Houthi arms alliance",
+                     actor=ib.US_SIDE, **{ib.WAR_RELATED: False}),
+        ])
+        assert len(out["events"]) == 1
+
+    def test_a_missing_field_keeps_the_event(self, monkeypatch):
+        """The default is fail-open everywhere: a parse failure is not evidence
+        that an event is off-topic."""
+        out = self._build(monkeypatch, [self._ev("Something we could not label")])
+        assert len(out["events"]) == 1
+
+
+class TestSafetyEventsExcluded:
+    def test_the_fetch_excludes_accidental_occurrences(self):
+        """An IndiGo diversion for a sick pilot was in the 4 Sep bulletin. The cut
+        is deterministic and made in SQL, so it costs no extraction either."""
+
+        class _Cur:
+            def fetchall(self):
+                return []
+
+        seen = {}
+
+        class _Conn:
+            def execute(self, sql, params):
+                seen["sql"], seen["params"] = sql, params
+                return _Cur()
+
+        from datetime import datetime, timezone
+        ib.fetch_theatre_events(_Conn(), datetime(2026, 9, 3, tzinfo=timezone.utc),
+                                datetime(2026, 9, 4, tzinfo=timezone.utc))
+        assert "event_type" in seen["sql"]
+        assert "emergency_landing" in seen["params"][-1]
+        assert "bird_strike" in seen["params"][-1]
+
+    def test_it_shares_the_sitrep_list_rather_than_copying_it(self):
+        from src.services.sitrep_generator import SAFETY_ONLY_EVENT_TYPES
+        assert ib.SAFETY_ONLY_EVENT_TYPES == SAFETY_ONLY_EVENT_TYPES
 
 
 class TestBuildBulletin:

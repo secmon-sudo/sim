@@ -77,6 +77,19 @@ STANDING_CLAIMED = "claimed"          # one belligerent asserts it, unconfirmed
 STANDING_DENIED = "denied"            # asserted and explicitly denied
 STANDING_UNKNOWN = "unknown"
 
+# Whether the headline is about the war at all. The theatre is defined by COUNTRY,
+# so everything that happens in twelve countries lands in the fetch — and on
+# 2026-09-04 the bulletin duly reported a Nazareth homicide, two sisters killed in
+# Sharjah, an Iranian professors' pay dispute and an IndiGo flight that diverted
+# because its pilot fell ill. None of those is a defect in the pipeline; they are
+# real events, correctly classified, and they belong in the country SITREP. They
+# are simply not this report's subject.
+#
+# Asked as a FIELD rather than filtered by event_type, because the type does not
+# separate them: "Two Palestinians killed by IDF fire" and "Three men shot dead in
+# Nazareth" are both civilian_casualties in Israel, and only one of them is the war.
+WAR_RELATED = "war_related"
+
 SECTION_ON_IRAN = "on_iran"
 SECTION_FROM_IRAN = "from_iran"
 SECTION_REGIONAL = "regional"
@@ -88,6 +101,24 @@ _EXTRACTION_SYSTEM_PROMPT = (
 )
 
 
+# Accidental occurrences: an engine failure, a bird strike, a diversion for a sick
+# pilot. The country SITREP has excluded these from its narrative since day one
+# (sitrep_generator.SAFETY_ONLY_EVENT_TYPES) because the report is about hostile
+# acts; this one is about a war, so the argument is only stronger. Imported rather
+# than copied — sitrep_generator already keeps the canonical list, and pass_d_score
+# keeps the other; a third copy is how the two in source_credibility.py started.
+#
+# It is a cheap cut and it is made BEFORE the model sees the batch, so an IndiGo
+# diversion in Muscat does not also cost a direction extraction.
+try:  # pragma: no cover - exercised via the real module in production
+    from src.services.sitrep_generator import SAFETY_ONLY_EVENT_TYPES
+except Exception:  # a missing optional dep must not take the bulletin down
+    SAFETY_ONLY_EVENT_TYPES = {
+        "bird_strike", "engine_failure", "emergency_landing", "depressurization",
+        "fire_on_board", "unruly_passenger", "runway_incursion",
+    }
+
+
 def fetch_theatre_events(db_conn, window_start: datetime,
                          window_end: datetime) -> List[Dict[str, Any]]:
     """Theatre events that are reports of a new incident, newest first.
@@ -97,6 +128,8 @@ def fetch_theatre_events(db_conn, window_start: datetime,
     strike. Events classified before report_kind existed (11 Aug 2026) carry NULL,
     and those are kept — excluding them would silently shorten the window rather
     than filter it.
+
+    Safety-only event types are the second cut, and a deterministic one.
     """
     rows = db_conn.execute(
         """SELECT id, source_title, source_domain, source_url, country_iso,
@@ -108,8 +141,10 @@ def fetch_theatre_events(db_conn, window_start: datetime,
               AND created_at >= %s AND created_at < %s
               AND (llm_parsed_output->>'report_kind' IS NULL
                    OR llm_parsed_output->>'report_kind' = 'new_incident')
+              AND (event_type IS NULL OR NOT (event_type = ANY(%s)))
             ORDER BY created_at DESC""",
-        (list(THEATRE_ISO), window_start, window_end),
+        (list(THEATRE_ISO), window_start, window_end,
+         sorted(SAFETY_ONLY_EVENT_TYPES)),
     ).fetchall()
     return [
         {
@@ -137,6 +172,14 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         f'or coalition forces or their bases were hit, "{OTHER_SIDE}" for anyone '
         f'else, "{UNATTRIBUTED}" when the text names no target.',
         "",
+        f'war_related: true when the headline is about the Iran-US war or the '
+        f'regional military situation around it — a strike, an interception, air '
+        f'defence, airspace or shipping disruption, an evacuation, a threat, '
+        f'diplomacy over the fighting, or casualties from it. false when the '
+        f'event merely HAPPENED in one of these countries and has no belligerent '
+        f'in it: ordinary crime, a road or aviation accident, a labour dispute, '
+        f'a domestic political story.',
+        "",
         f'standing: "{STANDING_CONFIRMED}" when the headline reports the action as '
         f'having happened, "{STANDING_CLAIMED}" when one side claims/alleges/says it '
         f'without confirmation, "{STANDING_DENIED}" when the headline reports it as '
@@ -153,12 +196,21 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         '"struck by unidentified projectiles", the actor is unattributed.',
         '- In "A denies B\'s claim that it struck C", the actor is B — the party '
         'said to have acted — never A, the one issuing the denial. standing=denied.',
+        '- An actor named as an ADJECTIVE or a possessive is still named. '
+        '"Kuwait\'s air defences intercept Iranian missiles" is actor=iran, and so '
+        'is \'"Iranian aggression": Kuwait responds to missile and UAV attacks\'. '
+        'Do not answer unattributed because the attacker is not the subject.',
+        '- An interception, a shoot-down, or a defensive response is an attack seen '
+        'from the receiving end: the actor is whoever FIRED, not whoever intercepted. '
+        'If the text does not say whose missiles they were, the actor is '
+        f'"{UNATTRIBUTED}" — that is the honest answer, not a reason to guess.',
         "",
         '- The target is not the country the story is filed under. "Iran strikes '
         'bases in Bahrain, Iraq and Jordan" is actor=iran, target=us_coalition.',
         "",
         'Reply with JSON only: '
-        '{"items":[{"n":1,"actor":"...","target":"...","standing":"..."}]}',
+        '{"items":[{"n":1,"actor":"...","target":"...","standing":"...",'
+        '"war_related":true}]}',
         "",
     ]
     for i, ev in enumerate(events, 1):
@@ -172,8 +224,13 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, str]]:
     if start < 0 or end <= start:
         raise ValueError("no JSON object in extraction reply")
     items = json.loads(content[start:end + 1]).get("items", [])
-    out: List[Dict[str, str]] = [
-        {"actor": UNATTRIBUTED, "target": UNATTRIBUTED, "standing": STANDING_UNKNOWN}
+    # war_related defaults TRUE on every failure path below. The field decides
+    # whether an event is dropped from the report entirely, and a parse failure is
+    # not evidence that an event is off-topic — defaulting it false would let one
+    # malformed batch silently delete a day's strikes.
+    out: List[Dict[str, Any]] = [
+        {"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
+         "standing": STANDING_UNKNOWN, WAR_RELATED: True}
         for _ in range(expected)
     ]
     valid_actors = {IRAN_SIDE, US_SIDE, OTHER_SIDE, UNATTRIBUTED}
@@ -196,6 +253,9 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, str]]:
             "actor": actor if actor in valid_actors else UNATTRIBUTED,
             "target": target if target in valid_actors else UNATTRIBUTED,
             "standing": standing if standing in valid_standing else STANDING_UNKNOWN,
+            # Only an explicit false drops an event; a missing or unreadable value
+            # keeps it. Same asymmetry as above, for the same reason.
+            WAR_RELATED: item.get(WAR_RELATED) is not False,
         }
     return out
 
@@ -231,7 +291,8 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
             logger.warning("Direction extraction failed for a batch of %d; those "
                            "events stay unattributed", len(chunk), exc_info=True)
             parsed = [{"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
-                       "standing": STANDING_UNKNOWN} for _ in chunk]
+                       "standing": STANDING_UNKNOWN, WAR_RELATED: True}
+                      for _ in chunk]
         for ev, fields in zip(chunk, parsed):
             ev.update(fields)
     return events
@@ -402,6 +463,22 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
                 "status": "empty"}
 
     extract_direction(router, events, db_conn=db_conn)
+
+    # Off-topic events leave the report here rather than at the fetch, because
+    # only the extraction can tell them apart — see WAR_RELATED. An event the
+    # extractor put a BELLIGERENT behind is never dropped, whatever it answered
+    # to this field: "US strike kills key broker in Houthi arms alliance" is the
+    # war by any reading, and a single mislabelled field should not be able to
+    # delete a strike from the record.
+    kept, dropped = [], []
+    for ev in events:
+        belligerent = ev.get("actor") in (IRAN_SIDE, US_SIDE)
+        (kept if belligerent or ev.get(WAR_RELATED, True) else dropped).append(ev)
+    if dropped:
+        logger.info("Iran bulletin: %d of %d events dropped as off-topic (e.g. %s)",
+                    len(dropped), len(events),
+                    "; ".join((e.get("title") or "")[:60] for e in dropped[:3]))
+    events = kept
     sections = group_into_sections(events)
     logger.info(
         "Iran bulletin: %d events — on Iran %d, from Iran %d, regional %d",

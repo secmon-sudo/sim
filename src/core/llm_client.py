@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 import tenacity
@@ -39,6 +39,10 @@ PROVIDER_ENDPOINTS = {
     # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
     # precondition even though usage stays at 0. Anonymous access is 401.
     "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
+    # Cloudflare Workers AI (2026-09-04). No entry here on purpose: its
+    # OpenAI-compatible route is
+    # https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1/chat/completions,
+    # so the URL carries the account and is set per-slot via LLMAccount.endpoint.
 }
 
 
@@ -273,7 +277,7 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
 
     def _send(body: dict) -> httpx.Response:
         return httpx.post(
-            PROVIDER_ENDPOINTS[acct.provider],
+            acct.endpoint or PROVIDER_ENDPOINTS[acct.provider],
             headers=headers,
             json=body,
             timeout=profile.request_timeout,
@@ -330,7 +334,8 @@ PURPOSES = frozenset({
 
 
 def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, max_tokens: int = 1024,
-             json_mode: bool = True) -> dict[str, Any]:
+             json_mode: bool = True,
+             accept: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """
     Try all available accounts in priority order.
 
@@ -341,6 +346,15 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
         - model: model ID string
         - latency_ms: int
         - content: extracted text content
+
+    ``accept`` is an optional caller-supplied check on the returned text. A slot
+    whose answer fails it is treated exactly like one that returned an empty
+    completion: sidelined and rotated past. It exists because "HTTP 200 with
+    text in it" is not the same as "did the job" — measured 2026-09-04, when
+    minimax-m2.7 narrated all five SITREPs and shortened every one of its 108
+    citation URLs to a bare domain, so the allowlist blanked 100% of them while
+    every other model in 21 days lost 0.3 per report. Nothing in the transport
+    layer can see that; only the caller knows its own contract.
 
     Raises LLMAllThrottled if every account is on cooldown before any attempt,
     or RuntimeError if all accounts were tried and failed.
@@ -412,6 +426,20 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
                     f"error body {str(api_error)[:200]!r}" if api_error else "an empty completion",
                     finish_reason,
                 )
+                continue
+
+            # The content is real; the question the caller answers is whether it
+            # is USABLE. Charged as a hard failure so the slot is sidelined for
+            # the rest of the run: a model that cannot honour the contract on one
+            # country will not honour it on the next four either.
+            if accept is not None and not accept(content):
+                router.report_failure(acct, hard_error=True)
+                last_error = RuntimeError(
+                    f"{acct.display_name} returned content the caller rejected")
+                logger.warning(
+                    "LLM %s answered but failed the caller's acceptance check "
+                    "(%d chars, finish_reason=%r), rotating...",
+                    acct.display_name, len(content), finish_reason)
                 continue
 
             router.report_success(acct)
