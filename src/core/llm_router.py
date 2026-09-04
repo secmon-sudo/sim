@@ -585,7 +585,7 @@ def build_quality_router() -> LLMRouter:
     severity-score calibration the alert thresholds are tuned to.
 
     Cascade: Mistral medium (best Turkish still reachable on this account) →
-    Cloudflare Workers AI llama-3.3-70b (only when both CLOUDFLARE_* vars are set)
+    Cloudflare Workers AI gpt-oss-120b (only when both CLOUDFLARE_* vars are set)
     → LLM7 minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as
     fallback, so a missing key or provider outage degrades to exactly the
     pre-2026-07-17 behavior.
@@ -630,6 +630,9 @@ def build_quality_router() -> LLMRouter:
     rotating away, so the slot had stopped being a quality tier and become a fixed
     per-run round-trip. Removed rather than re-pointed at the paid tier — the whole
     router exists to buy prose quality at zero cost, and Mistral already covers it.
+    The MODEL came back on 2026-09-04 on Cloudflare, which is the point of naming
+    the host and the weights separately: what ended was Cerebras' free tier, not
+    gpt-oss-120b's suitability for this work.
 
     mistral-large-2512 was the slot until the same day, when it began answering
     403 "This model is not available in your subscription tier". The account is
@@ -690,29 +693,48 @@ def build_quality_router() -> LLMRouter:
     # TPM ceiling, so two countries in a minute is already over. A second competent
     # slot is what that run needed, not a deeper stack of cheap ones.
     #
-    # Free allocation is 10,000 Neurons/day. At llama-3.3-70b-fp8-fast's published
-    # rate a SITREP-sized call (~11K in, ~3K out) is roughly 900 Neurons, so the six
-    # calls this router makes in a day land near 5,400 — inside the allowance with
-    # room, which is why it is a real slot and not a token gesture. rpd below is a
-    # self-imposed bound to keep a retry storm from spending the day's Neurons in a
-    # minute, NOT a published request limit.
+    # The free allocation is 10,000 Neurons/day and it is the whole budget, so the
+    # model is chosen by what a SITREP-shaped call COSTS, not by what a model card
+    # promises. This router makes 7 calls on a full day (5 countries + the digest +
+    # the bulletin narrative), and a call is ~11K prompt against the 6K completion
+    # ceiling. Against Cloudflare's published Neuron rates:
     #
-    # It is UNPROBED prose (scripts/probe_models.py --bulletin/--prose covers it:
-    # `--models cloudflare:@cf/meta/llama-3.3-70b-instruct-fp8-fast`). It sits here
-    # anyway because the SITREP now holds every model to the citation contract and
-    # rotates past one that fails it — which is exactly the guard that would have
-    # caught minimax. Run the probe before trusting its Turkish.
+    #   @cf/openai/gpt-oss-120b                    759 N/call → 5,313/day   53%
+    #   @cf/mistralai/mistral-small-3.1-24b       654 N/call → 4,578/day   46%
+    #   @cf/meta/llama-3.3-70b-instruct-fp8-fast 1,522 N/call → 10,654/day 107%  ✗
+    #
+    # llama-3.3-70b was this slot for one afternoon on an estimate that assumed a
+    # 3K completion. At the ceiling the narrator is actually allowed, it does not
+    # fit the day — 70b output is 204,805 Neurons/M against gpt-oss-120b's 68,182,
+    # and output is what a narrator spends.
+    #
+    # gpt-oss-120b is the pick for a second reason: it is not a new model here. It
+    # WAS this router's quality rung on Cerebras until 2026-09-02, writing the
+    # SITREP, storyline and forecast prose, and it left because its host's free tier
+    # ended rather than because it stopped being good at the job. Cloudflare hosts
+    # the same weights.
+    #
+    # Two things about it are still unmeasured ON THIS HOST and want the probe
+    # (`--models cloudflare:@cf/openai/gpt-oss-120b --prose`, then --bulletin):
+    # its Turkish, and its hidden reasoning. Cloudflare does not document a
+    # reasoning knob for the OpenAI-compatible route, so model_profiles sends none
+    # — where Cerebras had reasoning_effort=low — and unbudgeted thinking eats the
+    # completion the reader was supposed to get. If it does, mistral-small-3.1-24b
+    # is the measured alternative and costs less again.
+    #
+    # rpd below is a self-imposed bound to stop a retry storm spending the day's
+    # Neurons in a minute, NOT a published request limit.
     cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
     if cf_account and cf_token:
         quality_slots.insert(1, LLMAccount(
             provider="cloudflare", account_id="A",
-            model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            model="@cf/openai/gpt-oss-120b",
             api_key=cf_token,
             endpoint=("https://api.cloudflare.com/client/v4/accounts/"
                       f"{cf_account}/ai/v1/chat/completions"),
-            rpm=6, rpd=60,
-            bucket=TokenBucket(rate_per_minute=6, daily_limit=60, burst=1),
+            rpm=6, rpd=12,
+            bucket=TokenBucket(rate_per_minute=6, daily_limit=12, burst=1),
         ))
 
     active = [s for s in quality_slots if s.api_key]
