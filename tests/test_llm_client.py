@@ -503,3 +503,64 @@ def test_an_unusable_200_is_counted():
         llm_client.call_llm(router, "prompt")
     assert counters.snapshot().get(counters.LLM_UNUSABLE_200) == 1
     counters.reset()
+
+
+# ── First-429 diagnosis (Mistral outage, 2026-09-04) ──
+#
+# 429 bodies were deliberately never logged, on the reasonable grounds that Pass C
+# would emit thousands. The cost of that showed when Mistral 429'd every SITREP
+# call and two cold probe calls: there was no way to tell a per-minute limit from
+# an exhausted monthly quota from a workspace that was never activated.
+
+
+def _http_429(body=None, headers=None):
+    resp = httpx.Response(
+        429,
+        json=body if body is not None else {"message": "Requests rate limit exceeded"},
+        headers=headers or {"retry-after": "30",
+                            "x-ratelimit-limit-tokens-minute": "25000"},
+        request=httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions"),
+    )
+    return httpx.HTTPStatusError("429", request=resp.request, response=resp)
+
+
+def test_the_first_429_from_a_slot_is_explained(caplog):
+    llm_client._429_EXPLAINED.clear()
+    router = LLMRouter([_acct("mistral-medium-latest", provider="mistral"),
+                        _acct("openai/gpt-oss-20b:free")])
+    with caplog.at_level("WARNING"):
+        with patch.object(llm_client, "_send_request",
+                          side_effect=[_http_429(), _resp(_GOOD)]):
+            llm_client.call_llm(router, "prompt")
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "Requests rate limit exceeded" in logged
+    assert "x-ratelimit-limit-tokens-minute=25000" in logged
+    llm_client._429_EXPLAINED.clear()
+
+
+def test_the_second_429_from_the_same_slot_is_quiet(caplog):
+    """Pass C would emit thousands; once per slot per process is the budget."""
+    llm_client._429_EXPLAINED.clear()
+    for _ in range(2):
+        router = LLMRouter([_acct("mistral-medium-latest", provider="mistral"),
+                            _acct("openai/gpt-oss-20b:free")])
+        with patch.object(llm_client, "_send_request",
+                          side_effect=[_http_429(), _resp(_GOOD)]):
+            llm_client.call_llm(router, "prompt")
+    # caplog collects for the whole test, so the warm-up calls above are in it too.
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        router = LLMRouter([_acct("mistral-medium-latest", provider="mistral"),
+                            _acct("openai/gpt-oss-20b:free")])
+        with patch.object(llm_client, "_send_request",
+                          side_effect=[_http_429(), _resp(_GOOD)]):
+            llm_client.call_llm(router, "prompt")
+    assert "Requests rate limit exceeded" not in " ".join(
+        r.getMessage() for r in caplog.records)
+    llm_client._429_EXPLAINED.clear()
+
+
+def test_a_429_with_no_headers_still_logs_something_readable():
+    resp = httpx.Response(429, text="", request=httpx.Request("POST", "https://x/y"))
+    assert llm_client._rate_limit_headers(resp) == "no limit headers"
+    assert llm_client._error_detail(resp) == "<empty body>"

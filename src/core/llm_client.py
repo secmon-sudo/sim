@@ -141,6 +141,31 @@ def _error_detail(response: httpx.Response) -> str:
     return " ".join(text.split())[:ERROR_DETAIL_MAX_CHARS] or "<empty body>"
 
 
+# Slots whose first 429 has already been explained in the log. Per process, which
+# is per run — a slot that is rate-limited all day says so once per run, not once
+# per call.
+_429_EXPLAINED: set[str] = set()
+
+
+def _rate_limit_headers(response: httpx.Response) -> str:
+    """Whatever the provider says about the limit it just enforced.
+
+    Providers do not agree on the names, so this collects rather than parses:
+    anything rate-limit shaped, plus Retry-After. It is a diagnostic string for a
+    human reading a log, not a value anything branches on — `_parse_retry_after`
+    remains the thing that decides backoff.
+    """
+    try:
+        interesting = {
+            k: v for k, v in response.headers.items()
+            if "ratelimit" in k.lower().replace("-", "")
+            or k.lower() in ("retry-after", "x-request-id")
+        }
+    except Exception:  # pragma: no cover - defensive
+        return "headers unreadable"
+    return ", ".join(f"{k}={v}" for k, v in sorted(interesting.items())) or "no limit headers"
+
+
 def _parse_retry_after(response: httpx.Response) -> float | None:
     """Extract a backoff hint (seconds) from a 429 response.
 
@@ -506,11 +531,25 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             # access", "no billing plan" and "bad key" from no evidence at all. Only
             # on hard errors — 429s are ordinary and their bodies would be noise —
             # and truncated, since a provider error body can carry the whole prompt.
+            # A 429 is ordinary and its body would be noise a thousand times over
+            # in Pass C — but the FIRST one from a given slot in a process is not
+            # ordinary, it is the whole diagnosis. On 2026-09-04 Mistral answered
+            # 429 to every SITREP call and to two cold single calls 45s apart, and
+            # because no 429 body was ever logged there was no way to tell a
+            # per-minute limit from an exhausted monthly quota from a workspace
+            # that was never activated. Once per slot, then silence.
+            detail = ""
+            if is_hard_error:
+                detail = f": {_error_detail(e.response)}"
+            elif is_429 and acct.display_name not in _429_EXPLAINED:
+                _429_EXPLAINED.add(acct.display_name)
+                detail = (f": {_error_detail(e.response)}"
+                          f" [{_rate_limit_headers(e.response)}]")
             logger.warning(
                 "LLM %s failed (HTTP %d)%s, rotating...",
                 acct.display_name,
                 status,
-                f": {_error_detail(e.response)}" if is_hard_error else "",
+                detail,
             )
 
         except Exception as e:
