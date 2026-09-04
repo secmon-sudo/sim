@@ -15,6 +15,7 @@ from typing import Any, Callable
 import httpx
 import tenacity
 
+from src.core import counters
 from src.core.llm_router import SLOW_SLOT_COOLDOWN_SECONDS, LLMAccount, LLMRouter
 from src.core.model_profiles import get_profile, wall_clock_ceiling
 
@@ -415,6 +416,7 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             # provider failure instead: sideline the slot and rotate.
             api_error = data.get("error")
             if api_error or not content.strip():
+                counters.bump(counters.LLM_UNUSABLE_200)
                 router.report_failure(acct, hard_error=True)
                 last_error = RuntimeError(
                     f"unusable HTTP 200 from {acct.display_name}: "
@@ -433,6 +435,7 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             # the rest of the run: a model that cannot honour the contract on one
             # country will not honour it on the next four either.
             if accept is not None and not accept(content):
+                counters.bump(counters.LLM_CONTRACT_REJECTED)
                 router.report_failure(acct, hard_error=True)
                 last_error = RuntimeError(
                     f"{acct.display_name} returned content the caller rejected")

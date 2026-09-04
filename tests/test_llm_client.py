@@ -476,3 +476,30 @@ class TestErrorDetail:
             llm_client._error_detail(broken)
         except Exception as exc:  # pragma: no cover - the point is that this never runs
             pytest.fail(f"_error_detail raised on a broken response: {exc}")
+
+
+def test_a_rejected_answer_is_counted():
+    """A fallback path that increments nothing leaves no evidence it was taken —
+    which is how five hollow SITREPs shipped unnoticed on 2026-09-04."""
+    from src.core import counters
+
+    counters.reset()
+    router = LLMRouter([_acct("m1"), _acct("m2", account_id="B")])
+    bad = _resp({"choices": [{"message": {"content": "nope"},
+                              "finish_reason": "stop"}]})
+    with patch.object(llm_client, "_send_request", side_effect=[bad, _resp(_GOOD)]):
+        llm_client.call_llm(router, "prompt", accept=lambda t: "{" in t)
+    assert counters.snapshot().get(counters.LLM_CONTRACT_REJECTED) == 1
+    counters.reset()
+
+
+def test_an_unusable_200_is_counted():
+    from src.core import counters
+
+    counters.reset()
+    router = LLMRouter([_acct("m1"), _acct("m2", account_id="B")])
+    empty = _resp({"choices": [{"message": {"content": ""}, "finish_reason": None}]})
+    with patch.object(llm_client, "_send_request", side_effect=[empty, _resp(_GOOD)]):
+        llm_client.call_llm(router, "prompt")
+    assert counters.snapshot().get(counters.LLM_UNUSABLE_200) == 1
+    counters.reset()

@@ -287,7 +287,23 @@ def run_digest_llm(router: LLMRouter, rows: List[Dict[str, Any]],
         "Aşağıdaki ülke SITREP'lerinden günlük yönetici brifingini yaz.\n\n"
         + "\n\n".join(blocks)
     )
-    return call_llm(router, user_prompt, _SYSTEM_PROMPT, max_tokens=1600, json_mode=False)
+    # validate_digest has always existed, but it ran AFTER the call: a model that
+    # returned a headerless blob cost the run its whole digest, because raising is
+    # all a post-hoc check can do. As an acceptance check the same rule instead
+    # sidelines that slot and rotates to the next one — the difference between
+    # losing the digest and losing one attempt at it.
+    isos = [r["iso"] for r in rows]
+
+    def _usable(text: str) -> bool:
+        try:
+            validate_digest(parse_digest(text, isos))
+        except Exception:
+            logger.warning("Digest reply had no overview paragraph; rotating")
+            return False
+        return True
+
+    return call_llm(router, user_prompt, _SYSTEM_PROMPT, max_tokens=1600,
+                    json_mode=False, accept=_usable)
 
 
 _URL_RE = re.compile(r"https?://\S+")

@@ -652,6 +652,29 @@ def build_quality_router() -> LLMRouter:
         (937K/625K/1.3M) but they are small edge models, and prose quality is the
         only reason this router exists. Throughput was never the constraint here.
     """
+    quality_slots = _quality_slots()
+    active = [s for s in quality_slots if s.api_key]
+    if not active:
+        logger.warning("Quality router: no MISTRAL_API_KEY/CLOUDFLARE_API_TOKEN/"
+                       "LLM7_KEY/POLLINATIONS_API_KEY set, falling back to full router")
+        return build_llm_router()
+    return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
+
+
+def quality_slot_models() -> tuple:
+    """The (provider, model) pairs this router DELIBERATELY chose, without the
+    main cascade it falls through to.
+
+    Exists so the weekly regression probe tests what production actually uses.
+    A hand-kept list beside the router would drift from it, and a drifted list is
+    worse than none: it reports green about slots nothing runs while the slots
+    that do run go unwatched.
+    """
+    return tuple((s.provider, s.model) for s in _quality_slots() if s.api_key)
+
+
+def _quality_slots() -> list:
+    """The quality cascade's own slots, in order. See build_quality_router."""
     quality_slots = [
         LLMAccount(
             provider="mistral", account_id="A",
@@ -770,12 +793,7 @@ def build_quality_router() -> LLMRouter:
                 bucket=TokenBucket(rate_per_minute=6, daily_limit=12, burst=1),
             ))
 
-    active = [s for s in quality_slots if s.api_key]
-    if not active:
-        logger.warning("Quality router: no MISTRAL_API_KEY/CLOUDFLARE_API_TOKEN/"
-                       "LLM7_KEY/POLLINATIONS_API_KEY set, falling back to full router")
-        return build_llm_router()
-    return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
+    return quality_slots
 
 
 def build_bulk_router() -> LLMRouter:

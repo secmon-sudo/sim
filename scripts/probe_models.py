@@ -156,6 +156,20 @@ def list_models(provider: str) -> int:
     return 0
 
 
+# Which environment variable holds each provider's key. One copy, because
+# --regression and --models both need it and a second copy is how a provider ends
+# up silently skipped.
+_DEFAULT_KEY_ENV = {
+    "gemini": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY_A",
+    "openrouter": "OPENROUTER_API_KEY_A",
+    "mistral": "MISTRAL_API_KEY",
+    "llm7": "LLM7_KEY",
+    "pollinations": "POLLINATIONS_API_KEY",
+    "cloudflare": "CLOUDFLARE_API_TOKEN",
+}
+
+
 def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     """A router holding exactly the model under test — no failover.
 
@@ -526,11 +540,11 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
 
 def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
           extras: dict | None = None, prose: bool = False,
-          bulletin: bool = False) -> None:
+          bulletin: bool = False) -> bool:
     print(f"\n{'=' * 72}\n{provider}/{model}")
     if not os.environ.get(key_env):
         print(f"  SKIP: {key_env} not set")
-        return
+        return False
 
     router = _one_slot_router(provider, model, key_env)
     # A probe asks "can this model do the job at all", so it must not inherit the
@@ -604,7 +618,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
     except Exception as exc:
         print(f"  FAILED after {time.monotonic() - started:.1f}s: "
               f"{type(exc).__name__}: {str(exc)[:400]}")
-        return
+        return False
     finally:
         if patched:
             llm_client.get_profile = real_get_profile
@@ -627,7 +641,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         if not ok:
             print("  --- raw content ---")
             print(str(content)[:2000])
-        return
+        return ok
     if prose:
         ok, note = _grade_prose(content, result)
         print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
@@ -635,7 +649,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         # Turkish is any good, and that judgment is the entire reason for this mode.
         print("  --- narrative as written ---")
         print(content)
-        return
+        return ok
     # _parse_batch_response RAISES on unparseable content rather than returning
     # empty. An unparseable reply is a probe's most informative outcome, so it must
     # be a graded verdict here, not an exception: letting it propagate killed the
@@ -651,6 +665,85 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
     if not ok:
         print("  --- raw content ---")
         print(str(content)[:2500])
+    return ok
+
+
+def run_regression() -> int:
+    """Probe the slots production actually uses, and fail loudly when one breaks.
+
+    The harness has always been able to answer "is this candidate any good". What
+    it could not answer is "is the slot we have been using for a month STILL any
+    good", and that is the question the record keeps asking:
+
+      * gemini-2.5-flash-lite was retired early and answered 404 to every grounded
+        call for a fortnight before anyone connected it to the empty aviation
+        block (2026-07-23).
+      * Groq deprecated llama-3.1-8b-instant with a week's notice, and would have
+        rerouted Pass C's model without telling us (2026-09-02).
+      * Cerebras' free tier ended and every run paid a wasted round-trip to a
+        402 until someone read the logs (2026-09-02).
+      * OpenRouter's whole free gpt-oss family disappeared (2026-07-08).
+
+    None of those was a model getting worse at its job; every one was the ground
+    moving. A model is a dependency with no version pin and no changelog, and the
+    only way to know it still works is to run it.
+
+    The slot list comes from the routers rather than from a list kept here on
+    purpose — a hand-kept copy drifts, and a drifted copy reports green about
+    slots nothing runs while the ones that do run go unwatched.
+    """
+    from src.core.llm_router import (
+        BULLETIN_MEASURED_MODELS,
+        build_bulletin_router,
+        quality_slot_models,
+    )
+
+    failures: list[str] = []
+    checked = 0
+
+    print("\n" + "=" * 72)
+    print("REGRESSION: quality-router slots against the real SITREP narrator")
+    print("=" * 72)
+    for provider, model in quality_slot_models():
+        checked += 1
+        try:
+            if not probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""),
+                         timeout=300.0, prose=True):
+                failures.append(f"{provider}/{model} (prose)")
+        except Exception as exc:
+            failures.append(f"{provider}/{model} (prose, crashed: {type(exc).__name__})")
+
+    print("\n" + "=" * 72)
+    print("REGRESSION: bulletin direction slots against the trap headlines")
+    print("=" * 72)
+    bulletin_providers = {a.model: a.provider for a in build_bulletin_router().accounts}
+    for model in BULLETIN_MEASURED_MODELS:
+        provider = bulletin_providers.get(model)
+        if not provider:
+            print(f"\n{model}: no key configured, skipping")
+            continue
+        checked += 1
+        try:
+            if not probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""),
+                         timeout=120.0, bulletin=True):
+                failures.append(f"{provider}/{model} (bulletin)")
+        except Exception as exc:
+            failures.append(f"{provider}/{model} (bulletin, crashed: {type(exc).__name__})")
+
+    print("\n" + "=" * 72)
+    if not checked:
+        # A regression run that tested nothing and reported green is the exact
+        # failure this whole guard exists to stop: a check that quietly stopped
+        # checking. Missing keys in CI is the realistic way it happens.
+        print("REGRESSION FAILED: no slot had a key — nothing was tested")
+        return 1
+    if failures:
+        print(f"REGRESSION FAILED: {len(failures)} of {checked} slot(s)")
+        for f in failures:
+            print(f"  ✗ {f}")
+        return 1
+    print(f"REGRESSION PASSED: {checked} slot(s)")
+    return 0
 
 
 def main() -> int:
@@ -670,7 +763,13 @@ def main() -> int:
     ap.add_argument("--prose", action="store_true",
                     help="run the REAL Turkish SITREP narrator prompt instead of the "
                          "Pass C batch — for quality-router slots, whose job is prose")
+    ap.add_argument("--regression", action="store_true",
+                    help="probe the slots PRODUCTION actually uses, read from the "
+                         "routers themselves; exits non-zero if any of them fails")
     args = ap.parse_args()
+
+    if args.regression:
+        return run_regression()
 
     for provider in [p for p in args.list_providers.split(",") if p.strip()]:
         if provider.strip() in _CATALOGUES:
@@ -680,15 +779,7 @@ def main() -> int:
     if not args.models:
         return 0
 
-    default_key = {
-        "gemini": "GEMINI_API_KEY",
-        "groq": "GROQ_API_KEY_A",
-        "openrouter": "OPENROUTER_API_KEY_A",
-        "mistral": "MISTRAL_API_KEY",
-        "llm7": "LLM7_KEY",
-        "pollinations": "POLLINATIONS_API_KEY",
-        "cloudflare": "CLOUDFLARE_API_TOKEN",
-    }
+    default_key = _DEFAULT_KEY_ENV
     extras = json.loads(args.extras) if args.extras.strip() else {}
     # A 6K-token narrative is a different order of work than a 2K classification
     # batch, and mistral's own production profile already allows 180s for it — a

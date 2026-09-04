@@ -49,6 +49,29 @@ NARRATIVE_SYSTEM_PROMPT = (
 )
 
 
+def brief_is_usable(text: str) -> bool:
+    """The three things the prompt asks for that a machine can check.
+
+    Plain prose, no markdown, no preamble — and a length that could plausibly be
+    the 2-4 sentences requested. A reasoning slot that answers with a JSON object,
+    a bullet list, or "Here is the summary:" has not written a brief; it has
+    written something that will be stored verbatim as one and read by nobody until
+    it looks wrong in a report.
+
+    Kept loose on purpose. This is the last-resort check that a slot did the job
+    at all, not an editor: two sentences of dull prose pass, and should.
+    """
+    body = (text or "").strip()
+    if len(body) < 40:
+        return False
+    if body.startswith(("{", "[", "#", "```")):
+        return False
+    # A leading bullet is the whole reply's shape, not a stray character mid-text.
+    if body.lstrip().startswith(("- ", "* ", "• ")):
+        return False
+    return True
+
+
 def compute_signature(events: list[dict]) -> str:
     """Stable content fingerprint of a storyline — changes only when events change."""
     ids = sorted(str(e.get("id")) for e in events)
@@ -238,6 +261,7 @@ def run_storyline_narratives(db_conn, router) -> dict:
                 # Prose narrative — NOT JSON. Forcing Groq's json_object mode here
                 # returns HTTP 400 (validator requires "json" in the prompt).
                 json_mode=False,
+                accept=brief_is_usable,
             )
             log_llm_telemetry(db_conn, result, router, success=True,
                               purpose="storyline_narrative")

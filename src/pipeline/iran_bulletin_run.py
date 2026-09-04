@@ -22,6 +22,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from src.core import counters
 from src.core.llm_router import LLMRouter, build_bulletin_router
 from src.pipeline.weekly_forecast import upload_report_to_r2
 from src.services.iran_bulletin import (
@@ -199,6 +200,13 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
         logger.exception("Iran bulletin: Telegram dispatch failed")
 
     _save(db_conn, window_start, window_end, "completed", result, r2_url)
+    taken = counters.snapshot()
+    if taken:
+        # Chiefly bulletin_direction_batch_failed, which fails OPEN: those events
+        # keep the unattributed default and land in the regional section, so the
+        # report looks entirely normal while having quietly stopped saying which
+        # way anything was going. The number is the only trace.
+        logger.warning("Iran bulletin degradation counters: %s", taken)
     sections = result["sections"]
     logger.info(
         "Iran bulletin completed: %d events (on Iran %d, from Iran %d, regional %d)",
@@ -207,6 +215,7 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
     )
     return {
         "success": True, "status": "completed",
+        "degradation_counters": taken,
         "events": len(result["events"]),
         "sections": {SECTION_TITLES[k]: len(sections[k]) for k in SECTION_TITLES},
         "standings": {

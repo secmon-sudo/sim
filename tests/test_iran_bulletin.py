@@ -497,3 +497,49 @@ class TestDirectionUsesTargetNotFiling:
     def test_a_us_strike_on_a_third_country_is_not_section_one(self):
         ev = {"country_iso": "IQ", "actor": ib.US_SIDE, "target": ib.OTHER_SIDE}
         assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+
+class TestNarrativeContract:
+    """The 4 Sep bulletin printed "us_coalition" at the reader eight times.
+
+    ACTOR_LABELS closed the hole that let it happen; this closes the class. Any
+    payload field added later with a slug for a value gets caught here whether or
+    not anyone remembers to write a label table for it.
+    """
+
+    HEADER = "İRAN TOPRAKLARINA YÖNELİK SALDIRILAR\n"
+
+    def test_a_leaked_actor_slug_is_rejected(self):
+        assert not ib.narrative_is_usable(
+            self.HEADER + "us_coalition tarafından gerçekleştirilen saldırılarda...")
+
+    def test_a_leaked_standing_slug_is_rejected(self):
+        assert not ib.narrative_is_usable(
+            self.HEADER + "Bu olayın durumu unknown olarak kaydedildi.")
+
+    def test_proper_turkish_passes(self):
+        assert ib.narrative_is_usable(
+            self.HEADER + "ABD/koalisyon güçleri tarafından saldırı düzenlendi.")
+
+    def test_a_narrative_with_no_section_line_is_rejected(self):
+        """The renderer is shape-driven: with no ALL-CAPS line the whole report
+        collapses into one undifferentiated block."""
+        assert not ib.narrative_is_usable("Tek bir paragraf, hiç başlık yok.")
+
+    def test_an_empty_narrative_is_rejected(self):
+        assert not ib.narrative_is_usable("")
+        assert not ib.narrative_is_usable("   \n  ")
+
+    def test_a_slug_inside_a_longer_word_is_not_a_leak(self):
+        """The match is on word boundaries: 'other' must not fire on a URL or a
+        compound, or the check starts rejecting good narratives."""
+        assert ib.narrative_is_usable(
+            self.HEADER + "Kaynak: brotherhood-news sitesinde yayımlandı.")
+
+    def test_the_token_list_covers_every_payload_value(self):
+        """A field added to the payload without a label table is the bug this
+        guards; the guard is only as good as this list."""
+        for token in (ib.IRAN_SIDE, ib.US_SIDE, ib.OTHER_SIDE, ib.UNATTRIBUTED,
+                      ib.STANDING_CONFIRMED, ib.STANDING_CLAIMED,
+                      ib.STANDING_DENIED, ib.STANDING_UNKNOWN, ib.WAR_RELATED):
+            assert token in ib._INTERNAL_TOKENS, token

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.airspace import build_airspace_assessment
 from src.core.llm_client import log_llm_telemetry
+from src.core import counters
 from src.core.llm_router import LLMRouter
 from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
 from src.services.czib_client import fetch_active_czib_by_country
@@ -334,5 +335,26 @@ def run_daily_sitrep(db_conn, router: LLMRouter,
     slim = [{k: v for k, v in r.items()
              if k not in ("report_text", "clusters", "airspace")}
             for r in results]
+
+    # A SITREP run's own degradation record, written whether or not anything
+    # failed. On 2026-09-04 this run reported five completed countries and five
+    # unusable reports; a stage count cannot tell those apart, and this row is
+    # where the difference now shows. Best-effort — the reports are already
+    # delivered and a telemetry write must not undo that.
+    taken = counters.snapshot()
+    if taken:
+        logger.warning("SITREP run degradation counters: %s", taken)
+    try:
+        db_conn.execute(
+            "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",
+            ("sitrep_run", json.dumps(
+                {"completed": completed, "failed": failed,
+                 "countries": [r.get("country_iso") for r in results],
+                 "degradation_counters": taken}, default=str)),
+        )
+        db_conn.commit()
+    except Exception:
+        logger.exception("SITREP: could not log run telemetry")
+
     return {"success": failed == 0, "countries": slim, "completed": completed,
-            "digest_r2_url": digest_r2_url}
+            "digest_r2_url": digest_r2_url, "degradation_counters": taken}

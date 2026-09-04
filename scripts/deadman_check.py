@@ -25,6 +25,11 @@ from datetime import datetime, timezone
 import httpx
 import psycopg
 
+from src.core.output_health import (
+    DEFAULT_WINDOW_HOURS,
+    format_report,
+    run_checks,
+)
 from src.services.ops_notifier import send_ops_alert
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -194,6 +199,25 @@ def check_dispatch_backstop(db_url: str, max_age_hours: float,
     return False
 
 
+def check_output_health(db_url: str, window_hours: float) -> bool:
+    """Page when a delivered report is empty of the thing that makes it a report.
+
+    The dead-man's original question is "did it run". Every LLM failure this
+    project has had answered yes and was still a failure — see
+    src/core/output_health.py for the four that shipped. Returns True when it
+    paged, so a caller (and the tests) can tell "healthy" from "checked nothing".
+    """
+    with psycopg.connect(db_url, connect_timeout=15) as conn:
+        findings = run_checks(conn, window_hours)
+    text = format_report(findings)
+    if not text:
+        logger.info("Output health: nothing to report")
+        return False
+    logger.warning("Output health: %d finding(s)", len(findings))
+    send_ops_alert(text, title="SIM RAPOR SAĞLIĞI")
+    return True
+
+
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.environ.get(name, default))
@@ -232,6 +256,16 @@ def main() -> int:
         )
     except Exception:
         logger.exception("Dispatch backstop check failed — not paging")
+
+    # Third, and last for a reason: this is the check that pages about reports
+    # that ARRIVED. If the pipeline is dead the two checks above already said so
+    # and this one has nothing to add; if the pipeline is alive, this is the only
+    # thing here that can tell you the reports it produced are hollow.
+    try:
+        check_output_health(db_url, _env_float("DEADMAN_OUTPUT_WINDOW_HOURS",
+                                               DEFAULT_WINDOW_HOURS))
+    except Exception:
+        logger.exception("Output-health check failed — not paging")
 
     # Always green — the alert is the payload, not the exit code.
     return 0

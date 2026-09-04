@@ -40,9 +40,11 @@ the pipeline a classification.
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List
 
+from src.core import counters
 from src.core.llm_client import call_llm, log_llm_telemetry
 from src.core.llm_router import LLMRouter
 
@@ -321,6 +323,7 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
                                   purpose="bulletin_direction")
             parsed = _parse_extraction(result.get("content", ""), len(chunk))
         except Exception:
+            counters.bump(counters.BULLETIN_DIRECTION_BATCH_FAILED)
             logger.warning("Direction extraction failed for a batch of %d; those "
                            "events stay unattributed", len(chunk), exc_info=True)
             parsed = [{"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
@@ -482,6 +485,47 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
     ])
 
 
+# Every value the narrator's payload is keyed on. If one of these appears in the
+# finished Turkish prose, the model copied a field name out of the data instead of
+# writing it — which is exactly what shipped on 4 Sep, eight times, as
+# "us_coalition tarafından gerçekleştirilen saldırılarda".
+#
+# ACTOR_LABELS closed the hole that let it happen. This closes the class: any
+# future field added to the payload with a slug for a value gets caught here
+# whether or not anyone remembers to write a label table for it.
+_INTERNAL_TOKENS = (
+    IRAN_SIDE, US_SIDE, OTHER_SIDE, UNATTRIBUTED,
+    STANDING_CONFIRMED, STANDING_CLAIMED, STANDING_DENIED, STANDING_UNKNOWN,
+    WAR_RELATED, SECTION_ON_IRAN, SECTION_FROM_IRAN, SECTION_REGIONAL,
+)
+
+
+def narrative_is_usable(text: str) -> bool:
+    """Two things a bulletin narrative must be, both machine-checkable.
+
+    It must not print an internal identifier at the reader, and it must carry at
+    least one ALL-CAPS section line — the renderer is shape-driven and a narrative
+    without one collapses into a single undifferentiated block.
+
+    Note "iran" is a token here and also a perfectly ordinary English word the
+    prose will not contain (the report is Turkish, where it is "İran"), which is
+    why the match is on word boundaries and case-sensitive: the slug is lowercase
+    ASCII in every payload it comes from.
+    """
+    if not text or not text.strip():
+        return False
+    for token in _INTERNAL_TOKENS:
+        if re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", text):
+            logger.warning("Bulletin narrative leaked the internal token %r", token)
+            return False
+    for line in text.splitlines():
+        letters = [c for c in line.strip() if c.isalpha()]
+        if len(letters) >= 4 and all(c == c.upper() for c in letters):
+            return True
+    logger.warning("Bulletin narrative carries no ALL-CAPS section line")
+    return False
+
+
 def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
                    window_end: datetime, max_tokens: int = 6000) -> Dict[str, Any]:
     """Fetch, attribute, group and narrate the theatre bulletin.
@@ -527,6 +571,7 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
         # Prose, never JSON: a reasoning model asked for JSON here returns the
         # narrative wrapped in a string field and the renderer sees one long line.
         json_mode=False,
+        accept=narrative_is_usable,
     )
     if db_conn is not None:
         log_llm_telemetry(db_conn, result, router, success=True,

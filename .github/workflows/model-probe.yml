@@ -1,9 +1,22 @@
 name: Model Probe
 
-# Manual only. Runs a candidate model through the REAL Pass C classification
-# prompt and uploads the answers, so a new slot is chosen on output rather than
-# on catalog copy. Costs a handful of LLM calls and touches no database.
+# Two jobs in one workflow.
+#
+# `probe` is manual: it runs a CANDIDATE model through the real prompts and
+# uploads the answers, so a new slot is chosen on output rather than on catalog
+# copy. Costs a handful of LLM calls and touches no database.
+#
+# `regression` is weekly: it runs the slots PRODUCTION ALREADY USES through the
+# same prompts, and pages ops when one of them stops working. A model is a
+# dependency with no version pin and no changelog — gemini-2.5-flash-lite was
+# retired early and answered 404 for a fortnight, Groq deprecated a Pass C model
+# with a week's notice, Cerebras' free tier ended mid-run, OpenRouter's free
+# gpt-oss family vanished. None of that shows up until a report looks wrong, and
+# by then it has been wrong for a while. Monday 06:00 UTC, before the 07:30
+# SITREP, so a failure is known before the day's reports are written.
 on:
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       models:
@@ -43,6 +56,7 @@ env:
 
 jobs:
   probe:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -79,3 +93,59 @@ jobs:
           name: model-probe-${{ github.run_id }}
           path: logs/probe.txt
           retention-days: 7
+
+  regression:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Probe the slots production uses
+        id: regression
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python -m scripts.probe_models --regression 2>&1 | tee logs/regression.txt
+
+      - name: Page ops when a production slot failed
+        if: steps.regression.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          # Verdict lines only. The full transcript is in the artifact, and a page
+          # nobody can read on a phone is a page nobody reads.
+          SUMMARY=$(grep -E "^  ✗ |^REGRESSION" logs/regression.txt | head -20)
+          export SUMMARY
+          python -c "
+          import os
+          from src.services.ops_notifier import send_ops_alert
+          summary = os.environ.get('SUMMARY', '').strip() or '(özet çıkarılamadı)'
+          send_ops_alert(
+              '⚠️ Haftalık slot probu: üretimde kullanılan bir model artık işini '
+              'yapmıyor.\n\n' + summary +
+              '\n\nTam çıktı: Actions > Model Probe > regression artifact.',
+              title='SIM MODEL REGRESYONU')
+          "
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-regression-${{ github.run_id }}
+          path: logs/regression.txt
+          retention-days: 30
+
+      - name: Fail the job when a slot failed
+        if: steps.regression.outcome == 'failure'
+        run: exit 1

@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+from src.core import counters
 from src.core.llm_router import build_llm_router, build_quality_router
 from src.pipeline.pass_a_ingest import run_pass_a
 from src.pipeline.pass_b_dedup import run_pass_b
@@ -280,6 +281,15 @@ def run_pipeline():
         results["duration_seconds"] = round(time.monotonic() - start_time, 2)
 
         # Persist telemetry JSON to logs/ for artifact upload
+        # Degradation counters ride with the run's own telemetry. They are the
+        # half of the picture the stage stats cannot carry: a run where every
+        # stage reports success but llm_contract_rejected is 5 produced five
+        # reports nobody should trust. See src/core/counters.py.
+        taken = counters.snapshot()
+        if taken:
+            results["degradation_counters"] = taken
+            logger.warning("Degradation counters for this run: %s", taken)
+
         try:
             with open(LOGS_DIR / "telemetry.json", "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, default=str)
