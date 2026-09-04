@@ -339,8 +339,17 @@ class TestQualityCascadeOrder:
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
             "minimax-m2.7",
-            "YoannDev90/poolside-laguna-s-2.1:free",
+            "gpt-oss",
         ]
+
+    def test_the_last_rung_is_an_official_pollinations_model(self, monkeypatch):
+        """laguna failed the 2026-09-04 probe by inventing the FIR code OAKWX,
+        and it is a community entry — an individual's upstream key in a shared
+        router. gpt-oss is official and passed. Both still sit last: two of four
+        officials probed that day returned an empty HTTP 200."""
+        providers = dict((m, p) for p, m in self._slots(monkeypatch))
+        assert providers.get("gpt-oss") == "pollinations"
+        assert not any("laguna" in m for m in providers)
 
     def test_the_cloudflare_slots_share_one_endpoint_and_bound(self, monkeypatch):
         from src.core import llm_router as lr

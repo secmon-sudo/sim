@@ -585,10 +585,9 @@ def build_quality_router() -> LLMRouter:
     severity-score calibration the alert thresholds are tuned to.
 
     Cascade: Cloudflare Workers AI gpt-oss-120b → Cloudflare mistral-small-3.1-24b
-    (both only when the CLOUDFLARE_* vars are set) → Mistral medium → LLM7
-    minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as fallback,
-    so a missing key or provider outage degrades to exactly the pre-2026-07-17
-    behavior.
+    (both only when the CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 →
+    Pollinations gpt-oss → the full main cascade as fallback, so a missing key or
+    provider outage degrades to exactly the pre-2026-07-17 behavior.
 
     Cloudflare leads from 2026-09-04, and the reason is a measurement rather than
     a preference. Two things happened that day. Mistral answered HTTP 429 to every
@@ -625,18 +624,11 @@ def build_quality_router() -> LLMRouter:
       - llm7/minimax-m2.7 — PASS at 14.1s, first-party slot on LLM7's token
         allowance, which is a TOKEN budget (~1M/day) and so is spent by this
         router's low volume far more slowly than by anything in Pass A-E.
-      - pollinations/poolside-laguna-s-2.1:free — PASS at 15.9s, and the only one
-        of six free Pollinations models that was usable: glm-fast returned HTTP 200
-        with an empty completion after 96s, nemotron-3-ultra-550b read-timed out
-        twice, two more 503'd. Turkish prose checked separately (11.4s, grammatical,
-        no inverted sentences) — but its usage came back with reasoning_tokens at
-        163 of 386 completion tokens, i.e. hidden thinking takes ~42% of whatever
-        max_tokens the caller asked for. At the 6K SITREP budget that is a real cut
-        in usable narrative, and no reasoning knob is declared for this provider
-        (see model_profiles), so treat its output length as roughly half the ask.
-        It sits LAST on purpose: every free model there is an individual's upstream
-        key registered into a community router and flagged alpha, so it is a
-        zero-cost safety net and never a slot to depend on.
+      - pollinations/gpt-oss (GPT-OSS 20B, official) — PASS at 37.5s on the real
+        SITREP prompt, 2026-09-04, replacing laguna-s-2.1 which failed the same
+        probe by inventing an FIR code. Still LAST: two of the four official models
+        probed alongside it returned an empty HTTP 200, so "official" raises this
+        provider's floor without making it dependable.
     Neither is a quality upgrade on the rungs above — both are cheaper prose, and
     both failed the 2026-09-04 regression probe (minimax truncates citation URLs
     to bare domains, laguna invents FIR codes). They are last because they only
@@ -716,11 +708,37 @@ def _quality_slots() -> list:
             bucket=TokenBucket(rate_per_minute=6, daily_limit=300, burst=1),
         ),
         # per_user_rpm=30 is published in the Pollinations catalogue; halved here
-        # because the number describes the community router's own ceiling, not the
-        # upstream key behind it, and that key's owner gets no warning from us.
+        # because the number describes the gateway's own ceiling, not the upstream
+        # capacity behind it.
+        #
+        # Was YoannDev90/poolside-laguna-s-2.1:free until 2026-09-04. Two things
+        # replaced it, both from reading the LIVE catalogue rather than the note
+        # written about it two days earlier:
+        #
+        #   * laguna FAILED that day's regression probe — it wrote the FIR code
+        #     OAKWX where the payload said OAKX, a fabricated aviation identifier
+        #     in a report whose hardest rule is that codes come only from the
+        #     computed airspace block.
+        #   * The catalogue now lists 228 text models, 39 of them OFFICIAL rather
+        #     than community. That distinction is the exact objection that put
+        #     laguna last: a community entry is an individual's upstream key
+        #     registered into a shared router and flagged alpha, and the laguna
+        #     family is visibly churning — a sibling entry carries a five-day
+        #     shutdown notice naming our own slot as the migration target.
+        #
+        # gpt-oss is the only one of four probed officials that passed. Nemotron
+        # 3.5 Lightning ran to 3002 words, hit the length ceiling and rewrote its
+        # URLs; glm-5.3-flash and GPT-5 Nano both returned an empty HTTP 200. Two
+        # failures in four is why this stays LAST despite being official.
+        #
+        # It is GPT-OSS 20B — the small sibling of the 120B leading this cascade
+        # on Cloudflare. At the bottom of a fallback chain that is a feature: the
+        # same weights family the report was written around, reached through a
+        # completely different host, so a Cloudflare outage does not take the
+        # prose style with it.
         LLMAccount(
             provider="pollinations", account_id="A",
-            model="YoannDev90/poolside-laguna-s-2.1:free",
+            model="gpt-oss",
             api_key=os.environ.get("POLLINATIONS_API_KEY", ""),
             rpm=15, rpd=300,
             bucket=TokenBucket(rate_per_minute=15, daily_limit=300, burst=1),
