@@ -162,15 +162,18 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         "For each numbered headline, name the actor that CARRIED OUT the action and "
         "say how well that attribution stands up.",
         "",
-        f'actor: "{IRAN_SIDE}" (Iran, IRGC, Revolutionary Guards, Tehran, or an '
-        f'Iran-aligned group), "{US_SIDE}" (United States, CENTCOM, coalition, or '
-        f'an allied military), "{OTHER_SIDE}" (any other named actor), or '
+        f'actor: "{IRAN_SIDE}" (the Iranian state or its forces — Iran, IRGC, '
+        f'Revolutionary Guards, Tehran, or an Iran-aligned armed group such as '
+        f'Hezbollah or the Houthis), "{US_SIDE}" (the United States, CENTCOM, or '
+        f'a force acting WITH the US against Iran in this war), '
+        f'"{OTHER_SIDE}" (any other named actor — including Israel acting on its '
+        f'own, a national army, a police force, or a civilian body), or '
         f'"{UNATTRIBUTED}" when the text names no actor at all.',
         "",
         f'target: who or what was ON THE RECEIVING END, with the same four values. '
         f'"{IRAN_SIDE}" when Iran or Iranian territory was hit, "{US_SIDE}" when US '
-        f'or coalition forces or their bases were hit, "{OTHER_SIDE}" for anyone '
-        f'else, "{UNATTRIBUTED}" when the text names no target.',
+        f'forces or their bases were hit, "{OTHER_SIDE}" for anyone else, '
+        f'"{UNATTRIBUTED}" when the text names no target.',
         "",
         f'war_related: true when the headline is about ARMED CONFLICT or a '
         f'military/security operation — a strike, shelling, an interception, air '
@@ -201,6 +204,13 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         '"Kuwait\'s air defences intercept Iranian missiles" is actor=iran, and so '
         'is \'"Iranian aggression": Kuwait responds to missile and UAV attacks\'. '
         'Do not answer unattributed because the attacker is not the subject.',
+        '- But the adjective has to name a STATE or an ARMED FORCE. "Iranian '
+        'missiles" and "Iranian forces" are iran; "Iranian professors", "Iranian '
+        f'media" and "Iranian shipping" are civilians and belong to "{OTHER_SIDE}". '
+        'A nationality is not a belligerent.',
+        f'- Israel is "{OTHER_SIDE}", never "{US_SIDE}". An Israeli strike in '
+        f'Lebanon or the West Bank is Israel acting on its own; "{US_SIDE}" means '
+        'the United States and whoever is fighting Iran alongside it.',
         '- An interception, a shoot-down, or a defensive response is an attack seen '
         'from the receiving end: the actor is whoever FIRED, not whoever intercepted. '
         'If the text does not say whose missiles they were, the actor is '
