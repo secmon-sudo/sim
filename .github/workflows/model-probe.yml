@@ -112,29 +112,46 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          set -o pipefail
           mkdir -p logs
+          # Exit code carries the verdict: 0 clean, 1 a model answered and did the
+          # job badly, 2 a model could not be reached at all. Those are different
+          # problems and the page below says which.
+          #
+          # `set +e` around the call is not decoration: GitHub runs `shell: bash`
+          # as `bash -e -o pipefail`, so a non-zero pipeline aborts the script
+          # then and there and the line that captures the code never runs. The
+          # step would have reported success for every outcome.
+          set +e
           python -m scripts.probe_models --regression 2>&1 | tee logs/regression.txt
+          CODE=$?
+          set -e
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "probe exited $CODE"
 
-      - name: Page ops when a production slot failed
-        if: steps.regression.outcome == 'failure'
+      - name: Page ops
+        if: steps.regression.outputs.code != '0'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+          CODE: ${{ steps.regression.outputs.code }}
         continue-on-error: true
         shell: bash
         run: |
           # Verdict lines only. The full transcript is in the artifact, and a page
           # nobody can read on a phone is a page nobody reads.
-          SUMMARY=$(grep -E "^  ✗ |^REGRESSION" logs/regression.txt | head -20)
+          SUMMARY=$(grep -E "^  ✗ |^  ~ |^REGRESSION" logs/regression.txt | head -20)
           export SUMMARY
           python -c "
           import os
           from src.services.ops_notifier import send_ops_alert
           summary = os.environ.get('SUMMARY', '').strip() or '(özet çıkarılamadı)'
+          regressed = os.environ.get('CODE') == '1'
+          head = ('⚠️ Haftalık slot probu: üretimde kullanılan bir model artık '
+                  'işini yapmıyor.' if regressed else
+                  'ℹ️ Haftalık slot probu: bir slota hiç ulaşılamadı (kota/kesinti). '
+                  'Model bozulmadı, ama o slot bugün rapor yazamaz.')
           send_ops_alert(
-              '⚠️ Haftalık slot probu: üretimde kullanılan bir model artık işini '
-              'yapmıyor.\n\n' + summary +
+              head + '\n\n' + summary +
               '\n\nTam çıktı: Actions > Model Probe > regression artifact.',
               title='SIM MODEL REGRESYONU')
           "
@@ -146,6 +163,9 @@ jobs:
           path: logs/regression.txt
           retention-days: 30
 
-      - name: Fail the job when a slot failed
-        if: steps.regression.outcome == 'failure'
+      # Red only for a real regression. An unreachable slot is reported and
+      # kept green: a weekly job that goes red every time a free tier rate-limits
+      # is a job people stop looking at, and then it is worth less than nothing.
+      - name: Fail the job when a model regressed
+        if: steps.regression.outputs.code == '1'
         run: exit 1

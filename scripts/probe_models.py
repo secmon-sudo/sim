@@ -538,13 +538,22 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
     return ok, note
 
 
+# What a probe attempt concluded. The distinction matters because a weekly cron
+# that pages identically for both teaches people to ignore it: a model that
+# answered and did the job badly is a REGRESSION and needs a decision, while one
+# that 429'd is an availability fact and usually needs only patience.
+VERDICT_PASS = "pass"
+VERDICT_FAIL = "fail"
+VERDICT_UNREACHABLE = "unreachable"
+
+
 def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
           extras: dict | None = None, prose: bool = False,
-          bulletin: bool = False) -> bool:
+          bulletin: bool = False) -> str:
     print(f"\n{'=' * 72}\n{provider}/{model}")
     if not os.environ.get(key_env):
         print(f"  SKIP: {key_env} not set")
-        return False
+        return VERDICT_UNREACHABLE
 
     router = _one_slot_router(provider, model, key_env)
     # A probe asks "can this model do the job at all", so it must not inherit the
@@ -618,7 +627,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
     except Exception as exc:
         print(f"  FAILED after {time.monotonic() - started:.1f}s: "
               f"{type(exc).__name__}: {str(exc)[:400]}")
-        return False
+        return VERDICT_UNREACHABLE
     finally:
         if patched:
             llm_client.get_profile = real_get_profile
@@ -641,7 +650,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         if not ok:
             print("  --- raw content ---")
             print(str(content)[:2000])
-        return ok
+        return VERDICT_PASS if ok else VERDICT_FAIL
     if prose:
         ok, note = _grade_prose(content, result)
         print(f"  latency={result.get('latency_ms')}ms  verdict={'PASS' if ok else 'FAIL'} ({note})")
@@ -649,7 +658,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
         # Turkish is any good, and that judgment is the entire reason for this mode.
         print("  --- narrative as written ---")
         print(content)
-        return ok
+        return VERDICT_PASS if ok else VERDICT_FAIL
     # _parse_batch_response RAISES on unparseable content rather than returning
     # empty. An unparseable reply is a probe's most informative outcome, so it must
     # be a graded verdict here, not an exception: letting it propagate killed the
@@ -665,10 +674,10 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
     if not ok:
         print("  --- raw content ---")
         print(str(content)[:2500])
-    return ok
+    return VERDICT_PASS if ok else VERDICT_FAIL
 
 
-def run_regression() -> int:
+def run_regression(unreachable_retry_delay: float = 45.0) -> int:
     """Probe the slots production actually uses, and fail loudly when one breaks.
 
     The harness has always been able to answer "is this candidate any good". What
@@ -691,27 +700,56 @@ def run_regression() -> int:
     The slot list comes from the routers rather than from a list kept here on
     purpose — a hand-kept copy drifts, and a drifted copy reports green about
     slots nothing runs while the ones that do run go unwatched.
+
+    Two buckets, because the first live run showed they are not the same thing.
+    A slot that ANSWERED and did the job badly is a regression and needs a
+    decision — that run caught minimax-m2.7 truncating apnews.com/b to
+    apnews.com, reproducing the morning's five-report citation collapse from a
+    cold start, and laguna inventing the FIR code OAKWX. A slot that could not be
+    REACHED (Mistral and Groq both 429'd) is an availability fact; it is worth
+    saying, but paging about it in the same words teaches people to skim the
+    page. Unreachable slots get one retry after a pause first, so a single blip
+    does not spend anyone's attention.
     """
+    import time as _time
+
     from src.core.llm_router import (
         BULLETIN_MEASURED_MODELS,
         build_bulletin_router,
         quality_slot_models,
     )
 
-    failures: list[str] = []
-    checked = 0
+    regressions: list[str] = []
+    unreachable: list[str] = []
+    passed = 0
+
+    def _attempt(provider: str, model: str, label: str, **kw) -> None:
+        nonlocal passed
+        try:
+            verdict = probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""), **kw)
+        except Exception as exc:
+            verdict = VERDICT_UNREACHABLE
+            print(f"  probe crashed: {type(exc).__name__}: {exc}")
+        if verdict == VERDICT_UNREACHABLE and unreachable_retry_delay:
+            print(f"  unreachable; retrying once in {unreachable_retry_delay:.0f}s")
+            _time.sleep(unreachable_retry_delay)
+            try:
+                verdict = probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""), **kw)
+            except Exception as exc:
+                verdict = VERDICT_UNREACHABLE
+                print(f"  probe crashed on retry: {type(exc).__name__}: {exc}")
+        if verdict == VERDICT_PASS:
+            passed += 1
+        elif verdict == VERDICT_FAIL:
+            regressions.append(f"{provider}/{model} ({label})")
+        else:
+            unreachable.append(f"{provider}/{model} ({label})")
 
     print("\n" + "=" * 72)
     print("REGRESSION: quality-router slots against the real SITREP narrator")
     print("=" * 72)
     for provider, model in quality_slot_models():
-        checked += 1
-        try:
-            if not probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""),
-                         timeout=300.0, prose=True):
-                failures.append(f"{provider}/{model} (prose)")
-        except Exception as exc:
-            failures.append(f"{provider}/{model} (prose, crashed: {type(exc).__name__})")
+        _attempt(provider, model, "prose", timeout=300.0, prose=True)
 
     print("\n" + "=" * 72)
     print("REGRESSION: bulletin direction slots against the trap headlines")
@@ -722,14 +760,9 @@ def run_regression() -> int:
         if not provider:
             print(f"\n{model}: no key configured, skipping")
             continue
-        checked += 1
-        try:
-            if not probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""),
-                         timeout=120.0, bulletin=True):
-                failures.append(f"{provider}/{model} (bulletin)")
-        except Exception as exc:
-            failures.append(f"{provider}/{model} (bulletin, crashed: {type(exc).__name__})")
+        _attempt(provider, model, "bulletin", timeout=120.0, bulletin=True)
 
+    checked = passed + len(regressions) + len(unreachable)
     print("\n" + "=" * 72)
     if not checked:
         # A regression run that tested nothing and reported green is the exact
@@ -737,12 +770,19 @@ def run_regression() -> int:
         # checking. Missing keys in CI is the realistic way it happens.
         print("REGRESSION FAILED: no slot had a key — nothing was tested")
         return 1
-    if failures:
-        print(f"REGRESSION FAILED: {len(failures)} of {checked} slot(s)")
-        for f in failures:
-            print(f"  ✗ {f}")
+    print(f"REGRESSION: {passed} passed, {len(regressions)} regressed, "
+          f"{len(unreachable)} unreachable, of {checked} slot(s)")
+    for name in regressions:
+        print(f"  ✗ REGRESSED {name}")
+    for name in unreachable:
+        print(f"  ~ UNREACHABLE {name}")
+    if regressions:
         return 1
-    print(f"REGRESSION PASSED: {checked} slot(s)")
+    if unreachable:
+        # Not a regression, still not a clean bill of health: on 2026-09-04 the
+        # primary quality slot 429'd every call and a fallback wrote the whole
+        # day's reports. Exit 2 so the workflow can page in different words.
+        return 2
     return 0
 
 
