@@ -111,6 +111,30 @@ class TestRun:
         assert sent["r2_url"] is None
         assert sent["html_doc"], "the document is the report; it must still go"
 
+    def test_the_placeholder_r2_host_is_never_linked(self, monkeypatch, _quiet):
+        """upload_report_to_r2 returns pub-default.r2.dev when the public base is
+        unset. That host does not resolve, so the card would carry a link that
+        fails on SSL — which is exactly what the 4 Sep bulletin shipped."""
+        sent = {}
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(
+            run, "upload_report_to_r2",
+            lambda *a, **k: "https://pub-default.r2.dev/iran_bulletin_20260904.html")
+        monkeypatch.setattr(run, "send_sitrep_telegram",
+                            lambda **k: sent.update(k) or "msg-1")
+        out = run.run_iran_bulletin(_Conn())
+        assert out["success"] is True
+        assert sent["r2_url"] is None
+        assert sent["html_doc"], "the document still goes; only the link is dropped"
+
+    def test_a_real_r2_link_is_passed_through(self, monkeypatch, _quiet):
+        sent = {}
+        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "send_sitrep_telegram",
+                            lambda **k: sent.update(k) or "msg-1")
+        run.run_iran_bulletin(_Conn())
+        assert sent["r2_url"] == "https://r2/x"
+
     def test_a_storage_outage_does_not_lose_a_dispatched_report(
             self, monkeypatch, _quiet):
         """_save swallows: the report is already in someone's hands."""

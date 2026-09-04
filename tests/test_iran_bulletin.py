@@ -284,6 +284,28 @@ class TestNarrativePrompt:
         for title in ib.SECTION_TITLES.values():
             assert title in prompt
 
+    def test_no_internal_slug_reaches_the_narrator(self):
+        """The 4 Sep bulletin printed "us_coalition tarafından gerçekleştirilen
+        saldırılarda" eight times, because the actor went into the payload as the
+        slug the sections are keyed on. Anything in that payload can end up in
+        Turkish prose verbatim, so none of the slugs may be in it."""
+        prompt = self._prompt()
+        for slug in (ib.IRAN_SIDE, ib.US_SIDE, ib.OTHER_SIDE, ib.UNATTRIBUTED,
+                     ib.STANDING_CONFIRMED, ib.STANDING_CLAIMED,
+                     ib.STANDING_DENIED, ib.STANDING_UNKNOWN):
+            assert slug not in prompt, slug
+
+    def test_the_actor_reaches_the_model_by_name(self):
+        prompt = self._prompt()
+        assert '"fail": "ABD/koalisyon güçleri"' in prompt
+        assert '"fail": "İran"' in prompt
+
+    def test_an_unnamed_actor_is_labelled_rather_than_dropped(self):
+        """A missing key would let the model pick an actor from the headline; the
+        label plus its rule tells it not to attribute at all."""
+        assert ib.ACTOR_LABELS[ib.UNATTRIBUTED] in self._prompt()
+        assert "fail atfetme" in self._prompt()
+
 
 class TestBuildBulletin:
     def test_an_empty_window_is_not_an_error(self, monkeypatch):

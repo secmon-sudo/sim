@@ -73,6 +73,35 @@ _EVENT_TYPE_TR = {
     "web_discovery": "Web Taraması Bulgusu",
     "other_aviation_related": "Diğer Havacılık Olayı",
     "unclassified": "Sınıflandırılmamış",
+    # The aviation half of the catalogue was missing from this table, so a
+    # Turkish report printed the raw code de-snaked into English: the 4 Sep Iran
+    # bulletin carried "Airspace Closure" and "Emergency Landing" next to "Füze
+    # Saldırısı". The fallback is doing its job — it just cannot translate. Every
+    # event_type Pass C is allowed to emit now has a row here.
+    "airspace_closure": "Hava Sahası/Havalimanı Kapanışı",
+    "gnss_interference": "GNSS Karıştırma",
+    "runway_incursion": "Piste İzinsiz Giriş",
+    "emergency_landing": "Acil İniş",
+    "bird_strike": "Kuş Çarpması",
+    "engine_failure": "Motor Arızası",
+    "fire_on_board": "Uçakta Yangın",
+    "depressurization": "Basınç Kaybı",
+    "unruly_passenger": "Yolcu Kaynaklı Olay",
+    "laser_attack": "Lazerle Taciz",
+    "suspicious_package": "Şüpheli Paket",
+    "aviation_personnel_attack": "Havacılık Personeline Saldırı",
+    "pilot_attacked": "Pilota Saldırı",
+    "cabin_crew_attacked": "Kabin Ekibine Saldırı",
+    "ground_staff_attacked": "Yer Personeline Saldırı",
+    "african_terrorism": "Terör Saldırısı (Afrika)",
+    "extremist_violence": "Aşırılıkçı Şiddet",
+    "mass_stabbing": "Toplu Bıçaklı Saldırı",
+    "vehicle_ramming": "Araçla Ezme Saldırısı",
+    "resort_attack": "Tatil Beldesine Saldırı",
+    "beach_attack": "Sahilde Saldırı",
+    "tourist_bus_attack": "Turist Otobüsüne Saldırı",
+    "cruise_ship_attack": "Yolcu Gemisine Saldırı",
+    "noise": "Gürültü",
 }
 
 # The closing paren is optional: a model that writes "Reuters (https://x" still
@@ -103,6 +132,24 @@ def _strip_md(line: str) -> str:
     # the bare URL instead of losing the source.
     line = re.sub(r"\[[^\]]*\]\((https?://[^)\s]+)\)?", r"\1", line)
     return line.strip()
+
+
+def _tr_title(text: str) -> str:
+    """Title-case that survives Turkish.
+
+    str.title() decomposes the dotted capital İ — "ASKERİ" came back "Askeri̇",
+    with a stray combining dot — because the I/İ pair has no case rule in Python's
+    default mapping. Lower with the Turkish pair applied first, then upper only
+    the initial of each word, with the same pair applied again.
+    """
+    out = []
+    for word in text.split(" "):
+        low = word.replace("İ", "i").replace("I", "ı").lower()
+        if low:
+            head = low[0].replace("i", "İ").replace("ı", "I").upper()
+            low = head + low[1:]
+        out.append(low)
+    return " ".join(out)
 
 
 def _event_type_label(code: str) -> str:
@@ -590,7 +637,7 @@ def render_sitrep_html(country_name: str, country_iso: str,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(report_title.title())} — {_esc(country_name)} — {_esc(window_end[:10])}</title>
+<title>{_esc(_tr_title(report_title))} — {_esc(country_name)} — {_esc(window_end[:10])}</title>
 </head>
 <body style="margin:0;background:#0a0f1c;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;overflow-x:hidden">
 <div style="max-width:720px;margin:0 auto;padding:0 16px 40px">

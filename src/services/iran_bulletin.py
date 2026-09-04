@@ -318,6 +318,24 @@ STANDING_LABELS = {
     STANDING_UNKNOWN: "Durum belirsiz",
 }
 
+# What each actor is CALLED in the report. STANDING_LABELS has always existed and
+# the standing reads correctly in Turkish because of it; the actor had no such
+# table, so `fail: "us_coalition"` went into the narrator's payload raw and came
+# back out in the prose — eight times in the 4 Sep bulletin, in sentences like
+# "us_coalition tarafından gerçekleştirilen saldırılarda". A slug is not a name.
+#
+# OTHER_SIDE has no name to give: it means "an actor SIM did not classify", and
+# the only place its identity exists is the headline, which the narrator is
+# already reading. So the label is an instruction to go and read it, paired with
+# the rule below — a fixed word like "diğer" would produce "diğer tarafından
+# gerçekleştirilen saldırı", which names nobody while sounding like it does.
+ACTOR_LABELS = {
+    IRAN_SIDE: "İran",
+    US_SIDE: "ABD/koalisyon güçleri",
+    OTHER_SIDE: "başlıkta adı geçen taraf",
+    UNATTRIBUTED: "belirsiz",
+}
+
 _NARRATIVE_SYSTEM_PROMPT = (
     "Sen bir güvenlik analistisin. Türkçe, düz ve devrik olmayan cümlelerle "
     "yazarsın. Sana verilen veride olmayan hiçbir olayı, sayıyı, yeri veya "
@@ -333,7 +351,7 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
             {
                 "baslik": ev.get("title", ""),
                 "ulke": ev.get("country_iso"),
-                "fail": ev.get("actor"),
+                "fail": ACTOR_LABELS.get(ev.get("actor"), "belirsiz"),
                 "durum": STANDING_LABELS.get(ev.get("standing"), "Durum belirsiz"),
                 "siddet": ev.get("severity"),
                 "yayinci": ev.get("domain"),
@@ -357,7 +375,12 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "- Her olayın failini ve durumunu yaz. 'Tek taraflı iddia' veya "
         "'İddia edildi, yalanlandı' olan bir olayı ASLA gerçekleşmiş gibi anlatma; "
         "kimin iddia ettiğini söyle.",
-        "- Faili 'unattributed' olan olaylarda fail atfetme.",
+        "- Fail alanı 'başlıkta adı geçen taraf' olan olaylarda faili başlıktan "
+        "oku ve adıyla yaz.",
+        "- Fail alanı 'belirsiz' olan olaylarda kimseye fail atfetme; olayı "
+        "failsiz anlat.",
+        "- Veri alanlarını olduğu gibi cümleye kopyalama; hepsi Türkçe "
+        "yazılacak.",
         "- Verideki sayıları değiştirme, yuvarlama, toplama.",
         "",
         "VERİ:",

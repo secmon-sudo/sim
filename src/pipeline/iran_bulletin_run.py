@@ -171,6 +171,15 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
     try:
         r2_url = upload_report_to_r2(f"iran_bulletin_{stamp}.html",
                                      html_doc.encode("utf-8"), "text/html")
+        # upload_report_to_r2 invents a public base when R2_PUBLIC_URL_BASE is
+        # unset, and that host does not exist — Telegram renders the link and it
+        # fails on SSL. daily_sitrep has suppressed it since the day it was found;
+        # this path was written later and inherited the bug rather than the fix,
+        # so the 4 Sep bulletin card carried pub-default.r2.dev/iran_bulletin_*.
+        if r2_url and "pub-default.r2.dev" in r2_url:
+            logger.warning("Iran bulletin: R2_PUBLIC_URL_BASE not configured; "
+                           "omitting the R2 link")
+            r2_url = None
     except Exception:
         logger.warning("Iran bulletin: R2 upload failed; dispatching anyway",
                        exc_info=True)
