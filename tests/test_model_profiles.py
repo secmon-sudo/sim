@@ -87,3 +87,14 @@ class TestRequestTimeout:
     def test_fast_providers_keep_default(self):
         assert get_profile("groq", "openai/gpt-oss-20b").request_timeout == 30.0
         assert get_profile("openrouter", "nvidia/nemotron-3-super-120b-a12b:free").request_timeout == 30.0
+
+
+def test_the_paid_floor_does_not_pay_for_hidden_thinking():
+    """Gemini 3.1 Flash Lite reasons by default and OpenRouter bills reasoning at
+    the OUTPUT rate. The dollars are small; the budget is not — reasoning is 22%
+    of completion tokens across OpenRouter's traffic to this model, and every one
+    of those comes out of the 6,000-token ceiling the narrative is allowed."""
+    from src.core.model_profiles import get_profile
+
+    p = get_profile("openrouter", "google/gemini-3.1-flash-lite")
+    assert p.payload_extras == {"reasoning": {"enabled": False}}

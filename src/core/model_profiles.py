@@ -85,6 +85,19 @@ OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
     # exactly the shape that spends the budget on hidden thinking. Checked
     # 2026-09-02 when it took the secondary slots from GLM 5.2.
     "minimax/minimax-m3:free",
+    # The paid floor (see llm_router._quality_slots). Gemini 3.1 Flash Lite
+    # supports full thinking levels and reasons by default, and OpenRouter bills
+    # reasoning tokens at the OUTPUT rate ($1.50/M). Two costs, and the second is
+    # the one that matters: across all of OpenRouter's traffic to this model,
+    # reasoning is 659M tokens against 2.97B completion — 22% — and every one of
+    # those comes out of the 6,000-token ceiling the narrative is allowed. That is
+    # the laguna problem measured on 2026-09-02, where hidden thinking took 42% of
+    # max_tokens and the reader got half a report.
+    #
+    # Turning it off costs nothing measurable: probed both ways on the real SITREP
+    # prompt, 3,299ms/278 words with reasoning and 3,288ms/241 words without, both
+    # PASS. This is prose written from supplied facts, not a problem to think about.
+    "google/gemini-3.1-flash-lite",
 })
 
 # LLM7 (aggregator, added 2026-09-02) publishes a per-model `json_mode` boolean in
