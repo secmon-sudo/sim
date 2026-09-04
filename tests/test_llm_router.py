@@ -283,3 +283,56 @@ class TestQualityRouter:
         assert router.accounts[0].provider == "mistral"
         assert len(router.accounts) > 1
         reset_bucket_registry()
+
+
+class TestQualityCascadeOrder:
+    """Ordering is a measurement here, not a preference (4 Sep 2026)."""
+
+    def _slots(self, monkeypatch):
+        from src.core import llm_router as lr
+
+        for name in ("MISTRAL_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY"):
+            monkeypatch.setenv(name, "k")
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+        return lr.quality_slot_models()
+
+    def test_cloudflare_leads_the_cascade(self, monkeypatch):
+        """Mistral 429'd all five SITREP calls that morning and both cold probe
+        calls after it; a dead slot at the front is a round-trip paid before any
+        work starts, which is why Cerebras was removed two days earlier."""
+        slots = self._slots(monkeypatch)
+        assert slots[0] == ("cloudflare", "@cf/openai/gpt-oss-120b")
+        assert slots[1][0] == "cloudflare"
+
+    def test_mistral_is_demoted_not_deleted(self, monkeypatch):
+        """Nothing says the 429s are permanent, and its Turkish is the best this
+        project has measured. A slot that is down costs one round-trip; a slot
+        that is gone cannot come back on its own."""
+        models = [m for _p, m in self._slots(monkeypatch)]
+        assert "mistral-medium-latest" in models
+        assert models.index("mistral-medium-latest") == 2
+
+    def test_the_cloudflare_slots_share_one_endpoint_and_bound(self, monkeypatch):
+        from src.core import llm_router as lr
+
+        for name in ("MISTRAL_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY"):
+            monkeypatch.setenv(name, "k")
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+        cf = [s for s in lr._quality_slots() if s.provider == "cloudflare"]
+        assert len(cf) == 2
+        # One account, one allowance: the endpoint carries the account id.
+        assert len({s.endpoint for s in cf}) == 1
+        assert all("acct" in s.endpoint for s in cf)
+        # The bound caps spend now that the free cliff is gone, and 7 calls a day
+        # plus a rotation or two must fit under it.
+        assert all(s.rpd == 20 for s in cf)
+
+    def test_no_cloudflare_vars_means_no_cloudflare_slot(self, monkeypatch):
+        from src.core import llm_router as lr
+
+        monkeypatch.setenv("MISTRAL_API_KEY", "k")
+        monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+        monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+        assert not any(p == "cloudflare" for p, _m in lr.quality_slot_models())

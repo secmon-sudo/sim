@@ -584,11 +584,26 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Mistral medium (best Turkish still reachable on this account) →
-    Cloudflare Workers AI gpt-oss-120b → Cloudflare mistral-small-3.1-24b (both
-    only when the CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 → Pollinations
-    laguna-s-2.1 → the full main cascade as fallback, so a missing key or provider
-    outage degrades to exactly the pre-2026-07-17 behavior.
+    Cascade: Cloudflare Workers AI gpt-oss-120b → Cloudflare mistral-small-3.1-24b
+    (both only when the CLOUDFLARE_* vars are set) → Mistral medium → LLM7
+    minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as fallback,
+    so a missing key or provider outage degrades to exactly the pre-2026-07-17
+    behavior.
+
+    Cloudflare leads from 2026-09-04, and the reason is a measurement rather than
+    a preference. Two things happened that day. Mistral answered HTTP 429 to every
+    one of the five country SITREP calls, and then to two more cold single calls
+    45 seconds apart in the regression probe — this is not our own burst against
+    the 25K TPM ceiling, it is the slot being unavailable, and a dead slot at the
+    front of a cascade is a fixed per-run round-trip paid before any work starts.
+    That is exactly why Cerebras was removed two days earlier when its free tier
+    began answering 402. And the two Cloudflare slots PASSED the same probe on the
+    real SITREP prompt while the two rungs below them failed it.
+
+    Mistral keeps its place in the cascade rather than being deleted: nothing says
+    the 429s are permanent, its Turkish is the best this project has measured, and
+    a slot that costs one round-trip when it is down costs nothing when it is up.
+    It is demoted, not judged.
 
     A word on minimax-m2.7, which sits third and passed its Pass C probe: on
     2026-09-04 it narrated all five SITREPs and shortened EVERY citation URL to a
@@ -784,13 +799,18 @@ def _quality_slots() -> list:
                        f"{cf_account}/ai/v1/chat/completions")
         for offset, cf_model in enumerate(("@cf/openai/gpt-oss-120b",
                                            "@cf/mistralai/mistral-small-3.1-24b-instruct")):
-            quality_slots.insert(1 + offset, LLMAccount(
+            quality_slots.insert(offset, LLMAccount(
                 provider="cloudflare", account_id="A",
                 model=cf_model,
                 api_key=cf_token,
                 endpoint=cf_endpoint,
-                rpm=6, rpd=12,
-                bucket=TokenBucket(rate_per_minute=6, daily_limit=12, burst=1),
+                # 20/day, not 12. On the free allowance the bound existed to stop
+                # a retry storm eating the day's Neurons; on Workers Paid the
+                # cliff is gone and the bound's job changes to capping SPEND. The
+                # router makes 7 calls on a full day, so 20 leaves room for a
+                # rotation or two and still cannot run away.
+                rpm=6, rpd=20,
+                bucket=TokenBucket(rate_per_minute=6, daily_limit=20, burst=1),
             ))
 
     return quality_slots
