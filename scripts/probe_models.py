@@ -426,11 +426,22 @@ BULLETIN_SAMPLE = [
     # Off-topic and not even violent, but it scored high enough to be narrated.
     ("Iranian professors threaten to suspend academic activity as salaries "
      "remain unpaid", "other", "other", "unknown", False),
-    # The discriminating row for war_related: same country and same event type as
-    # the Nazareth homicides the bulletin also carried, opposite answer. A model
-    # that drops this one is filtering by "is it crime", not by "is it the war".
+    # This row went in labelled True and the probe overturned it — both models
+    # answered off-topic, and on reflection they are right. The West Bank is a
+    # separate conflict with neither Iran, nor an Iran-aligned force, nor the
+    # coalition in it; it is in the fetch only because Israel is a theatre country.
+    # The field's wording was the thing at fault ("the regional military situation
+    # around it" invited exactly this argument) and now names the parties instead.
     ('Two Palestinians were killed by IDF fire in the Ramallah area: "They threw '
-     'blocks and stones"', "other", "other", "confirmed", True),
+     'blocks and stones"', "other", "other", "confirmed", False),
+    # The pair that actually discriminates, and the reason the field cannot be a
+    # crime filter: both are violent deaths in the theatre, one week apart in the
+    # same corpus. Hezbollah is Iran-aligned, so the shelling is this report's
+    # subject; the Nazareth murders are not, and the 4 Sep bulletin printed them.
+    ("Israeli artillery shelling reported in southern Lebanon",
+     "other", "other", "confirmed", True),
+    ("Israel's 2026 homicide toll reaches 200 as three men shot to death in "
+     "Nazareth in one night", "other", "other", "confirmed", False),
 ]
 
 
