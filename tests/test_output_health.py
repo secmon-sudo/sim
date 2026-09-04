@@ -165,12 +165,12 @@ class TestOpenRouterCredit:
         monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
 
     def test_a_low_balance_is_reported_in_days(self, monkeypatch):
-        # $1.00 left ÷ $0.165/day ≈ 6 days
-        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 9.0}})
+        # $0.20 left ÷ $0.044/day ≈ 5 days
+        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 9.8}})
         out = oh.check_openrouter_credit(None, 30.0)
         assert out and out[0].key == "openrouter_credit_low"
-        assert "6 gün" in out[0].message
-        assert "$1.00" in out[0].detail
+        assert "5 gün" in out[0].message
+        assert "$0.20" in out[0].detail
 
     def test_a_healthy_balance_says_nothing(self, monkeypatch):
         self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 1.0}})

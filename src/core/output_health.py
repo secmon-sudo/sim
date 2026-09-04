@@ -246,11 +246,11 @@ def check_degradation_counters(conn, window_hours: float) -> List[Finding]:
                     "Degradation counters fired in the last day", listed)]
 
 
-# Roughly what the paid floor spends in a day: 7 calls at 13,040 tokens, 80/20
-# prompt/completion, against Haiku 4.5's $1/$5 per million. Used only to turn a
-# remaining balance into "about this many days left", which is the form a person
-# can act on — "$0.84 remaining" is not.
-FLOOR_USD_PER_DAY = 0.165
+# Roughly what the paid floor spends in a day: 8 calls at $0.0055 each
+# (gemini-3.1-flash-lite, priced against seven days of measured telemetry). Used
+# only to turn a remaining balance into "about this many days left", which is the
+# form a person can act on — "$0.84 remaining" is not.
+FLOOR_USD_PER_DAY = 0.044
 CREDIT_WARN_DAYS = 14.0
 
 

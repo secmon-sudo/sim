@@ -321,7 +321,7 @@ class TestQualityCascadeOrder:
         amount of monitoring lowers a rate. One paid rung on top turns a free
         tier dying into a log line, because it was never writing the reports."""
         provider, model = self._slots(monkeypatch)[0]
-        assert (provider, model) == ("openrouter", "anthropic/claude-haiku-4.5")
+        assert (provider, model) == ("openrouter", "google/gemini-3.1-flash-lite")
 
     def test_the_floor_is_not_a_preview_id(self, monkeypatch):
         """gemini-3-flash passed the same probe and was excluded for this: a
@@ -352,7 +352,7 @@ class TestQualityCascadeOrder:
 
     def test_the_cascade_is_exactly_the_measured_five(self, monkeypatch):
         assert [m for _p, m in self._slots(monkeypatch)] == [
-            "anthropic/claude-haiku-4.5",
+            "google/gemini-3.1-flash-lite",
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
             "minimax-m2.7",

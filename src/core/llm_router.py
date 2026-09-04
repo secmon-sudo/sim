@@ -584,7 +584,7 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: OpenRouter claude-haiku-4.5 (paid, the floor) → Cloudflare Workers AI
+    Cascade: OpenRouter gemini-3.1-flash-lite (paid, the floor) → Cloudflare Workers AI
     gpt-oss-120b → Cloudflare mistral-small-3.1-24b (both only when the
     CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 → Pollinations gpt-oss → the
     full main cascade as fallback, so a missing key or provider outage degrades to
@@ -719,40 +719,49 @@ def _quality_slots() -> list:
         # — Haiku 4.5 is $4.96/month, so the credit already sitting there is
         # about two months, and gpt-5-mini at $1.65 would be six.
         #
-        # Chosen on the real SITREP prompt, not on price (probe, 2026-09-04):
-        #   claude-haiku-4.5    PASS   9.8s  256 words  $4.96/mo  ← this one
-        #   gpt-5-mini          PASS  38.3s  427 words  $1.65/mo
-        #   gemini-3-flash      PASS   6.2s  262 words  $2.75/mo
-        # All three passed. Haiku wrote the cleanest Turkish by a clear margin,
-        # was the only one to name publishers properly ("Reuters", "AP News")
-        # where the others wrote bare domains the prompt forbids, and was four
-        # times faster than gpt-5-mini. gemini-3-flash was excluded on principle
-        # rather than on output: it is a `-preview` id, and binding the floor of
-        # the cascade to a preview would reintroduce the exact instability the
-        # slot exists to end.
+        # Chosen on the real SITREP prompt, priced against this router's MEASURED
+        # monthly volume (2.27M prompt + 0.50M completion, from seven days of
+        # telemetry). Every candidate below passed; the choice was made on
+        # Turkish, speed and price in that order (probes, 2026-09-04):
         #
-        # rpd is a SPEND cap, not a provider limit, and the arithmetic is the
-        # whole reason for the number. One call is 13,040 tokens at roughly 80/20
-        # prompt/completion, which at Haiku's $1/$5 per million is $0.0235. Seven
-        # calls a day — the real figure — is $4.93 a month. The bound has to sit
-        # close enough to that to matter:
+        #   gemini-3.1-flash-lite  PASS   3.3s  278 words  $1.31/mo  ← this one
+        #   claude-haiku-4.5       PASS   9.8s  256 words  $4.96/mo
+        #   gemini-2.5-flash-lite  PASS   2.9s  266 words  $0.43/mo
+        #   gpt-5-mini             PASS  38.3s  427 words  $1.65/mo
+        #   gemini-3-flash-preview PASS   6.2s  262 words  $2.75/mo
         #
-        #   rpd=25  worst month $17.60   (the first version; far too loose)
-        #   rpd=12  worst month  $8.45
-        #   rpd=10  worst month  $7.04   ← this
+        # gemini-3.1-flash-lite wrote the cleanest Turkish of anything probed all
+        # day — "kritik bir eşiğe ulaşmıştır", "ikinci bir duyuruya kadar askıya
+        # aldığını açıklamıştır" — and it alone handled the unnamed carriers
+        # correctly ("ismi belirtilmeyen iki farklı havayolu şirketi") instead of
+        # inventing names. It is three times faster than Haiku and a quarter of
+        # the price.
         #
-        # OpenRouter is prepaid, so the credit balance is itself a hard ceiling
-        # and nothing here can overspend it. That makes the danger not a surprise
-        # bill but a surprise SILENCE: credit runs out, the floor drops away, and
-        # the free rungs below quietly take over — which is the exact failure this
-        # slot was added to end. output_health.check_openrouter_credit is the
-        # other half of the fix.
+        # And it is not a guess dressed as a measurement: this model already
+        # narrated 14 production SITREPs between 29 Aug and 2 Sep, every one of
+        # them with working citations and 0.3 blanked per report. Fourteen real
+        # reports outrank any probe.
+        #
+        # gpt-5-mini and Haiku both wrote publisher names as bare domains, which
+        # the prompt forbids. gemini-3-flash was excluded on principle rather than
+        # output — it is a `-preview` id, and binding the floor of the cascade to
+        # a preview reintroduces the instability the slot exists to end. The
+        # 2.5-flash-lite line is kept as the cheaper fallback if this ever needs
+        # to get cheaper still.
+        #
+        # rpd is a SPEND cap, not a provider limit. A call costs $0.0055 here, the
+        # real load is 8 a day, and 15 leaves room for rotations while capping a
+        # runaway month at $2.47. OpenRouter is prepaid, so the balance is itself
+        # a hard ceiling and nothing can overspend it — which makes the danger not
+        # a surprise bill but a surprise SILENCE, since the floor would simply
+        # drop away and the free rungs below would quietly take over.
+        # output_health.check_openrouter_credit is the other half of that fix.
         LLMAccount(
             provider="openrouter", account_id="A",
-            model="anthropic/claude-haiku-4.5",
+            model="google/gemini-3.1-flash-lite",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
-            rpm=6, rpd=10,
-            bucket=TokenBucket(rate_per_minute=6, daily_limit=10, burst=1),
+            rpm=6, rpd=15,
+            bucket=TokenBucket(rate_per_minute=6, daily_limit=15, burst=1),
         ),
         # LLM7 publishes no RPM/RPD; the documented allowance is ~1M tokens/day and
         # this router spends tokens in narrative-sized lumps, not in request counts.
