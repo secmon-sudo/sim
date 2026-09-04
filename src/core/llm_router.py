@@ -637,41 +637,50 @@ def build_quality_router() -> LLMRouter:
         It sits LAST on purpose: every free model there is an individual's upstream
         key registered into a community router and flagged alpha, so it is a
         zero-cost safety net and never a slot to depend on.
-    Neither is a quality upgrade over Mistral — both are cheaper prose. They are
-    ordered behind it so they only ever run when the rung above is already dead.
+    Neither is a quality upgrade on the rungs above — both are cheaper prose, and
+    both failed the 2026-09-04 regression probe (minimax truncates citation URLs
+    to bare domains, laguna invents FIR codes). They are last because they only
+    ever run when everything above them is already dead, and a degraded report is
+    better than no report.
 
-    Cerebras (gpt-oss-120b) sat between the two until 2026-09-02, when its free
-    tier ended: every run answered HTTP 402 (payment required) exactly once before
-    rotating away, so the slot had stopped being a quality tier and become a fixed
-    per-run round-trip. Removed rather than re-pointed at the paid tier — the whole
-    router exists to buy prose quality at zero cost, and Mistral already covers it.
-    The MODEL came back on 2026-09-04 on Cloudflare, which is the point of naming
-    the host and the weights separately: what ended was Cerebras' free tier, not
-    gpt-oss-120b's suitability for this work.
+    Cerebras (gpt-oss-120b) sat here until 2026-09-02, when its free tier ended:
+    every run answered HTTP 402 (payment required) exactly once before rotating
+    away, so the slot had stopped being a quality tier and become a fixed per-run
+    round-trip. The MODEL came back on 2026-09-04 on Cloudflare, which is the
+    point of naming the host and the weights separately: what ended was Cerebras'
+    free tier, not gpt-oss-120b's suitability for this work.
 
-    mistral-large-2512 was the slot until the same day, when it began answering
-    403 "This model is not available in your subscription tier". The account is
-    fine and the slug is current (Mistral Large 3, v25.12) — the MODEL is outside
-    the tier, and mistral-large-2411 retired 2026-05-31, so no "large" is
-    reachable. NB: the rate-limit dashboard still lists mistral-large-2512 with
-    limits, so a model appearing there is NOT evidence of access; only a live call
-    is. That is what the 4xx error-body logging in llm_client is for.
+    ── Mistral, removed 2026-09-04 ──────────────────────────────────────────
+    Mistral was this router's reason for existing: it wrote the SITREP prose from
+    2026-07-17 and its Turkish is still the best this project has measured, over
+    290 successful calls in the preceding month. It is gone because the ACCOUNT
+    stopped being able to make requests, in two steps that only made sense once
+    the 429 bodies were finally logged:
 
-    Limits read off the account's rate-limit dashboard (2026-09-02):
-      - mistral-medium-latest: 25K TPM / 0.83 RPS. TPM is the binding constraint
-        and it is 10x TIGHTER than large's 250K — one 6K-token SITREP narrative
-        plus its prompt is a large fraction of a single minute's budget, so burst
-        is 1: two concurrent full-size calls would exceed the window and 429.
-        rpd is a generous bound, only to keep day-accounting meaningful.
-      - Deliberately NOT ministral-14b/8b/3b: they have 25-50x the TPM headroom
-        (937K/625K/1.3M) but they are small edge models, and prose quality is the
-        only reason this router exists. Throughput was never the constraint here.
+      * 2026-09-02, mistral-large-2512 → HTTP 403 "This model is not available in
+        your subscription tier". Read at the time as one model leaving the tier.
+      * 2026-09-04 03:16 the last call succeeded; by 07:32 every call answered
+        HTTP 429 carrying `x-ratelimit-limit-req-minute=0`.
+
+    The limit was not exceeded. The limit IS zero — the workspace is entitled to
+    no requests at all. A new API key changed nothing, and it could not: Mistral
+    sets rate tiers per WORKSPACE, so a fresh key in the same workspace inherits
+    the same zero. Billing was never attached to that workspace, which makes the
+    two dates one event rather than two: a free entitlement expiring in stages,
+    expensive models first.
+
+    Deleted rather than demoted, after being demoted for half a day. A slot that
+    cannot answer is a fixed per-run round-trip paid before any work starts —
+    exactly the reason Cerebras went — and this one cannot come back without a
+    billing decision. If that decision is ever made, note that Mistral Medium 3.5
+    is $8.22/month for this router's measured volume, against $0 for the two
+    Cloudflare slots that now do the job and passed the same probe.
     """
     quality_slots = _quality_slots()
     active = [s for s in quality_slots if s.api_key]
     if not active:
-        logger.warning("Quality router: no MISTRAL_API_KEY/CLOUDFLARE_API_TOKEN/"
-                       "LLM7_KEY/POLLINATIONS_API_KEY set, falling back to full router")
+        logger.warning("Quality router: no CLOUDFLARE_API_TOKEN/LLM7_KEY/"
+                       "POLLINATIONS_API_KEY set, falling back to full router")
         return build_llm_router()
     return LLMRouter(_share_buckets(active) + build_llm_router().accounts)
 
@@ -691,14 +700,6 @@ def quality_slot_models() -> tuple:
 def _quality_slots() -> list:
     """The quality cascade's own slots, in order. See build_quality_router."""
     quality_slots = [
-        LLMAccount(
-            provider="mistral", account_id="A",
-            model="mistral-medium-latest",
-            api_key=os.environ.get("MISTRAL_API_KEY", ""),
-            rpm=2, rpd=2000,
-            bucket=TokenBucket(rate_per_minute=2, daily_limit=2000, burst=1,
-                               tpm_limit=25_000),
-        ),
         # LLM7 publishes no RPM/RPD; the documented allowance is ~1M tokens/day and
         # this router spends tokens in narrative-sized lumps, not in request counts.
         # So the limits below are a self-imposed bound to keep day-accounting honest

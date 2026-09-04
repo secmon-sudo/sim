@@ -238,20 +238,25 @@ class TestSharedBuckets:
 
 class TestQualityRouter:
     def _clear_env(self, monkeypatch):
-        for var in ("MISTRAL_API_KEY", "OPENROUTER_API_KEY_A",
-                    "OPENROUTER_API_KEY_B", "GEMINI_API_KEY"):
+        for var in ("MISTRAL_API_KEY", "OPENROUTER_API_KEY_A", "OPENROUTER_API_KEY_B",
+                    "GEMINI_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY",
+                    "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("GROQ_API_KEY_A", "keyA")
         monkeypatch.setenv("GROQ_API_KEY_B", "keyB")
 
+    def _quality_env(self, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+
     def test_cascade_order_with_quality_key(self, monkeypatch):
         reset_bucket_registry()
         self._clear_env(monkeypatch)
-        monkeypatch.setenv("MISTRAL_API_KEY", "mk")
+        self._quality_env(monkeypatch)
         router = build_quality_router()
         # quality slot leads the cascade, full main cascade follows as fallback
-        assert router.accounts[0].provider == "mistral"
-        assert router.accounts[0].model == "mistral-medium-latest"
+        assert router.accounts[0].provider == "cloudflare"
+        assert router.accounts[0].model == "@cf/openai/gpt-oss-120b"
         assert any(a.provider == "groq" for a in router.accounts[1:])
         reset_bucket_registry()
 
@@ -261,7 +266,7 @@ class TestQualityRouter:
         # router is a silent bill, not a fallback.
         reset_bucket_registry()
         self._clear_env(monkeypatch)
-        monkeypatch.setenv("MISTRAL_API_KEY", "mk")
+        self._quality_env(monkeypatch)
         monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
         router = build_quality_router()
         assert all(a.provider != "cerebras" for a in router.accounts)
@@ -278,10 +283,22 @@ class TestQualityRouter:
     def test_quality_key_prepends_ahead_of_main_cascade(self, monkeypatch):
         reset_bucket_registry()
         self._clear_env(monkeypatch)
+        self._quality_env(monkeypatch)
+        router = build_quality_router()
+        assert router.accounts[0].provider == "cloudflare"
+        assert len(router.accounts) > 1
+        reset_bucket_registry()
+
+    def test_a_mistral_key_alone_no_longer_builds_a_quality_tier(self, monkeypatch):
+        """Removed 2026-09-04: the workspace answers 429 with
+        x-ratelimit-limit-req-minute=0. A key that cannot buy a request must not
+        look like a quality slot — that is how a dead rung becomes a per-run
+        round-trip."""
+        reset_bucket_registry()
+        self._clear_env(monkeypatch)
         monkeypatch.setenv("MISTRAL_API_KEY", "mk")
         router = build_quality_router()
-        assert router.accounts[0].provider == "mistral"
-        assert len(router.accounts) > 1
+        assert all(a.provider != "mistral" for a in router.accounts)
         reset_bucket_registry()
 
 
@@ -305,13 +322,25 @@ class TestQualityCascadeOrder:
         assert slots[0] == ("cloudflare", "@cf/openai/gpt-oss-120b")
         assert slots[1][0] == "cloudflare"
 
-    def test_mistral_is_demoted_not_deleted(self, monkeypatch):
-        """Nothing says the 429s are permanent, and its Turkish is the best this
-        project has measured. A slot that is down costs one round-trip; a slot
-        that is gone cannot come back on its own."""
+    def test_mistral_is_gone(self, monkeypatch):
+        """Removed 2026-09-04. The 429s carried x-ratelimit-limit-req-minute=0 —
+        the limit is not exceeded, it IS zero, and a new key inherits the same
+        zero because Mistral sets rate tiers per workspace. A slot that cannot
+        answer is a round-trip paid before any work starts, and this one cannot
+        come back without a billing decision."""
         models = [m for _p, m in self._slots(monkeypatch)]
-        assert "mistral-medium-latest" in models
-        assert models.index("mistral-medium-latest") == 2
+        assert not any(m.startswith("mistral-") for m in models), models
+        # The Cloudflare-hosted mistral-small is a different thing entirely: a
+        # different host, a different account, and it passed the probe.
+        assert "@cf/mistralai/mistral-small-3.1-24b-instruct" in models
+
+    def test_the_cascade_is_exactly_the_measured_four(self, monkeypatch):
+        assert [m for _p, m in self._slots(monkeypatch)] == [
+            "@cf/openai/gpt-oss-120b",
+            "@cf/mistralai/mistral-small-3.1-24b-instruct",
+            "minimax-m2.7",
+            "YoannDev90/poolside-laguna-s-2.1:free",
+        ]
 
     def test_the_cloudflare_slots_share_one_endpoint_and_bound(self, monkeypatch):
         from src.core import llm_router as lr
