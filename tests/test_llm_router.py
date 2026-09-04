@@ -308,19 +308,35 @@ class TestQualityCascadeOrder:
     def _slots(self, monkeypatch):
         from src.core import llm_router as lr
 
-        for name in ("MISTRAL_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY"):
+        for name in ("MISTRAL_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY",
+                     "OPENROUTER_API_KEY_A"):
             monkeypatch.setenv(name, "k")
         monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
         return lr.quality_slot_models()
 
-    def test_cloudflare_leads_the_cascade(self, monkeypatch):
+    def test_a_paid_slot_is_the_floor(self, monkeypatch):
+        """The point of the whole cascade. Free tiers set the RATE at which this
+        has to be rebuilt — five rungs changed under us in a month — and no
+        amount of monitoring lowers a rate. One paid rung on top turns a free
+        tier dying into a log line, because it was never writing the reports."""
+        provider, model = self._slots(monkeypatch)[0]
+        assert (provider, model) == ("openrouter", "anthropic/claude-haiku-4.5")
+
+    def test_the_floor_is_not_a_preview_id(self, monkeypatch):
+        """gemini-3-flash passed the same probe and was excluded for this: a
+        `-preview` id at the bottom of the cascade reintroduces exactly the
+        version instability the slot exists to end."""
+        _p, model = self._slots(monkeypatch)[0]
+        assert "preview" not in model
+
+    def test_cloudflare_leads_the_free_slots(self, monkeypatch):
         """Mistral 429'd all five SITREP calls that morning and both cold probe
         calls after it; a dead slot at the front is a round-trip paid before any
         work starts, which is why Cerebras was removed two days earlier."""
         slots = self._slots(monkeypatch)
-        assert slots[0] == ("cloudflare", "@cf/openai/gpt-oss-120b")
-        assert slots[1][0] == "cloudflare"
+        assert slots[1] == ("cloudflare", "@cf/openai/gpt-oss-120b")
+        assert slots[2][0] == "cloudflare"
 
     def test_mistral_is_gone(self, monkeypatch):
         """Removed 2026-09-04. The 429s carried x-ratelimit-limit-req-minute=0 —
@@ -334,8 +350,9 @@ class TestQualityCascadeOrder:
         # different host, a different account, and it passed the probe.
         assert "@cf/mistralai/mistral-small-3.1-24b-instruct" in models
 
-    def test_the_cascade_is_exactly_the_measured_four(self, monkeypatch):
+    def test_the_cascade_is_exactly_the_measured_five(self, monkeypatch):
         assert [m for _p, m in self._slots(monkeypatch)] == [
+            "anthropic/claude-haiku-4.5",
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
             "minimax-m2.7",

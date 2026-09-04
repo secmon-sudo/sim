@@ -584,10 +584,17 @@ def build_quality_router() -> LLMRouter:
     rate limits can't carry bulk volume, and swapping bulk models would shift the
     severity-score calibration the alert thresholds are tuned to.
 
-    Cascade: Cloudflare Workers AI gpt-oss-120b → Cloudflare mistral-small-3.1-24b
-    (both only when the CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 →
-    Pollinations gpt-oss → the full main cascade as fallback, so a missing key or
-    provider outage degrades to exactly the pre-2026-07-17 behavior.
+    Cascade: OpenRouter claude-haiku-4.5 (paid, the floor) → Cloudflare Workers AI
+    gpt-oss-120b → Cloudflare mistral-small-3.1-24b (both only when the
+    CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 → Pollinations gpt-oss → the
+    full main cascade as fallback, so a missing key or provider outage degrades to
+    exactly the pre-2026-07-17 behavior.
+
+    One paid rung on top, everything free beneath it. That shape is the point: a
+    free tier dying stops being an incident and becomes a log line, because the
+    reports were never being written by it. The free slots stay because they cost
+    nothing and now answer to contracts (see call_llm's `accept`) — they are a
+    fallback, not the plan.
 
     Cloudflare leads from 2026-09-04, and the reason is a measurement rather than
     a preference. Two things happened that day. Mistral answered HTTP 429 to every
@@ -692,6 +699,47 @@ def quality_slot_models() -> tuple:
 def _quality_slots() -> list:
     """The quality cascade's own slots, in order. See build_quality_router."""
     quality_slots = [
+        # ── The floor, added 2026-09-04 ──────────────────────────────────────
+        #
+        # This is the first slot in this router that is not a free tier, and the
+        # reason is a rate, not an incident. Free tiers have no SLA, no version
+        # pin and no deprecation policy, so the RATE at which this cascade has to
+        # be rebuilt is set by other people: Cerebras' free tier ended 2 Sep,
+        # gemini-2.5-flash-lite retired early, OpenRouter's free gpt-oss family
+        # vanished, Mistral's workspace went to zero requests 4 Sep, laguna's
+        # family started posting five-day shutdown notices. Every guard built
+        # today lowers the cost of NOTICING that; none of them lowers the rate.
+        # Only a contract does.
+        #
+        # It costs nothing new. OPENROUTER_API_KEY_A was funded with $10 in July
+        # 2026 to lift the free-model request cap, and that credit has been idle
+        # ever since because this project only ever used its `:free` slots. At
+        # this router's measured volume — 2.21M prompt + 0.55M completion tokens
+        # a month, 8.2% of SIM's total and 100% of every LLM incident it has had
+        # — Haiku 4.5 is $4.96/month, so the credit already sitting there is
+        # about two months, and gpt-5-mini at $1.65 would be six.
+        #
+        # Chosen on the real SITREP prompt, not on price (probe, 2026-09-04):
+        #   claude-haiku-4.5    PASS   9.8s  256 words  $4.96/mo  ← this one
+        #   gpt-5-mini          PASS  38.3s  427 words  $1.65/mo
+        #   gemini-3-flash      PASS   6.2s  262 words  $2.75/mo
+        # All three passed. Haiku wrote the cleanest Turkish by a clear margin,
+        # was the only one to name publishers properly ("Reuters", "AP News")
+        # where the others wrote bare domains the prompt forbids, and was four
+        # times faster than gpt-5-mini. gemini-3-flash was excluded on principle
+        # rather than on output: it is a `-preview` id, and binding the floor of
+        # the cascade to a preview would reintroduce the exact instability the
+        # slot exists to end.
+        #
+        # rpd is a spend cap, not a provider limit: 7 calls on a full day, 25
+        # leaves room for rotations and still cannot run away with the credit.
+        LLMAccount(
+            provider="openrouter", account_id="A",
+            model="anthropic/claude-haiku-4.5",
+            api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
+            rpm=6, rpd=25,
+            bucket=TokenBucket(rate_per_minute=6, daily_limit=25, burst=1),
+        ),
         # LLM7 publishes no RPM/RPD; the documented allowance is ~1M tokens/day and
         # this router spends tokens in narrative-sized lumps, not in request counts.
         # So the limits below are a self-imposed bound to keep day-accounting honest
@@ -818,7 +866,10 @@ def _quality_slots() -> list:
                        f"{cf_account}/ai/v1/chat/completions")
         for offset, cf_model in enumerate(("@cf/openai/gpt-oss-120b",
                                            "@cf/mistralai/mistral-small-3.1-24b-instruct")):
-            quality_slots.insert(offset, LLMAccount(
+            # After the paid floor, not before it: the Cloudflare slots are free
+            # and excellent, but "free and excellent" is what every rung in this
+            # cascade has been on the day it was added.
+            quality_slots.insert(1 + offset, LLMAccount(
                 provider="cloudflare", account_id="A",
                 model=cf_model,
                 api_key=cf_token,
