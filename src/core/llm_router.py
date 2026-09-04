@@ -585,10 +585,10 @@ def build_quality_router() -> LLMRouter:
     severity-score calibration the alert thresholds are tuned to.
 
     Cascade: Mistral medium (best Turkish still reachable on this account) →
-    Cloudflare Workers AI gpt-oss-120b (only when both CLOUDFLARE_* vars are set)
-    → LLM7 minimax-m2.7 → Pollinations laguna-s-2.1 → the full main cascade as
-    fallback, so a missing key or provider outage degrades to exactly the
-    pre-2026-07-17 behavior.
+    Cloudflare Workers AI gpt-oss-120b → Cloudflare mistral-small-3.1-24b (both
+    only when the CLOUDFLARE_* vars are set) → LLM7 minimax-m2.7 → Pollinations
+    laguna-s-2.1 → the full main cascade as fallback, so a missing key or provider
+    outage degrades to exactly the pre-2026-07-17 behavior.
 
     A word on minimax-m2.7, which sits third and passed its Pass C probe: on
     2026-09-04 it narrated all five SITREPs and shortened EVERY citation URL to a
@@ -714,28 +714,61 @@ def build_quality_router() -> LLMRouter:
     # ended rather than because it stopped being good at the job. Cloudflare hosts
     # the same weights.
     #
-    # Two things about it are still unmeasured ON THIS HOST and want the probe
-    # (`--models cloudflare:@cf/openai/gpt-oss-120b --prose`, then --bulletin):
-    # its Turkish, and its hidden reasoning. Cloudflare does not document a
+    # Probed on the host 2026-09-04 with the real SITREP prompt
+    # (scripts/probe_models.py --prose). No hidden reasoning leaked and no slot
+    # altered a URL, which was the specific worry — Cloudflare documents no
     # reasoning knob for the OpenAI-compatible route, so model_profiles sends none
-    # — where Cerebras had reasoning_effort=low — and unbudgeted thinking eats the
-    # completion the reader was supposed to get. If it does, mistral-small-3.1-24b
-    # is the measured alternative and costs less again.
+    # where Cerebras had reasoning_effort=low:
+    #
+    #   gpt-oss-120b            PASS  22s  759 N  Turkish good, labels canonical.
+    #                                             Wrote publisher names as bare
+    #                                             domains ("reuters.com"), which the
+    #                                             prompt forbids and the source chips
+    #                                             render badly — cosmetic, the URL
+    #                                             beside it was correct.
+    #   mistral-small-3.1-24b   PASS  18s  654 N  Format exactly right; clumsier
+    #                                             Turkish, and it printed one event
+    #                                             twice in different sections.
+    #   llama-4-scout-17b       PASS  17s  734 N  Good Turkish, but dropped the
+    #                                             "Doğruluk Durumu:" prefix, which
+    #                                             _normalize_label_line keys on — a
+    #                                             deviant label it cannot repair.
+    #   gemma-4-26b-a4b-it      PASS  83s  264 N  Best Turkish of the five and
+    #                                             perfect format. FIVE TIMES the
+    #                                             latency, on a payload a fraction of
+    #                                             a real one. Not taken; the same
+    #                                             slowness got Gemma 4 rejected on
+    #                                             Gemini (57.7s, 2026-09-02).
+    #   glm-5.3-flash           HTTP 403 — not reachable on this account. The other
+    #                                             four answered on the same token, so
+    #                                             it is the model, not the token.
+    #
+    # Two slots, not four. Every Cloudflare model draws on the SAME 10,000 Neuron
+    # account allowance, so a third and fourth rung buy no capacity — only another
+    # 13.5K-token call to waste when a model misbehaves. What a second slot DOES buy
+    # is a different set of weights when the first one fails for its own reasons
+    # (a 5xx, or the citation contract), which is exactly the minimax case. Ordered
+    # by Turkish; mistral-small is second because its format compliance was perfect
+    # and llama-4-scout's was not, and a fallback should be structurally safe.
     #
     # rpd below is a self-imposed bound to stop a retry storm spending the day's
-    # Neurons in a minute, NOT a published request limit.
+    # Neurons in a minute, NOT a published request limit. The two share a bucket
+    # for the same reason they share the allowance.
     cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
     if cf_account and cf_token:
-        quality_slots.insert(1, LLMAccount(
-            provider="cloudflare", account_id="A",
-            model="@cf/openai/gpt-oss-120b",
-            api_key=cf_token,
-            endpoint=("https://api.cloudflare.com/client/v4/accounts/"
-                      f"{cf_account}/ai/v1/chat/completions"),
-            rpm=6, rpd=12,
-            bucket=TokenBucket(rate_per_minute=6, daily_limit=12, burst=1),
-        ))
+        cf_endpoint = ("https://api.cloudflare.com/client/v4/accounts/"
+                       f"{cf_account}/ai/v1/chat/completions")
+        for offset, cf_model in enumerate(("@cf/openai/gpt-oss-120b",
+                                           "@cf/mistralai/mistral-small-3.1-24b-instruct")):
+            quality_slots.insert(1 + offset, LLMAccount(
+                provider="cloudflare", account_id="A",
+                model=cf_model,
+                api_key=cf_token,
+                endpoint=cf_endpoint,
+                rpm=6, rpd=12,
+                bucket=TokenBucket(rate_per_minute=6, daily_limit=12, burst=1),
+            ))
 
     active = [s for s in quality_slots if s.api_key]
     if not active:
