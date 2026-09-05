@@ -79,3 +79,9 @@ LLM_UNUSABLE_200 = "llm_unusable_200"
 # regional section — which is precisely why it needs a number: the report looks
 # normal, it has simply stopped saying which way anything was going.
 BULLETIN_DIRECTION_BATCH_FAILED = "bulletin_direction_batch_failed"
+
+# A direction reply came back with fewer items than the batch it answered. Each
+# missing one silently takes the unattributed default and lands in the regional
+# section, so the report renders perfectly while saying less and less. This is
+# how 51 of 73 events lost their actor on 5 Sep with nothing in the logs.
+BULLETIN_DIRECTION_SHORT_REPLY = "bulletin_direction_short_reply"

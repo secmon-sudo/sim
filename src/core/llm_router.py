@@ -549,9 +549,20 @@ def build_llm_router() -> LLMRouter:
 # nemotron. And the failure it leaves behind is the honest one — no slot means
 # every event stays unattributed and lands in the regional section, which is the
 # bulletin saying it could not read the direction rather than guessing it.
+# gemini-3.5-flash-lite EXCLUDED 2026-09-05, and it is the reason this list is
+# re-measured rather than trusted. It scored 16/16 on 4 Sep, then served 13 of
+# the 14 direction calls the next morning and returned 51 of 73 events with no
+# actor at all. Re-probed on the same prompt with four real headlines from that
+# collapse added: actor 2/20, target 0/20 — against qwen's 20/20 on the identical
+# input, which rules out the prompt. Its replies come back short (442 completion
+# tokens where twelve items need about 600) and every item it omits takes the
+# unattributed default, so the failure is invisible in the report.
+#
+# That leaves one slot. Deliberately: a second slot whose answer is "unattributed"
+# is worse than no second slot, because extraction failing outright is visible in
+# the counters while this was not.
 BULLETIN_MEASURED_MODELS = (
     "qwen/qwen3.8-27b",
-    "gemini-3.5-flash-lite",
 )
 
 

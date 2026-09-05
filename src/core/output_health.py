@@ -326,6 +326,7 @@ def check_openrouter_credit(conn, window_hours: float,
 # the default before it is worth a person's attention.
 COUNTER_ALARM_THRESHOLDS = {
     "bulletin_direction_batch_failed": 1,
+    "bulletin_direction_short_reply": 5,
     "llm_contract_rejected": 3,
     "llm_unusable_200": 5,
 }

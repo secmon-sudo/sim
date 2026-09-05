@@ -272,6 +272,7 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
     valid_actors = {IRAN_SIDE, US_SIDE, OTHER_SIDE, UNATTRIBUTED}
     valid_standing = {STANDING_CONFIRMED, STANDING_CLAIMED,
                       STANDING_DENIED, STANDING_UNKNOWN}
+    recovered = 0
     for item in items:
         try:
             idx = int(item["n"]) - 1
@@ -293,11 +294,37 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
             # keeps it. Same asymmetry as above, for the same reason.
             WAR_RELATED: item.get(WAR_RELATED) is not False,
         }
+        recovered += 1
+    # A reply that carries fewer items than the batch had is the failure that hid
+    # the 5 Sep collapse: every missing item silently takes the unattributed
+    # default, the sections still render, and the only symptom is that the report
+    # has quietly stopped saying which way anything was going. On that day
+    # gemini-3.5-flash-lite averaged 442 completion tokens where twelve items need
+    # about 600, and 51 of 73 events came back with no actor. Fail open, but never
+    # fail silent.
+    if recovered < expected:
+        counters.bump(counters.BULLETIN_DIRECTION_SHORT_REPLY, expected - recovered)
+        logger.warning(
+            "Direction extraction recovered %d of %d items; the other %d keep the "
+            "unattributed default", recovered, expected, expected - recovered)
     return out
 
 
+# Groq's free tier enforces 1,000 OUTPUT tokens per minute per model, and the
+# request is rejected before it runs if the asked-for max_tokens exceeds it —
+# "Request too large ... Requested 1019", logged in full on 5 Sep now that first
+# 429 bodies are visible. max_tokens here is 50*batch + 512, so 12 asked for
+# 1,112 and qwen, the primary and by far the most accurate slot, could not serve
+# a single batch of the bulletin. 8 asks for 912 and fits with room.
+#
+# Same shape as the Pass C fix of 2026-08-11, and the same lesson: a batch size
+# is not a throughput choice, it is a promise about the reply's size.
+DIRECTION_BATCH_SIZE = 8
+
+
 def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
-                      db_conn=None, batch_size: int = 12) -> List[Dict[str, Any]]:
+                      db_conn=None,
+                      batch_size: int = DIRECTION_BATCH_SIZE) -> List[Dict[str, Any]]:
     """Attach actor and standing to each event, in place, and return the list.
 
     A failed batch does not fail the bulletin: those events keep the unattributed

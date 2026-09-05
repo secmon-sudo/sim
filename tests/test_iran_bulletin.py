@@ -238,10 +238,11 @@ class TestBulletinRouter:
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
         out = lr.build_bulletin_router()
         models = [a.model for a in out.accounts]
-        # Both exclusions are for the same measured failure — asserting a
-        # direction the text does not carry. nemotron joined gpt-oss-20b on
-        # 2026-09-04: it answers actor=iran to a headline that names no attacker.
-        assert models == ["qwen/qwen3.8-27b", "gemini-3.5-flash-lite"]
+        # Every exclusion here is a measured failure. gpt-oss-20b and nemotron
+        # assert a direction the text does not carry; gemini-3.5-flash-lite
+        # (removed 5 Sep) returns short replies whose missing items silently
+        # become "unattributed" — 51 of 73 events in one live bulletin.
+        assert models == ["qwen/qwen3.8-27b"]
 
     def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
         """An absent slot leaves events unattributed and the bulletin says so;
@@ -543,3 +544,39 @@ class TestNarrativeContract:
                       ib.STANDING_CONFIRMED, ib.STANDING_CLAIMED,
                       ib.STANDING_DENIED, ib.STANDING_UNKNOWN, ib.WAR_RELATED):
             assert token in ib._INTERNAL_TOKENS, token
+
+
+class TestShortReplyIsCounted:
+    """A reply carrying fewer items than its batch is the failure that hid the
+    5 Sep collapse: every missing item takes the unattributed default, the
+    sections still render, and the report has quietly stopped saying which way
+    anything was going. Fail open, but never fail silent."""
+
+    def test_a_short_reply_bumps_the_counter(self):
+        from src.core import counters
+
+        counters.reset()
+        body = json.dumps({"items": [{"n": 1, "actor": "iran"}]})
+        out = ib._parse_extraction(body, 8)
+        assert len(out) == 8
+        assert out[7]["actor"] == ib.UNATTRIBUTED
+        assert counters.snapshot().get(
+            counters.BULLETIN_DIRECTION_SHORT_REPLY) == 7
+        counters.reset()
+
+    def test_a_complete_reply_counts_nothing(self):
+        from src.core import counters
+
+        counters.reset()
+        body = json.dumps({"items": [
+            {"n": i + 1, "actor": "iran", "target": "us_coalition",
+             "standing": "confirmed"} for i in range(3)]})
+        ib._parse_extraction(body, 3)
+        assert counters.BULLETIN_DIRECTION_SHORT_REPLY not in counters.snapshot()
+        counters.reset()
+
+    def test_the_batch_fits_groqs_output_ceiling(self):
+        """Groq's free tier rejects a request whose max_tokens exceeds 1,000
+        OUTPUT tokens per minute before it runs. max_tokens is 50*batch + 512, so
+        12 asked for 1,112 and the primary slot could not serve one batch."""
+        assert 50 * ib.DIRECTION_BATCH_SIZE + 512 < 1000
