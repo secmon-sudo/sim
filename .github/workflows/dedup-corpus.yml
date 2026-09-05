@@ -23,6 +23,14 @@ on:
         description: "Satır tavanı (üretimde 2000)"
         type: string
         default: "2000"
+      corroboration:
+        description: '"Tek kaynak" etiketinin kaç yayıncıyı gizlediğini ölç (dump yerine)'
+        type: boolean
+        default: false
+      band_hours:
+        description: "Korroborasyon ölçümünde ± saat bandı"
+        type: string
+        default: "48"
 
 concurrency:
   group: dedup-corpus
@@ -32,7 +40,11 @@ env:
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
 jobs:
+  # Skipped when the run was dispatched for the measurement below: a corpus dump
+  # is a different job with a different artifact, and running both wastes a
+  # database round-trip and confuses which artifact belongs to which question.
   dump:
+    if: '!inputs.corroboration'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -54,3 +66,32 @@ jobs:
           name: dedup-corpus
           path: dedup_corpus.json
           retention-days: 14
+
+  # Read-only measurement, not a dump: replays the REAL matcher over pairs it
+  # never got to see at ingest, and reports how many publishers were behind an
+  # event we labelled "Tek kaynak". Needs the database, so it lives here next to
+  # the credential rather than in the probe workflow.
+  corroboration:
+    if: inputs.corroboration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Measure hidden corroboration
+        run: |
+          mkdir -p logs
+          python -m scripts.replay_corroboration \
+            --days "${{ inputs.days }}" \
+            --band-hours "${{ inputs.band_hours }}" \
+            --examples 8 2>&1 | tee logs/corroboration.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: corroboration-${{ github.run_id }}
+          path: logs/corroboration.txt
+          retention-days: 30
