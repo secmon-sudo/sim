@@ -61,6 +61,22 @@ class TestCitationCollapse:
     def test_a_healthy_day_says_nothing(self):
         assert oh.check_sitrep_citations(_Conn([]), 30.0) == []
 
+    def test_it_looks_only_at_the_latest_run(self):
+        """The window is 30 hours and a SITREP runs daily, so a plain window
+        query spans two runs. On 5 Sep this reported the previous morning's five
+        broken reports — twice, hours after the cause had been fixed and removed
+        — while that morning's five were perfect. A check that keeps announcing a
+        solved problem is the fastest way to teach someone to ignore it."""
+        conn = _Conn([])
+        oh.check_sitrep_citations(conn, 30.0)
+        sql = conn.seen[0][0]
+        assert "max(window_end)" in sql, sql
+
+    def test_truncation_is_scoped_the_same_way(self):
+        conn = _Conn([])
+        oh.check_sitrep_truncation(conn, 30.0)
+        assert "max(window_end)" in conn.seen[0][0]
+
 
 class TestTruncation:
     def test_it_reports_reports_cut_off_at_the_ceiling(self):
@@ -139,6 +155,14 @@ class TestDegradationCounters:
         # Below its own threshold, so it must not ride along on another
         # counter's finding — that is how a page fills up with non-events.
         assert "llm_unusable_200" not in out[0].detail
+
+    def test_routine_provider_weather_is_not_a_page(self):
+        """Measured 5 Sep over six consecutive pipeline runs: 1, 1, 1, 1, 4, 1 —
+        every one completing successfully. The counter records the router
+        rotating past an empty 200, which is the system healing itself, and the
+        daily total sits near 8-12 simply because there are 8-12 runs."""
+        conn = _Conn([("pipeline_run", {"llm_unusable_200": 12})])
+        assert oh.check_degradation_counters(conn, 30.0) == []
 
     def test_the_guard_working_once_is_not_a_page(self):
         """A single llm_contract_rejected means the citation guard caught a bad

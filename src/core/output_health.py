@@ -72,12 +72,21 @@ def check_sitrep_citations(conn, window_hours: float) -> List[Finding]:
     not "few" — six models over the preceding three weeks averaged 0.3 blanked
     citations per report and never once produced a report with none, so a report
     at zero is not a bad day, it is a different failure.
+
+    Scoped to the LATEST run rather than the whole window, and that is not a
+    detail. The window is 30 hours and a SITREP runs daily, so a window query
+    spans two runs: on 5 Sep it reported the previous morning's five broken
+    reports while that morning's five were perfect, twice, hours after the cause
+    had been fixed and removed. A check that keeps announcing a problem you
+    already solved is the fastest way to teach someone to ignore it.
     """
     rows = _rows(conn, """
         SELECT country_iso, llm_model
           FROM sitreps
          WHERE status = 'completed'
-           AND window_end > now() - (%s * interval '1 hour')
+           AND window_end = (SELECT max(window_end) FROM sitreps
+                              WHERE status = 'completed'
+                                AND window_end > now() - (%s * interval '1 hour'))
            AND report_text NOT LIKE %s
     """, (window_hours, "%https://%"))
     if not rows:
@@ -100,7 +109,9 @@ def check_sitrep_truncation(conn, window_hours: float) -> List[Finding]:
         SELECT country_iso
           FROM sitreps
          WHERE status = 'completed'
-           AND window_end > now() - (%s * interval '1 hour')
+           AND window_end = (SELECT max(window_end) FROM sitreps
+                              WHERE status = 'completed'
+                                AND window_end > now() - (%s * interval '1 hour'))
            AND report_text LIKE %s
     """, (window_hours, "%uzunluk sınırına takıldığı%"))
     if not rows:
@@ -328,7 +339,12 @@ COUNTER_ALARM_THRESHOLDS = {
     "bulletin_direction_batch_failed": 1,
     "bulletin_direction_short_reply": 5,
     "llm_contract_rejected": 3,
-    "llm_unusable_200": 5,
+    # Measured 5 Sep across six consecutive pipeline runs: 1, 1, 1, 1, 4, 1 — and
+    # every one of those runs completed successfully. This counter records the
+    # router rotating past a slot that answered an empty 200, which is the system
+    # healing itself; the daily total sits near 8-12 simply because there are
+    # 8-12 runs. A threshold under that pages every day about nothing.
+    "llm_unusable_200": 30,
 }
 DEFAULT_COUNTER_THRESHOLD = 3
 
