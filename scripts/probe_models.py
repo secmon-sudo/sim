@@ -470,6 +470,28 @@ BULLETIN_SAMPLE = [
     # has reduced the field to "is it violent".
     ("Israel's 2026 homicide toll reaches 200 as three men shot to death in "
      "Nazareth in one night", "other", "other", "confirmed", False),
+
+    # ── The 5 Sep production collapse, added verbatim from the corpus ──
+    #
+    # These are the plainest headlines in the whole sample and the live bulletin
+    # answered "unattributed" to all of them: 51 of 73 events, against 19.7% the
+    # day before. The counterweight added the previous evening ended with "Only an
+    # explicit 'Iranian missiles', 'Iranian drones' or a named attacker makes it
+    # iran", placed directly after two adjectival examples — and the models read
+    # "only those adjectival forms count" and stopped counting the SUBJECT.
+    #
+    # The lesson is about this file as much as the prompt. The curated sample
+    # scored 16/16 on the change that broke production, because it had one
+    # subject-position row and the failure needed volume to show. Real headlines
+    # in their real messiness now sit alongside the constructed traps.
+    ("OVERNIGHT: Iran launches strikes targeting Kuwait - Fox News",
+     "iran", ("other", "us_coalition"), "confirmed", True),
+    ("Iran Strikes Kuwait Air Base and Claims US Casualties in Escalating Gulf "
+     "Campaign - The Eastern Herald", "iran", "us_coalition", "claimed", True),
+    ("Israel says it has struck southern Lebanon after Hezbollah drone launch",
+     "other", "iran", "confirmed", True),
+    ("Three Iranian Pilots Reportedly Killed in US Strike",
+     "us_coalition", "iran", "claimed", True),
 ]
 
 
