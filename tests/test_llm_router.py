@@ -406,6 +406,33 @@ class TestQualityCascadeOrder:
         assert paid.bucket.burst >= 10, "a bulletin sends about ten batches at once"
         assert paid.rpd >= 17, "5 SITREPs + digest + narrative + ~10 direction"
 
+    def test_the_keyless_quality_rung_sits_above_pollinations(self, monkeypatch):
+        """Availability is the only job a bottom rung has. Pollinations' gpt-oss
+        route was last seen answering 4xx on 97% of requests; Kilo needs no
+        credential at all and passed the real Turkish SITREP prompt in 6.6s.
+
+        Pollinations stays BELOW rather than being deleted — a measured-poor rung
+        at the very bottom costs nothing, and removing a slot on a platform
+        statistic rather than our own probe is how this file has been wrong."""
+        from src.core import llm_router as lr
+
+        monkeypatch.setenv("POLLINATIONS_API_KEY", "k")
+        models = [(s.provider, s.model) for s in lr._quality_slots()]
+        providers = [p for p, _ in models]
+        assert providers.index("kilo") < providers.index("pollinations")
+
+    def test_a_keyless_quality_slot_is_not_dropped_as_unconfigured(self,
+                                                                   monkeypatch):
+        """build_quality_router filters on `if s.api_key`, which deletes a rung
+        that authenticates nobody."""
+        from src.core import llm_router as lr
+
+        for name in ("POLLINATIONS_API_KEY", "LLM7_KEY", "CLOUDFLARE_API_TOKEN",
+                     "OPENROUTER_API_KEY_A"):
+            monkeypatch.delenv(name, raising=False)
+        assert any(a.provider == "kilo"
+                   for a in lr.build_quality_router().accounts)
+
     def test_the_bulletin_falls_to_slots_that_can_serve_a_burst(self, monkeypatch):
         """The floor leads; below it are two rungs that were measured on the same
         20 labelled headlines. Order is latency and exhaustibility, not score:

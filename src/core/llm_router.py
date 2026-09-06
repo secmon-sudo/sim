@@ -786,7 +786,11 @@ def build_quality_router() -> LLMRouter:
     Cloudflare slots that now do the job and passed the same probe.
     """
     quality_slots = _quality_slots()
-    active = [s for s in quality_slots if s.api_key]
+    # A keyless provider has no key to test, and the plain truthiness check would
+    # silently delete the rung — the same trap the bulletin router carries a test
+    # for. See KEYLESS_PROVIDERS.
+    active = [s for s in quality_slots
+              if s.api_key or s.provider in KEYLESS_PROVIDERS]
     if not active:
         logger.warning("Quality router: no CLOUDFLARE_API_TOKEN/LLM7_KEY/"
                        "POLLINATIONS_API_KEY set, falling back to full router")
@@ -935,6 +939,32 @@ def _quality_slots() -> list:
         # same weights family the report was written around, reached through a
         # completely different host, so a Cloudflare outage does not take the
         # prose style with it.
+        # ── Kilo, added 2026-09-06, ABOVE Pollinations ───────────────────────
+        #
+        # Same model family as the pollinations slot below and the Cloudflare slot
+        # above, reached through a third host — the redundancy argument in the
+        # note below, applied one rung earlier.
+        #
+        # It is above pollinations on AVAILABILITY, which is the only thing a
+        # bottom rung is for. The pollinations slot is community-contributed and
+        # its gpt-oss route was last seen answering 4xx on 97% of requests; Kilo
+        # needs no key, no account and no card, and answered this router's real
+        # Turkish SITREP prompt in 6.6s with a PASS: correct section structure,
+        # working citation URLs, and Turkish that reads like Turkish ("askıya
+        # aldı", "yön değiştirdi"). Its 550B sibling also passed and is NOT here:
+        # 81.6s for the same 240 words, and it garbled a section heading.
+        #
+        # Pollinations is kept below rather than replaced. It costs nothing to
+        # leave a measured-poor rung at the very bottom, and removing a slot on
+        # the strength of a platform statistic rather than our own probe is how
+        # this file has been wrong before.
+        LLMAccount(
+            provider="kilo", account_id="A",
+            model="nvidia/nemotron-3-super-120b-a12b:free",
+            api_key="",  # keyless
+            rpm=3, rpd=120,
+            bucket=TokenBucket(rate_per_minute=3, daily_limit=120, burst=4),
+        ),
         LLMAccount(
             provider="pollinations", account_id="A",
             model="gpt-oss",
