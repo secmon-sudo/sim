@@ -558,22 +558,29 @@ def build_llm_router() -> LLMRouter:
 # tokens where twelve items need about 600) and every item it omits takes the
 # unattributed default, so the failure is invisible in the report.
 #
-# gemini-3.5-flash-lite RESTORED 2026-09-06, provisionally, and the reason the
-# previous paragraph was wrong is worth keeping. It ended "that leaves one slot,
-# deliberately: a second slot whose answer is unattributed is worse than no
-# second slot". One slot turned out to be worse than both: qwen hit its rate
-# limit the next morning, every batch raised LLMAllThrottled, and the bulletin
-# failed outright. Availability is not a nice-to-have below two.
+# Reordered 2026-09-06 after two live failures in one morning, and the second one
+# refuted a fix made ninety minutes earlier. Worth keeping both.
 #
-# The restoration is a hypothesis with a guard, not a reversal. Its measured
-# failure was a LENGTH one — 442 completion tokens where twelve items needed
-# about 600 — and the batch is 8 now rather than 12, needing roughly 400. If that
-# reading is wrong, output_health.check_bulletin_attribution pages the moment the
-# unattributed share crosses 50%, which is how the original collapse was found
-# within a morning. Check tomorrow's share before treating this as settled.
+# qwen is the most ACCURATE slot measured (actor 20/20) and cannot serve this
+# report. Groq's free tier caps OUTPUT at 1,000 tokens per MINUTE, the bulletin
+# sends about ten batches back to back, and each asks 912 — so one batch fits per
+# minute and the rest 429. Shrinking the batch does not help: fewer tokens per
+# call means more calls against the same per-minute budget. It stays as a
+# fallback because when it does answer it is the best of them.
+#
+# gemini-3.5-flash-lite was restored that morning on the theory that its failure
+# was length — 442 completion tokens where twelve items needed 600 — and that a
+# batch of 8 would fit. The very next run said otherwise: "recovered 0 of 8
+# items", ten times. It returns nothing parseable at any size. Removed for good;
+# the probe agrees at actor 2/20.
+#
+# So the head is the paid floor, which has no per-minute output ceiling, a 1M
+# context, and 18/20 actor with 20/20 standing on the same sample. It costs about
+# 1.5 cents a bulletin — 9K output and 7K input tokens a run — which is the whole
+# argument for having put a paid slot in this project at all.
 BULLETIN_MEASURED_MODELS = (
+    "google/gemini-3.1-flash-lite",
     "qwen/qwen3.8-27b",
-    "gemini-3.5-flash-lite",
 )
 
 
@@ -590,8 +597,17 @@ def build_bulletin_router() -> LLMRouter:
     established. Falling back to the full cascade instead would silently reach the
     one slot that inverts it.
     """
+    # Drawn from the QUALITY cascade, which already ends with the full main one,
+    # so both the paid floor and every bulk slot are reachable by name. Filtering
+    # only the main cascade — as this did until 2026-09-06 — put the paid slot out
+    # of reach of the one report that most needed it.
     order = {m: i for i, m in enumerate(BULLETIN_MEASURED_MODELS)}
-    accounts = [a for a in build_llm_router().accounts if a.model in order]
+    seen: set = set()
+    accounts = []
+    for a in build_quality_router().accounts:
+        if a.model in order and a.display_name not in seen:
+            seen.add(a.display_name)
+            accounts.append(a)
     accounts.sort(key=lambda a: order[a.model])
     if not accounts:
         logger.warning("Bulletin router has no measured slot with a key; "

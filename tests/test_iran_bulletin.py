@@ -216,9 +216,13 @@ class TestBulletinRouter:
         from src.core.llm_router import BULLETIN_MEASURED_MODELS
         assert "openai/gpt-oss-20b" not in BULLETIN_MEASURED_MODELS
 
-    def test_measured_order_is_fastest_perfect_first(self):
+    def test_the_head_is_the_slot_that_can_actually_serve(self):
+        """Was qwen, on accuracy alone (actor 20/20). Reordered 6 Sep when it
+        turned out it cannot serve this report at all: Groq's free tier caps
+        OUTPUT at 1,000 tokens per minute and the bulletin sends ten batches of
+        912 back to back. Accuracy you cannot reach is not accuracy."""
         from src.core.llm_router import BULLETIN_MEASURED_MODELS
-        assert BULLETIN_MEASURED_MODELS[0] == "qwen/qwen3.8-27b"
+        assert BULLETIN_MEASURED_MODELS[0] == "google/gemini-3.1-flash-lite"
 
     def test_router_only_ever_contains_measured_models(self, monkeypatch):
         from src.core import llm_router as lr
@@ -227,14 +231,21 @@ class TestBulletinRouter:
             def __init__(self, model):
                 self.model = model
                 self.bucket = None
+                # The router de-duplicates on display_name now that it reads a
+                # cascade which already contains the main one.
+                self.display_name = f"fake/A/{model}"
 
         class _FakeRouter:
             accounts = [_Acct("openai/gpt-oss-20b"),
                         _Acct("nvidia/nemotron-3-super-120b-a12b:free"),
                         _Acct("gemini-3.5-flash-lite"),
                         _Acct("qwen/qwen3.8-27b"),
+                        _Acct("google/gemini-3.1-flash-lite"),
                         _Acct("some/unmeasured-model")]
 
+        # The bulletin router draws from the QUALITY cascade, which already ends
+        # with the full main one — that is how the paid floor is reachable here.
+        monkeypatch.setattr(lr, "build_quality_router", lambda: _FakeRouter())
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
         out = lr.build_bulletin_router()
         models = [a.model for a in out.accounts]
@@ -242,7 +253,7 @@ class TestBulletinRouter:
         # assert a direction the text does not carry; gemini-3.5-flash-lite
         # (removed 5 Sep) returns short replies whose missing items silently
         # become "unattributed" — 51 of 73 events in one live bulletin.
-        assert models == ["qwen/qwen3.8-27b", "gemini-3.5-flash-lite"]
+        assert models == ["google/gemini-3.1-flash-lite", "qwen/qwen3.8-27b"]
 
     def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
         """An absent slot leaves events unattributed and the bulletin says so;
@@ -589,3 +600,23 @@ def test_direction_has_more_than_one_slot():
     from src.core.llm_router import BULLETIN_MEASURED_MODELS
 
     assert len(BULLETIN_MEASURED_MODELS) >= 2
+
+
+def test_the_direction_head_has_no_per_minute_output_ceiling():
+    """qwen is the most accurate slot measured and cannot serve this report:
+    Groq's free tier caps OUTPUT at 1,000 tokens per MINUTE, the bulletin sends
+    about ten batches back to back and each asks 912. Shrinking the batch makes
+    it worse — fewer tokens per call, more calls, same per-minute budget."""
+    from src.core.llm_router import BULLETIN_MEASURED_MODELS
+
+    assert BULLETIN_MEASURED_MODELS[0] == "google/gemini-3.1-flash-lite"
+    assert "qwen/qwen3.8-27b" in BULLETIN_MEASURED_MODELS
+
+
+def test_the_slot_that_returned_nothing_is_gone():
+    """gemini-3.5-flash-lite was restored on 6 Sep on a length theory and the
+    next run said "recovered 0 of 8 items" ten times. It returns nothing
+    parseable at any batch size; the probe agrees at actor 2/20."""
+    from src.core.llm_router import BULLETIN_MEASURED_MODELS
+
+    assert "gemini-3.5-flash-lite" not in BULLETIN_MEASURED_MODELS
