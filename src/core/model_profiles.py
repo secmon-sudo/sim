@@ -100,6 +100,23 @@ OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
     "google/gemini-3.1-flash-lite",
 })
 
+# Kilo Gateway slots whose model reasons by default. Kept separate from the
+# OpenRouter set even though the slugs are identical, because membership here is a
+# claim about what KILO forwards, not about the model — and that claim was measured
+# on 2026-09-06 rather than assumed:
+#
+#   nemotron-3-super, 60-token budget, no knob    → 57 reasoning tokens, prose garbage
+#   nemotron-3-super, 60-token budget, knob sent  → 0 reasoning tokens, {"ok":true}
+#   step-3.7-flash,   60-token budget, no knob    → 66 reasoning tokens, content empty
+#
+# That is the aggregator-fidelity question (see LLM7 below) answered positively for
+# the first time. It is answered PER MODEL and only for the two probed; anything
+# else on this gateway is unverified and gets no extras until it is measured.
+KILO_REASONING_DISABLED_MODELS = frozenset({
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "stepfun/step-3.7-flash:free",
+})
+
 # LLM7 (aggregator, added 2026-09-02) publishes a per-model `json_mode` boolean in
 # https://api.llm7.io/v1/models, so this is a DENYLIST rather than the allowlist used
 # for OpenRouter: there the safe default was "no", here the catalogue answers the
@@ -179,12 +196,15 @@ class ModelProfile:
 
 def get_profile(provider: str, model: str) -> ModelProfile:
     """Resolve the capability profile for a (provider, model) pair."""
-    if provider == "openrouter" and model in OPENROUTER_REASONING_DISABLED_MODELS:
+    if provider == "kilo" and model in KILO_REASONING_DISABLED_MODELS:
+        # Measured to land, unlike every other proxy here — see the set's note.
+        extras = {"reasoning": {"enabled": False}}
+    elif provider == "openrouter" and model in OPENROUTER_REASONING_DISABLED_MODELS:
         # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
         # that actually lands, whatever the underlying family accepts natively.
         extras = {"reasoning": {"enabled": False}}
     elif provider in ("llm7", "pollinations", "cloudflare", "vercel", "sambanova",
-                      "aion"):
+                      "aion", "kilo"):
         # Also before the family rules, and for the opposite reason: the family knobs
         # below are facts about first-party endpoints (Groq 400s on reasoning_effort
         # "none"), and nothing yet establishes that this proxy forwards them at all.
@@ -212,7 +232,7 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         # Per-model, from the provider's own catalogue — see LLM7_NO_JSON_MODE_MODELS
         # for why this one defaults to yes where OpenRouter defaults to no.
         supports_json = model not in LLM7_NO_JSON_MODE_MODELS
-    elif provider in ("pollinations", "sambanova", "vercel", "aion"):
+    elif provider in ("pollinations", "sambanova", "vercel", "aion", "kilo"):
         supports_json = True  # undeclared; verified at runtime, see the note above
     elif provider == "cloudflare":
         # Workers AI documents response_format on its OpenAI-compatible route, but
@@ -227,7 +247,7 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         request_timeout = 180.0
     elif provider == "llm7":
         request_timeout = LLM7_REQUEST_TIMEOUT
-    elif provider in ("pollinations", "sambanova", "vercel", "aion"):
+    elif provider in ("pollinations", "sambanova", "vercel", "aion", "kilo"):
         request_timeout = POLLINATIONS_REQUEST_TIMEOUT
     elif provider == "cloudflare":
         # Same allowance as Mistral, and for the same reason: this slot carries

@@ -112,12 +112,13 @@ _CATALOGUES = {
     # Aion Labs. The catalogue is the first question here, not the second: the
     # repo that named this provider gives a base URL and no model ids at all.
     "aion": ("https://api.aionlabs.ai/v1/models", "AION_API_KEY"),
+    "kilo": ("https://api.kilo.ai/api/gateway/v1/models", "KILO_API_KEY"),
 }
 
 # Catalogues that are documented as public and answer 401 to a bad bearer, so the
 # honest way to list them is with no credential at all — and they stay listable
 # before anyone has signed up.
-_KEYLESS_CATALOGUES = frozenset({"aion"})
+_KEYLESS_CATALOGUES = frozenset({"aion", "kilo"})
 
 # urllib's default User-Agent is "Python-urllib/3.x" and edge providers block it.
 # Measured on Aion 2026-09-06, same URL, same second: no header 200, curl's UA 200,
@@ -200,6 +201,9 @@ _DEFAULT_KEY_ENV = {
     "sambanova": "SAMBANOVA_API_KEY",
     "vercel": "VERCEL_AI_API_KEY",
     "aion": "AION_API_KEY",
+    # Keyless. The name is here so --models can address the provider at all; the
+    # env var is never set and _one_slot_router sends no Authorization header.
+    "kilo": "KILO_API_KEY",
 }
 
 

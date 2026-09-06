@@ -40,6 +40,14 @@ PROVIDER_ENDPOINTS = {
     # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
     # precondition even though usage stays at 0. Anonymous access is 401.
     "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
+    # Kilo Gateway (2026-09-06). Keyless — no key, no account, no card — and the
+    # first aggregator measured to FORWARD the reasoning knob rather than swallow
+    # it: nemotron-3-super answered a 60-token budget with 57 reasoning tokens and
+    # garbage prose, then 0 reasoning tokens and exact JSON once
+    # reasoning={"enabled": False} was sent. response_format is accepted too.
+    # 200 req/hr, and the model slugs are OpenRouter's, so the profiles this repo
+    # already carries apply unchanged.
+    "kilo": "https://api.kilo.ai/api/gateway/v1/chat/completions",
     # Aion Labs (2026-09-06). A daily free token allowance with NO CARD required,
     # which is the property that distinguishes it from the two providers below.
     # The allowance (~20K tokens/day) is far too small for the quality tier's
@@ -308,10 +316,15 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     json_mode=False: Groq's json_object validator requires the word "json" in the
     conversation, so a prose prompt without it returns HTTP 400.
     """
-    headers = {
-        "Authorization": f"Bearer {acct.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    # Omitted entirely when there is no key, rather than sent empty. A keyless
+    # gateway (Kilo) is a real slot shape now, and "Bearer " with nothing after it
+    # is not "no credential" to a server — Aion answers 200 to a request with no
+    # header at all and 401 to one carrying a bad bearer, so an empty one turns a
+    # working keyless slot into an auth failure. A provider that DOES want a key
+    # still fails the same way it always did, one line later.
+    if acct.api_key:
+        headers["Authorization"] = f"Bearer {acct.api_key}"
     if acct.provider == "openrouter":
         headers["HTTP-Referer"] = "https://sim-osint.app"
         headers["X-Title"] = "SIM-OSINT-Pipeline"
