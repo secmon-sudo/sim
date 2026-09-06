@@ -456,7 +456,13 @@ def call_llm(router: LLMRouter, prompt: str, system_prompt: str | None = None, m
             finish_reason = ""
             if data.get("choices"):
                 choice = data["choices"][0]
-                content = choice.get("message", {}).get("content", "")
+                # `or ""`, not a default: a provider that answers with the key
+                # present and null — "content": null — makes .get() return None,
+                # and the empty-completion guard below then raises AttributeError
+                # instead of rotating. That took down a whole probe on
+                # deepseek-v4-flash-vision-exp (2026-09-06) with a traceback that
+                # named our own code rather than the slot that misbehaved.
+                content = (choice.get("message") or {}).get("content") or ""
                 finish_reason = choice.get("finish_reason") or ""
 
             # OpenRouter free endpoints fail INSIDE a 200 when the upstream

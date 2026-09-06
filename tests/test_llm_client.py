@@ -617,3 +617,24 @@ def test_a_refused_response_format_still_disables_json_mode(monkeypatch):
                     [{"role": "user", "content": "json please"}],
                     max_tokens=64, json_mode=True)
     assert len(sidelined) == 1
+
+
+def test_a_null_content_rotates_instead_of_crashing():
+    """A provider answering "content": null made .get() return None and the
+    empty-completion guard raise AttributeError — a traceback naming our own
+    code rather than the slot that misbehaved. Seen on
+    deepseek-v4-flash-vision-exp, 2026-09-06."""
+    router = LLMRouter([_acct("bad/slot"), _acct("openai/gpt-oss-20b:free")])
+    null = _resp({"choices": [{"message": {"content": None},
+                               "finish_reason": "stop"}]})
+    with patch.object(llm_client, "_send_request", side_effect=[null, _resp(_GOOD)]):
+        result = llm_client.call_llm(router, "prompt")
+    assert result["model"] == "openai/gpt-oss-20b:free"
+
+
+def test_a_missing_message_object_also_rotates():
+    router = LLMRouter([_acct("bad/slot"), _acct("openai/gpt-oss-20b:free")])
+    broken = _resp({"choices": [{"message": None, "finish_reason": "stop"}]})
+    with patch.object(llm_client, "_send_request",
+                      side_effect=[broken, _resp(_GOOD)]):
+        assert llm_client.call_llm(router, "prompt")["content"] == '{"ok": 1}'
