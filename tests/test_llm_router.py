@@ -406,6 +406,50 @@ class TestQualityCascadeOrder:
         assert paid.bucket.burst >= 10, "a bulletin sends about ten batches at once"
         assert paid.rpd >= 17, "5 SITREPs + digest + narrative + ~10 direction"
 
+    def test_the_bulletin_falls_to_slots_that_can_serve_a_burst(self, monkeypatch):
+        """The floor leads; below it are two rungs that were measured on the same
+        20 labelled headlines. Order is latency and exhaustibility, not score:
+        Kilo has nothing to run out of, Aion has a 20K-token day."""
+        from src.core import llm_router as lr
+
+        for name in ("OPENROUTER_API_KEY_A", "LLM7_KEY", "POLLINATIONS_API_KEY"):
+            monkeypatch.setenv(name, "k")
+        monkeypatch.setenv("AION_API_KEY", "k")
+        models = [a.model for a in lr.build_bulletin_router().accounts]
+        assert models[0] == "google/gemini-3.1-flash-lite"
+        assert models[1] == "nvidia/nemotron-3-super-120b-a12b:free"
+        assert models[2] == "aion-labs/aion-3.0"
+
+    def test_qwen_is_not_a_bulletin_slot(self, monkeypatch):
+        """It is the most accurate model measured on this task and it cannot serve
+        it: Groq caps OUTPUT at 1,000 tokens a MINUTE and the bulletin sends ten
+        batches of 912 back to back. Keeping it as a fallback bought one good batch
+        in ten and nine silent 429s — the 5 and 6 Sep collapses exactly."""
+        from src.core import llm_router as lr
+
+        for name in ("GROQ_API_KEY_A", "GROQ_API_KEY_B", "OPENROUTER_API_KEY_A"):
+            monkeypatch.setenv(name, "k")
+        assert not any("qwen" in a.model
+                       for a in lr.build_bulletin_router().accounts)
+
+    def test_a_keyless_rung_survives_the_key_check(self, monkeypatch):
+        """Every other slot is dropped when its key is missing. Kilo has no key to
+        miss, and the same test would silently delete it."""
+        from src.core import llm_router as lr
+
+        monkeypatch.delenv("AION_API_KEY", raising=False)
+        providers = [a.provider for a in lr.build_bulletin_router().accounts]
+        assert "kilo" in providers
+        assert "aion" not in providers, "no key, no slot — unlike keyless Kilo"
+
+    def test_aions_daily_bound_stays_inside_its_free_allowance(self, monkeypatch):
+        """~20K tokens a day, ~1,300 a direction batch. The request count that
+        looks natural here is the one that quietly overruns the allowance."""
+        from src.core import llm_router as lr
+
+        aion = [a for a in lr._bulletin_fallback_slots() if a.provider == "aion"][0]
+        assert aion.bucket.daily_limit * 1300 <= 20_000
+
     def test_no_cloudflare_vars_means_no_cloudflare_slot(self, monkeypatch):
         from src.core import llm_router as lr
 

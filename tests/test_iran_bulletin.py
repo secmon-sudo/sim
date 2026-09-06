@@ -247,24 +247,39 @@ class TestBulletinRouter:
         # with the full main one — that is how the paid floor is reachable here.
         monkeypatch.setattr(lr, "build_quality_router", lambda: _FakeRouter())
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
+        # The declared fallback rungs are not drawn from any cascade, so they are
+        # not what this test is about; take them out and judge the filter alone.
+        monkeypatch.setattr(lr, "_bulletin_fallback_slots", list)
         out = lr.build_bulletin_router()
         models = [a.model for a in out.accounts]
         # Every exclusion here is a measured failure. gpt-oss-20b and nemotron
         # assert a direction the text does not carry; gemini-3.5-flash-lite
         # (removed 5 Sep) returns short replies whose missing items silently
         # become "unattributed" — 51 of 73 events in one live bulletin.
-        assert models == ["google/gemini-3.1-flash-lite", "qwen/qwen3.8-27b"]
+        #
+        # nemotron stays excluded HERE even though a Kilo-hosted nemotron is now a
+        # declared fallback rung: this list is what may be drawn from the bulk
+        # cascade, and a slug appearing in both places is not evidence that the
+        # cascade's copy was ever measured on this task.
+        assert models == ["google/gemini-3.1-flash-lite"]
 
-    def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
+    def test_an_empty_cascade_never_falls_back_to_the_full_one(self, monkeypatch):
         """An absent slot leaves events unattributed and the bulletin says so;
-        falling back to the full cascade would silently reach the inverting one."""
+        falling back to the full cascade would silently reach the inverting one.
+
+        Was "yields an empty router" until 2026-09-06. It cannot be empty any
+        more — the keyless Kilo rung is always there — but the property that
+        mattered was never emptiness, it was that nothing UNMEASURED gets in."""
         from src.core import llm_router as lr
 
         class _FakeRouter:
             accounts = []
 
+        monkeypatch.setattr(lr, "build_quality_router", lambda: _FakeRouter())
         monkeypatch.setattr(lr, "build_llm_router", lambda: _FakeRouter())
-        assert lr.build_bulletin_router().accounts == []
+        monkeypatch.delenv("AION_API_KEY", raising=False)
+        accounts = lr.build_bulletin_router().accounts
+        assert [a.provider for a in accounts] == ["kilo"]
 
 
 class TestNarrativePrompt:
@@ -593,24 +608,36 @@ class TestShortReplyIsCounted:
         assert 50 * ib.DIRECTION_BATCH_SIZE + 512 < 1000
 
 
-def test_direction_has_more_than_one_slot():
+def test_direction_has_more_than_one_slot(monkeypatch):
     """6 Sep: the list was narrowed to one model the day before, qwen hit its
     rate limit, every batch raised LLMAllThrottled and the bulletin failed
-    outright. Below two slots there is no availability, whatever the accuracy."""
-    from src.core.llm_router import BULLETIN_MEASURED_MODELS
+    outright. Below two slots there is no availability, whatever the accuracy.
 
-    assert len(BULLETIN_MEASURED_MODELS) >= 2
+    The invariant is about the ROUTER, not the measured-model list: since
+    2026-09-06 the rungs below the floor are declared rather than filtered, so
+    counting names in BULLETIN_MEASURED_MODELS stopped answering this question."""
+    from src.core.llm_router import build_bulletin_router
+
+    monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+    assert len(build_bulletin_router().accounts) >= 2
 
 
-def test_the_direction_head_has_no_per_minute_output_ceiling():
+def test_the_direction_head_has_no_per_minute_output_ceiling(monkeypatch):
     """qwen is the most accurate slot measured and cannot serve this report:
     Groq's free tier caps OUTPUT at 1,000 tokens per MINUTE, the bulletin sends
     about ten batches back to back and each asks 912. Shrinking the batch makes
-    it worse — fewer tokens per call, more calls, same per-minute budget."""
-    from src.core.llm_router import BULLETIN_MEASURED_MODELS
+    it worse — fewer tokens per call, more calls, same per-minute budget.
 
-    assert BULLETIN_MEASURED_MODELS[0] == "google/gemini-3.1-flash-lite"
-    assert "qwen/qwen3.8-27b" in BULLETIN_MEASURED_MODELS
+    Kept as a fallback until 2026-09-06 on the grounds that it is the best of
+    them when it answers. What that actually bought was one good batch in ten and
+    nine 429s that fail open into unattributed events — the 5 and 6 Sep collapses.
+    """
+    from src.core.llm_router import build_bulletin_router
+
+    monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+    accounts = build_bulletin_router().accounts
+    assert accounts[0].model == "google/gemini-3.1-flash-lite"
+    assert not any(a.provider == "groq" for a in accounts)
 
 
 def test_the_slot_that_returned_nothing_is_gone():

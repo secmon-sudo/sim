@@ -778,7 +778,6 @@ def run_regression(unreachable_retry_delay: float = 45.0) -> int:
     import time as _time
 
     from src.core.llm_router import (
-        BULLETIN_MEASURED_MODELS,
         build_bulletin_router,
         quality_slot_models,
     )
@@ -818,13 +817,14 @@ def run_regression(unreachable_retry_delay: float = 45.0) -> int:
     print("\n" + "=" * 72)
     print("REGRESSION: bulletin direction slots against the trap headlines")
     print("=" * 72)
-    bulletin_providers = {a.model: a.provider for a in build_bulletin_router().accounts}
-    for model in BULLETIN_MEASURED_MODELS:
-        provider = bulletin_providers.get(model)
-        if not provider:
-            print(f"\n{model}: no key configured, skipping")
-            continue
-        _attempt(provider, model, "bulletin", timeout=120.0, bulletin=True)
+    # Every slot the ROUTER would actually reach, not the measured-model list.
+    # Since 2026-09-06 the rungs below the paid floor are declared rather than
+    # filtered, so walking the list checked the head and skipped both fallbacks —
+    # and a fallback is precisely the thing nobody notices has died, because it
+    # only runs on the days something else already has.
+    for acct in build_bulletin_router().accounts:
+        _attempt(acct.provider, acct.model, "bulletin", timeout=120.0,
+                 bulletin=True)
 
     checked = passed + len(regressions) + len(unreachable)
     print("\n" + "=" * 72)

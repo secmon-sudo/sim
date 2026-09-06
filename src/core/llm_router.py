@@ -52,6 +52,11 @@ CLIENT_ERROR_COOLDOWN_SECONDS = 120
 SLOW_SLOT_COOLDOWN_SECONDS = 1800
 # Max tokens held at once per model slot — smooths the opening burst.
 DEFAULT_BURST = 8
+
+# Providers that authenticate nobody. A slot on one of these is usable with an
+# empty api_key, so the "has a key?" test that gates every other slot would
+# wrongly drop it. llm_client omits the Authorization header entirely for them.
+KEYLESS_PROVIDERS = frozenset({"kilo"})
 # Groq free-tier tokens-per-minute ceiling (gpt-oss-120b/20b, qwen3.8-27b all list 8K).
 # This — not RPM — is the binding constraint; modeling it stops a burst from tripping 429.
 GROQ_TPM = 8000
@@ -565,8 +570,16 @@ def build_llm_router() -> LLMRouter:
 # report. Groq's free tier caps OUTPUT at 1,000 tokens per MINUTE, the bulletin
 # sends about ten batches back to back, and each asks 912 — so one batch fits per
 # minute and the rest 429. Shrinking the batch does not help: fewer tokens per
-# call means more calls against the same per-minute budget. It stays as a
-# fallback because when it does answer it is the best of them.
+# call means more calls against the same per-minute budget.
+#
+# It was kept as a fallback anyway, on the grounds that when it does answer it is
+# the best of them. REMOVED 2026-09-06, because that trade was measured backwards:
+# what it actually buys is one good batch in ten, and the other nine are 429s that
+# fail OPEN — their events keep the unattributed default and land in the regional
+# section while the report renders perfectly. That is not a degraded fallback, it
+# is the exact shape of the 5 Sep and 6 Sep collapses (69.9% and 75.0%
+# unattributed). A rung that cannot serve the burst is not a rung, and pretending
+# otherwise cost two mornings of bulletins.
 #
 # gemini-3.5-flash-lite was restored that morning on the theory that its failure
 # was length — 442 completion tokens where twelve items needed 600 — and that a
@@ -580,22 +593,77 @@ def build_llm_router() -> LLMRouter:
 # argument for having put a paid slot in this project at all.
 BULLETIN_MEASURED_MODELS = (
     "google/gemini-3.1-flash-lite",
-    "qwen/qwen3.8-27b",
 )
+
+# The rungs BELOW the paid floor, declared here because they exist for this one
+# job and nowhere else — they are not in the quality cascade and must never write
+# a SITREP. Both were measured on the same 20 labelled headlines as everything
+# above (probe, 2026-09-06):
+#
+#   gemini-3.1-flash-lite  actor 18/20  target 18/20  standing 20/20   2.2s  paid
+#   kilo nemotron-3-super  actor 18/20  target 19/20  standing 18/20  12.2s  free
+#   aion-3.0               actor 19/20  target 18/20  standing 20/20  38.5s  free-tier
+#
+# Order is not the scoreboard. Kilo goes first on latency and on having nothing to
+# exhaust: no key, no account, no daily allowance that can run out mid-report.
+# Aion is a point better on actor and three times slower, with a 20K-token daily
+# allowance that a single busy day could eat — a fine third rung, a poor second.
+#
+# Both are free, which is the risk the paid floor exists to hold off, so neither
+# may ever lead: they are what the bulletin falls to when the floor is unreachable,
+# and on that path 12 seconds a batch costs nothing anyone will notice.
+#
+# One contradiction, stated rather than buried: nemotron is on this file's
+# EXCLUSION list for the bulletin, on an older finding that it "asserts a direction
+# the text does not carry". That finding stands for the cascade's OpenRouter copy
+# and it was made against an earlier version of the extraction prompt, which has
+# since been rewritten twice — and the run above sent reasoning={"enabled": False},
+# which the old one may not have. A slug is not a slot: what was measured on 6 Sep
+# is Kilo's copy, under today's prompt, at actor 18/20 and target 19/20. If it ever
+# regresses here, the exclusion was the right instinct and this rung goes first.
+def _bulletin_fallback_slots() -> list:
+    return [
+        # Keyless — no key, no account, no card. 200 req/hr, which a ten-batch
+        # bulletin never approaches; rate_per_minute is set from that hourly cap
+        # rather than from the burst, and burst covers the whole report at once
+        # for the reason the paid floor's does (a per-minute rate is the wrong
+        # shape for work that arrives all together).
+        LLMAccount(
+            provider="kilo", account_id="A",
+            model="nvidia/nemotron-3-super-120b-a12b:free",
+            api_key="",
+            rpm=3, rpd=120,
+            bucket=TokenBucket(rate_per_minute=3, daily_limit=120, burst=12),
+        ),
+        # 15 RPM and ~20K tokens a day, no card. daily_limit is sized in TOKENS
+        # even though the bucket counts requests: a direction batch costs about
+        # 1,300, so 12 keeps a bad day inside the allowance with room, where the
+        # 40 that looks natural here would blow through it and start failing
+        # silently mid-report.
+        LLMAccount(
+            provider="aion", account_id="A",
+            model="aion-labs/aion-3.0",
+            api_key=os.environ.get("AION_API_KEY", ""),
+            rpm=15, rpd=12,
+            bucket=TokenBucket(rate_per_minute=15, daily_limit=12, burst=12),
+        ),
+    ]
 
 
 def build_bulletin_router() -> LLMRouter:
     """Router for the Iran bulletin's direction extraction.
 
-    Filtered from build_llm_router() rather than re-declared, so rate limits,
-    shared buckets and key wiring can never drift from the bulk definitions — the
-    only thing this function decides is WHICH slots are allowed.
+    The head is filtered from build_quality_router() rather than re-declared, so
+    rate limits, shared buckets and key wiring can never drift from the bulk
+    definitions. The fallback rungs below it are declared, because they serve this
+    report and nothing else — see _bulletin_fallback_slots.
 
-    Returns an empty router when none of the measured models has a key. That is
-    deliberate: extraction then fails, every event keeps the unattributed default
-    and falls to the regional section, which reports that direction could not be
-    established. Falling back to the full cascade instead would silently reach the
-    one slot that inverts it.
+    Never falls back to the full cascade, whatever fails. Every slot here has been
+    measured on this task; the bulk cascade contains one that INVERTS direction,
+    and reaching it would put the war the wrong way round in a report a person
+    reads. When nothing answers, extraction fails, every event keeps the
+    unattributed default and falls to the regional section — which is the honest
+    place for an event whose direction could not be established.
     """
     # Drawn from the QUALITY cascade, which already ends with the full main one,
     # so both the paid floor and every bulk slot are reachable by name. Filtering
@@ -609,6 +677,10 @@ def build_bulletin_router() -> LLMRouter:
             seen.add(a.display_name)
             accounts.append(a)
     accounts.sort(key=lambda a: order[a.model])
+    # Appended, never sorted in: the floor leads whenever it has a key, and these
+    # are only reached when it does not answer. A keyless slot has no key to check.
+    accounts.extend(a for a in _bulletin_fallback_slots()
+                    if a.api_key or a.provider in KEYLESS_PROVIDERS)
     if not accounts:
         logger.warning("Bulletin router has no measured slot with a key; "
                        "direction extraction will report unattributed")
