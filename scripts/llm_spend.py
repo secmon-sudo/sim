@@ -50,8 +50,16 @@ _QUERY = """
      ORDER BY tokens DESC, calls DESC
 """
 
+# The bucket carries the PROVIDER as well as the model, and that is not
+# cosmetic. Model ids collide across hosts: `qwen/qwen3.6-27b` and
+# `openai/gpt-oss-20b` run here on Groq's free tier and are also listed, for
+# money, in OpenRouter's catalogue. Pricing by model name alone billed a week of
+# free Groq traffic at OpenRouter's rates and reported $0.53 against a real bill
+# of $0.14 — caught on 2026-09-06 by the reconciliation line two functions down,
+# on the first run of this report.
 _QUERY_BY_MODEL = _QUERY.replace(
     "COALESCE(value_json->>'purpose', '(unattributed)') AS bucket",
+    "COALESCE(value_json->>'provider', '?') || ' ' || "
     "COALESCE(value_json->>'model', 'unknown') AS bucket",
 )
 
@@ -96,15 +104,22 @@ def fetch_prices() -> Dict[str, tuple]:
 
 
 def price_row(row: Dict[str, Any], prices: Dict[str, tuple]) -> float:
-    """Dollars for one bucket, or 0.0 when the model is free or unknown.
+    """Dollars for one bucket, or 0.0 for everything we do not pay for.
 
-    Only models we actually pay for appear in the list, so an unknown key is a
-    free slot and costs nothing — which is why a missing price is 0.0 rather
-    than an error. `--by model` gives an exact per-model figure; `--by purpose`
-    cannot, because a purpose spreads across slots, so it is reported once at
-    the bottom instead of being guessed per row.
+    Priced ONLY when the provider is openrouter, because that is the only
+    account with money on it. Every other slot — Groq, Gemini, Cloudflare, LLM7,
+    Pollinations — runs on a free tier, and several of them serve models whose
+    ids OpenRouter also sells. Matching on the model name alone therefore billed
+    a week of free Groq traffic at OpenRouter's rates: $0.53 reported against a
+    real bill of $0.14.
+
+    `--by purpose` prices nothing per row and says so at the bottom instead: a
+    purpose spreads across slots at whatever mix the router chose that day, so a
+    per-row figure would be a guess wearing a decimal point.
     """
-    rate = prices.get(row.get("model") or row.get("bucket") or "")
+    if row.get("provider") != "openrouter":
+        return 0.0
+    rate = prices.get(row.get("model") or "")
     if not rate:
         return 0.0
     return row["prompt_tokens"] / 1e6 * rate[0] + row["completion_tokens"] / 1e6 * rate[1]
@@ -138,7 +153,10 @@ def collect(db_conn, days: int, by: str = "purpose") -> List[Dict[str, Any]]:
     query = _QUERY_BY_MODEL if by == "model" else _QUERY
     rows = db_conn.execute(query, (days,)).fetchall()
     return [
-        {"bucket": r[0], "model": r[0] if by == "model" else None,
+        {"bucket": r[0],
+         # "openrouter google/gemini-3.1-flash-lite" → provider + model
+         "provider": r[0].split(" ", 1)[0] if by == "model" else None,
+         "model": r[0].split(" ", 1)[1] if by == "model" and " " in r[0] else None,
          "calls": r[1], "tokens": int(r[2] or 0),
          "prompt_tokens": int(r[3] or 0), "completion_tokens": int(r[4] or 0),
          "avg_ms": int(r[5] or 0), "failures": r[6]}
