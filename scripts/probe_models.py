@@ -212,6 +212,24 @@ _DEFAULT_KEY_ENV = {
 _KEYLESS_PROVIDERS = frozenset({"kilo"})
 
 
+# Slots removed because something OUTSIDE this repo stopped working, as opposed to
+# slots removed for writing badly. The distinction is the whole point: a model that
+# failed our probe is a closed question, while an account entitlement or a free tier
+# can come back, and nothing in the pipeline would ever notice if it did.
+#
+# Probed weekly and deliberately harmless: still-broken is the expected answer and
+# changes no exit code. Only a RECOVERY is reported, which can happen at most once
+# per entry, because the answer to a recovery is to put the slot back and delete
+# the line.
+RETIRED_SLOTS = [
+    ("mistral", "mistral-medium-latest",
+     "2026-09-04, workspace entitlement went to zero — "
+     "x-ratelimit-limit-req-minute=0, not a quota overrun. Re-checked 2026-09-06 "
+     "after forum reports of an outage: unchanged, large 403 and medium 429. Its "
+     "Turkish was the best this project has measured over 290 calls."),
+]
+
+
 def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     """A router holding exactly the model under test — no failover.
 
@@ -826,6 +844,23 @@ def run_regression(unreachable_retry_delay: float = 45.0) -> int:
         _attempt(acct.provider, acct.model, "bulletin", timeout=120.0,
                  bulletin=True)
 
+    print("\n" + "=" * 72)
+    print("WATCHLIST: slots removed for reasons outside this repo")
+    print("=" * 72)
+    recovered = []
+    for provider, model, why in RETIRED_SLOTS:
+        print(f"\n{provider}/{model}\n  removed: {why}")
+        try:
+            verdict = probe(provider, model, _DEFAULT_KEY_ENV.get(provider, ""),
+                            timeout=120.0, prose=True)
+        except Exception as exc:
+            verdict = VERDICT_UNREACHABLE
+            print(f"  still unavailable: {type(exc).__name__}: {str(exc)[:160]}")
+        if verdict == VERDICT_PASS:
+            recovered.append(f"{provider}/{model}")
+    # NOT counted into `checked`, and a slot that is still broken changes nothing:
+    # these are EXPECTED to fail, and a weekly page saying so is how a weekly job
+    # becomes one nobody reads.
     checked = passed + len(regressions) + len(unreachable)
     print("\n" + "=" * 72)
     if not checked:
@@ -847,6 +882,13 @@ def run_regression(unreachable_retry_delay: float = 45.0) -> int:
         # primary quality slot 429'd every call and a fallback wrote the whole
         # day's reports. Exit 2 so the workflow can page in different words.
         return 2
+    if recovered:
+        # The only GOOD news this job can produce, and the only reason the
+        # watchlist above is worth two calls a week. It fires at most once per
+        # slot, because a recovered slot gets put back and leaves the list.
+        for name in recovered:
+            print(f"  ↑ RECOVERED {name}")
+        return 3
     return 0
 
 

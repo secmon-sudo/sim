@@ -155,17 +155,25 @@ jobs:
         run: |
           # Verdict lines only. The full transcript is in the artifact, and a page
           # nobody can read on a phone is a page nobody reads.
-          SUMMARY=$(grep -E "^  ✗ |^  ~ |^REGRESSION" logs/regression.txt | head -20)
+          SUMMARY=$(grep -E "^  ✗ |^  ~ |^  ↑ |^REGRESSION" logs/regression.txt | head -20)
           export SUMMARY
           python -c "
           import os
           from src.services.ops_notifier import send_ops_alert
           summary = os.environ.get('SUMMARY', '').strip() or '(özet çıkarılamadı)'
-          regressed = os.environ.get('CODE') == '1'
-          head = ('⚠️ Haftalık slot probu: üretimde kullanılan bir model artık '
-                  'işini yapmıyor.' if regressed else
-                  'ℹ️ Haftalık slot probu: bir slota hiç ulaşılamadı (kota/kesinti). '
-                  'Model bozulmadı, ama o slot bugün rapor yazamaz.')
+          code = os.environ.get('CODE')
+          # Exit 3 is the only GOOD news this job produces and it fires at most
+          # once per slot: something removed for an external reason answers again.
+          heads = {
+              '1': ('⚠️ Haftalık slot probu: üretimde kullanılan bir model artık '
+                    'işini yapmıyor.'),
+              '2': ('ℹ️ Haftalık slot probu: bir slota hiç ulaşılamadı '
+                    '(kota/kesinti). Model bozulmadı, ama o slot bugün rapor '
+                    'yazamaz.'),
+              '3': ('✅ Haftalık slot probu: KAPALI sanılan bir slot yeniden '
+                    'cevap veriyor. Kaskada geri koymaya değer mi, bak.'),
+          }
+          head = heads.get(code, heads['2'])
           send_ops_alert(
               head + '\n\n' + summary +
               '\n\nTam çıktı: Actions > Model Probe > regression artifact.',
