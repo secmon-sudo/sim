@@ -206,6 +206,11 @@ _DEFAULT_KEY_ENV = {
     "kilo": "KILO_API_KEY",
 }
 
+# Providers that need no credential at all. Without this the key guard in probe()
+# skips them as unconfigured, which is the one verdict a keyless provider can
+# never deserve.
+_KEYLESS_PROVIDERS = frozenset({"kilo"})
+
 
 def _one_slot_router(provider: str, model: str, key_env: str) -> LLMRouter:
     """A router holding exactly the model under test — no failover.
@@ -610,7 +615,7 @@ def probe(provider: str, model: str, key_env: str, timeout: float | None = None,
           extras: dict | None = None, prose: bool = False,
           bulletin: bool = False) -> str:
     print(f"\n{'=' * 72}\n{provider}/{model}")
-    if not os.environ.get(key_env):
+    if not os.environ.get(key_env) and provider not in _KEYLESS_PROVIDERS:
         print(f"  SKIP: {key_env} not set")
         return VERDICT_UNREACHABLE
 

@@ -107,14 +107,16 @@ OPENROUTER_REASONING_DISABLED_MODELS = frozenset({
 #
 #   nemotron-3-super, 60-token budget, no knob    → 57 reasoning tokens, prose garbage
 #   nemotron-3-super, 60-token budget, knob sent  → 0 reasoning tokens, {"ok":true}
-#   step-3.7-flash,   60-token budget, no knob    → 66 reasoning tokens, content empty
 #
 # That is the aggregator-fidelity question (see LLM7 below) answered positively for
-# the first time. It is answered PER MODEL and only for the two probed; anything
-# else on this gateway is unverified and gets no extras until it is measured.
+# the first time — and only for one model. step-3.7-flash was in this set for
+# exactly one probe: it reasons by default (66 reasoning tokens on a 60-token
+# budget), but sending the knob did NOT stop it — the full bulletin probe came back
+# as an empty completion with finish_reason='length', the budget spent on thinking
+# that was supposed to be off. "Reasons by default" and "this knob turns it off" are
+# two different measurements and only the second one earns a place here.
 KILO_REASONING_DISABLED_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "stepfun/step-3.7-flash:free",
 })
 
 # LLM7 (aggregator, added 2026-09-02) publishes a per-model `json_mode` boolean in
