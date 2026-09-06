@@ -345,3 +345,91 @@ class TestGoogleNewsRecency:
         ]
         assert google_feeds, "expected Google News queries in news_queries"
         assert all("when%3A" in u or "when:" in u for u in google_feeds)
+
+
+class TestExactTitleIndex:
+    """The dedup window is declared in DAYS and enforced in ROWS.
+
+    Measured 2026-09-06: ingest runs at ~971 events/day and the corpus is capped at
+    2000 rows, so the matcher actually sees 1 day 22h of a 4-day window. Every one
+    of 18 duplicate ALERT pairs in a fortnight sat in that gap — rows_between 2,029
+    to 3,589 — and every one had an identical normalize_title. This index covers
+    the rest of the window by equality instead of by widening the O(N*M) matcher.
+    """
+
+    class _Conn:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def execute(self, *_a, **_k):
+            conn = self
+
+            class _R:
+                def fetchall(self_inner):
+                    return conn.rows
+            return _R()
+
+    def test_the_earliest_filing_is_the_survivor(self):
+        """Rows arrive oldest-first and setdefault keeps the first, because a
+        corroboration credit belongs on the original, not on the reprint."""
+        from src.pipeline import pass_a_ingest as pa
+
+        conn = self._Conn([
+            ("id-old", "pravda.com.ua",
+             "Russians kill two people in Kharkiv Oblast in FPV drone strike - "
+             "Українська правда", "Kharkiv"),
+            ("id-new", "pravda.com.ua",
+             "Russians kill two people in Kharkiv Oblast in FPV drone strike - "
+             "Українська правда", "Kharkiv"),
+        ])
+        index = pa._fetch_exact_title_index(conn)
+        assert len(index) == 1
+        assert next(iter(index.values()))[0] == "id-old"
+
+    def test_the_source_suffix_is_not_part_of_the_key(self):
+        """migflug filed the same story as "- MiGFlug" and "- migflug.com" and
+        both alerted. normalize_title already strips that; this pins that the
+        index inherits it rather than matching raw headlines."""
+        from src.pipeline import pass_a_ingest as pa
+
+        conn = self._Conn([
+            ("a", "migflug.com",
+             "Leipzig Airport Drone Attack: Germany Blames Russia - MiGFlug", ""),
+            ("b", "migflug.com",
+             "Leipzig Airport Drone Attack: Germany Blames Russia - migflug.com", ""),
+        ])
+        assert len(pa._fetch_exact_title_index(conn)) == 1
+
+    def test_a_stub_headline_cannot_collapse_unrelated_events(self):
+        """This matcher is equality, so a short generic headline would merge
+        stories that have nothing to do with each other."""
+        from src.pipeline import pass_a_ingest as pa
+
+        conn = self._Conn([
+            ("a", "x.com", "Breaking news", ""),
+            ("b", "y.com", "Breaking news", ""),
+        ])
+        assert pa._fetch_exact_title_index(conn) == {}
+
+    def test_a_failed_read_leaves_dedup_exactly_as_it_was(self):
+        """Fails open, like the corpus fetch beside it: an empty index is the
+        behaviour that existed before this function did."""
+        from src.pipeline import pass_a_ingest as pa
+
+        class _Boom:
+            def execute(self, *_a, **_k):
+                raise RuntimeError("pooler went away")
+
+        assert pa._fetch_exact_title_index(_Boom()) == {}
+
+    def test_syndication_is_indexed_too(self):
+        """Not restricted to one publisher, because the similarity matcher is not
+        either: 37 of the 72 pairs that escaped the cap over ten days were the
+        same headline under a second masthead, which is a corroboration credit."""
+        from src.pipeline import pass_a_ingest as pa
+
+        title = "Haiti gang raid kills 47 in Kenscoff, fuelling anger over lapses"
+        conn = self._Conn([("a", "indiatoday.in", title, ""),
+                           ("b", "hindustantimes.com", title, "")])
+        index = pa._fetch_exact_title_index(conn)
+        assert len(index) == 1 and next(iter(index.values()))[1] == "indiatoday.in"

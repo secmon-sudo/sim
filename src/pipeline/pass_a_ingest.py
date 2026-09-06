@@ -47,6 +47,7 @@ from src.pipeline.ingest_filters import (  # noqa: F401
     is_content_farm,
     is_noise,
     normalize_title,
+    places_disagree,
     priority_score,
     title_similarity,
     title_token_similarity,
@@ -164,6 +165,65 @@ def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list
     except Exception:
         logger.exception("Failed to fetch recent events for dedup")
         return [], []
+
+
+# A headline too short to be distinctive. The exact-title index below matches on
+# equality, so a stub like "Breaking news" would collapse unrelated events; every
+# duplicate pair measured on 2026-09-06 was far longer than this.
+_EXACT_TITLE_MIN_LEN = 25
+
+
+def _fetch_exact_title_index(db_conn) -> dict:
+    """normalize_title(headline) -> (event_id, domain, title, anchor), earliest wins.
+
+    The corpus above is `ORDER BY ingested_at DESC LIMIT 2000`, and that cap — not
+    the configured window — is what actually bounds dedup. Measured 2026-09-06:
+    ingest runs at ~971 events/day, so the newest 2000 rows span 1 day 22h against
+    a max_article_age_days of 4. The same story filed twice more than two days
+    apart was structurally invisible, and 18 of 18 duplicate ALERT pairs in a
+    fortnight were exactly that — rows_between ranged 2,029 to 3,589, every one of
+    them past the cap and every one inside the configured window. Same shape as the
+    linking-pool truncation of 2026-08-11: a window declared in days and enforced
+    in rows.
+
+    Raising the cap would fix it and cost the most expensive phase in Pass A —
+    find_content_duplicate is O(candidates x corpus) and content_dedup_cpu was
+    111s of the run. This costs nothing instead, because the long tail does not
+    need the similarity matcher: all 18 pairs have IDENTICAL normalize_title
+    output (16 byte-identical headlines, 2 differing only in the source suffix
+    normalize_title already strips). Equality is a dict lookup.
+
+    So the expensive matcher keeps its 2000-row corpus and this covers the rest of
+    the window exactly, and only, where the headlines match to the letter.
+
+    Deliberately NOT restricted to one domain. The existing matcher is not either,
+    and cross-publisher exact titles are syndication: dropping the copy and
+    crediting the original is what already happens inside the cap. Over ten days
+    72 such pairs escaped it, 35 same-publisher and 37 syndicated.
+    """
+    try:
+        rows = db_conn.execute(
+            """SELECT id, source_domain, source_title, anchor_name_raw
+               FROM events
+               WHERE ingested_at > NOW() - (%s * INTERVAL '1 day')
+               ORDER BY ingested_at ASC
+               LIMIT 20000""",
+            (_MAX_ARTICLE_AGE_DAYS,),
+        ).fetchall()
+    except Exception:
+        # Fails OPEN, like the corpus fetch above: no index means dedup behaves
+        # exactly as it did before this function existed.
+        logger.exception("Failed to fetch exact-title index for dedup")
+        return {}
+    index: dict = {}
+    for event_id, domain, title, anchor in rows:
+        key = normalize_title(title or "")
+        if len(key) < _EXACT_TITLE_MIN_LEN:
+            continue
+        # ASC order plus setdefault keeps the EARLIEST filing as the survivor,
+        # which is the one a corroboration credit belongs on.
+        index.setdefault(key, (event_id, domain or "", title or "", anchor or ""))
+    return index
 
 
 # Max corroborating sources kept per event — enough for a Çoklu Kaynak/Resmî
@@ -605,6 +665,18 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # the parallel fetch being exact rather than approximate; a number that
         # climbs toward the fetch count means the window is buying nothing.
         "dedup_window_stalls": 0,
+        # Duplicates the SIMILARITY matcher never saw, because the survivor was
+        # older than its 2000-row corpus reaches. Measured 2026-09-06: 18 of 18
+        # duplicate ALERT pairs in a fortnight, ~7 pairs a day across the corpus.
+        # If this ever reads zero for a week the cap has stopped binding and the
+        # index is dead weight; if it climbs, ingest volume is outrunning the cap
+        # further and content_dedup's own window is shrinking with it.
+        "exact_title_duplicates": 0,
+        # The safety valve on the line above: an exact-title hit whose stored
+        # ANCHOR named a different place than the incoming headline. Identical
+        # titles cannot disagree, but an anchor can name a city the headline never
+        # did — the Kharkiv/Kyiv failure of 2026-08-20, reached by another road.
+        "exact_title_place_veto": 0,
         # Why the fetch window was drained. The first parallel run cut article_fetch
         # from 145s to 88s but recorded ZERO stalls against 21 in-run duplicate
         # matches, which means the window was usually empty when those arrived —
@@ -704,6 +776,8 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
     # index-aligned; in-run inserts are prepended to both)
     with _timed(timings, "load_dedup_corpus"):
         recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
+        # Covers the part of the configured window the 2000-row cap cuts off.
+        exact_titles = _fetch_exact_title_index(db_conn)
 
     # One read for the whole run instead of one per candidate (see
     # load_domain_penalties). Timed under the same key as the loop lookups it
@@ -818,6 +892,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     # No anchor yet — Pass C classifies this event later in the run.
                     recent_events.insert(0, (item.get("title", ""), canonical, ""))
                     recent_meta.insert(0, (new_row[0], domain))
+                    # And into the exact index, which the corpus trimming below
+                    # must not evict: an item inserted early in a long run would
+                    # otherwise fall out of BOTH structures before the run ends.
+                    _key = normalize_title(item.get("title", ""))
+                    if len(_key) >= _EXACT_TITLE_MIN_LEN:
+                        exact_titles.setdefault(
+                            _key, (new_row[0], domain, item.get("title", ""), ""))
                     if len(recent_events) > 2500:
                         recent_events.pop()
                         recent_meta.pop()
@@ -973,6 +1054,36 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 settle_pending()
                 dup_idx = find_content_duplicate(recent_events,
                                                  item.get("title", ""), canonical)
+        if dup_idx is None and exact_titles:
+            # The long tail: same headline, letter for letter, further back than
+            # the corpus cap reaches. A separate branch rather than a widened
+            # corpus so the matcher's own path below stays byte-identical — it
+            # carries measured behaviour (in-run distance telemetry, the pending
+            # settle) that has nothing to do with this.
+            key = normalize_title(item.get("title", ""))
+            hit = exact_titles.get(key) if len(key) >= _EXACT_TITLE_MIN_LEN else None
+            if hit is not None:
+                hit_id, hit_domain, hit_title, hit_anchor = hit
+                # Same veto the matcher applies: two headlines naming different
+                # known places are not one incident. Identical titles cannot
+                # disagree with each other, but the stored ANCHOR can name a place
+                # the headline never did, and that is the case worth stopping.
+                if places_disagree(item.get("title", ""),
+                                   f"{hit_title} {hit_anchor}".strip()):
+                    stats["exact_title_place_veto"] += 1
+                else:
+                    stats["content_duplicates_skipped"] += 1
+                    stats["exact_title_duplicates"] += 1
+                    with _timed(timings, "corroboration_cpu"):
+                        params = _corroboration_params(
+                            hit_id, hit_domain, domain, url,
+                            item.get("title", ""), hit_title)
+                    if params is not None:
+                        pending_corroborations.append(params)
+                    else:
+                        stats["corroborations_refused"] += 1
+                    continue
+
         if dup_idx is not None:
             stats["content_duplicates_skipped"] += 1
             # dup_idx counts back from the head, and this run prepended exactly
