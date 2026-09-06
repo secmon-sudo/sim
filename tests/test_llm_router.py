@@ -392,6 +392,20 @@ class TestQualityCascadeOrder:
         # plus a rotation or two must fit under it.
         assert all(s.rpd == 20 for s in cf)
 
+    def test_the_paid_floor_can_absorb_a_burst(self, monkeypatch):
+        """burst was 1, sized for seven unhurried prose calls a day. On 6 Sep the
+        bulletin's direction extraction moved here — ten batches inside two
+        seconds — and the slot served exactly one before everything else fell
+        through to Groq and 429'd. A per-minute rate is the wrong shape for work
+        that arrives all at once."""
+        from src.core import llm_router as lr
+
+        for name in ("OPENROUTER_API_KEY_A", "LLM7_KEY", "POLLINATIONS_API_KEY"):
+            monkeypatch.setenv(name, "k")
+        paid = [s for s in lr._quality_slots() if s.provider == "openrouter"][0]
+        assert paid.bucket.burst >= 10, "a bulletin sends about ten batches at once"
+        assert paid.rpd >= 17, "5 SITREPs + digest + narrative + ~10 direction"
+
     def test_no_cloudflare_vars_means_no_cloudflare_slot(self, monkeypatch):
         from src.core import llm_router as lr
 

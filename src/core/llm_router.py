@@ -787,19 +787,36 @@ def _quality_slots() -> list:
         # 2.5-flash-lite line is kept as the cheaper fallback if this ever needs
         # to get cheaper still.
         #
-        # rpd is a SPEND cap, not a provider limit. A call costs $0.0055 here, the
-        # real load is 8 a day, and 15 leaves room for rotations while capping a
-        # runaway month at $2.47. OpenRouter is prepaid, so the balance is itself
-        # a hard ceiling and nothing can overspend it — which makes the danger not
-        # a surprise bill but a surprise SILENCE, since the floor would simply
-        # drop away and the free rungs below would quietly take over.
-        # output_health.check_openrouter_credit is the other half of that fix.
+        # These three numbers are a SPEND cap, not a provider limit, and the burst
+        # is the one that matters. It was 1 — sized for a slot doing seven
+        # unhurried prose calls a day — until 6 Sep, when the Iran bulletin's
+        # direction extraction moved here and turned out to be a BURST workload:
+        # ten batches inside two seconds. The slot served exactly one and the
+        # rest fell through to Groq and 429'd. Telemetry to the second:
+        #
+        #   08:10:36  openrouter/google/gemini-3.1-flash-lite  direction  ← the one
+        #   08:10:38  groq/qwen3.8-27b                         direction  ← 429
+        #   08:10:39  groq/qwen3.8-27b                         direction  ← 429
+        #
+        # A per-minute rate is the wrong shape for work that arrives all at once,
+        # and burst is what expresses that. 12 covers a bulletin's ten batches.
+        #
+        # The day's real load is 5 SITREPs + digest + bulletin narrative + about
+        # ten direction batches ≈ 17 calls, mixed cheap and dear, near $1.70 a
+        # month. rpd=40 is 2.3x that; a pathological month of 40 prose-sized calls
+        # a day would reach $6.60, which is the ceiling this number exists to set.
+        #
+        # OpenRouter is prepaid, so the balance is itself a hard ceiling and
+        # nothing can overspend it — which makes the danger not a surprise bill
+        # but a surprise SILENCE, since the floor would drop away and the free
+        # rungs below would quietly take over. check_openrouter_credit is the
+        # other half of that.
         LLMAccount(
             provider="openrouter", account_id="A",
             model="google/gemini-3.1-flash-lite",
             api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
-            rpm=6, rpd=15,
-            bucket=TokenBucket(rate_per_minute=6, daily_limit=15, burst=1),
+            rpm=30, rpd=40,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=40, burst=12),
         ),
         # ── LLM7 minimax-m2.7, removed 2026-09-04 ────────────────────────
         #
