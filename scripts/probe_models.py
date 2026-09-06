@@ -102,6 +102,13 @@ _CATALOGUES = {
     # Pollinations publishes 370 entries; the free-tier ones are community-contributed
     # (an individual's upstream key registered into the router) and marked alpha.
     "pollinations": ("https://gen.pollinations.ai/models", "POLLINATIONS_API_KEY"),
+    # Added 2026-09-06 alongside the probe-only slots. Both answer the standard
+    # OpenAI /v1/models shape, and both carry per-model context and output ceilings
+    # that decide eligibility before a single call is spent: SambaNova's
+    # Meta-Llama-3.3-70B caps completions at 3,072 tokens, which is below the
+    # SITREP's 6,000 budget, so it is disqualified by the catalogue alone.
+    "sambanova": ("https://api.sambanova.ai/v1/models", "SAMBANOVA_API_KEY"),
+    "vercel": ("https://ai-gateway.vercel.sh/v1/models", "VERCEL_AI_API_KEY"),
 }
 
 
@@ -167,6 +174,8 @@ _DEFAULT_KEY_ENV = {
     "llm7": "LLM7_KEY",
     "pollinations": "POLLINATIONS_API_KEY",
     "cloudflare": "CLOUDFLARE_API_TOKEN",
+    "sambanova": "SAMBANOVA_API_KEY",
+    "vercel": "VERCEL_AI_API_KEY",
 }
 
 

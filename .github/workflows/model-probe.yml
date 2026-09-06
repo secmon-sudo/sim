@@ -57,6 +57,10 @@ env:
   POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  # Probe-only (2026-09-06). Neither provider is in any production router; these
+  # exist so --prose can measure them on the real Turkish SITREP prompt.
+  SAMBANOVA_API_KEY:     ${{ secrets.SAMBANOVA_API_KEY }}
+  VERCEL_AI_API_KEY:     ${{ secrets.VERCEL_AI_API_KEY }}
 
 jobs:
   probe:
