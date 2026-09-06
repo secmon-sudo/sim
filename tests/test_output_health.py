@@ -143,6 +143,15 @@ class TestBulletinAttribution:
         """Four events, three unattributed, is 75% and means nothing."""
         assert oh.check_bulletin_attribution(_Conn([("2026-09-04", 0.75, 4)]), 30.0) == []
 
+    def test_only_the_latest_bulletin_is_judged(self):
+        """The 6 Sep page: three bulletins in one window, the last of them healthy,
+        and the reader was shown the two the fix had already superseded. The
+        SITREP checks were scoped for this exact reason a day earlier; this one
+        was missed."""
+        conn = _Conn([])
+        oh.check_bulletin_attribution(conn, 30.0)
+        assert "max(window_end)" in conn.seen[0][0], conn.seen[0][0]
+
 
 class TestDegradationCounters:
     def test_counters_are_summed_across_runs(self):

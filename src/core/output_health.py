@@ -199,6 +199,14 @@ def check_bulletin_attribution(conn, window_hours: float,
     ambiguous. The precise signal is the counter — a failed batch increments
     BULLETIN_DIRECTION_BATCH_FAILED — and this is the backstop for a failure that
     increments nothing.
+
+    Scoped to the LATEST bulletin, for the reason check_sitrep_citations already
+    carries: this fires on the report a reader actually has, and every earlier
+    attempt in the window has been superseded by it. On 6 Sep the burst fix landed
+    between runs — 08:06 and 08:10 came out at 75% unattributed, 08:14 at 43% —
+    and the unscoped query paged all three, hours later, two of them for a cause
+    that had already been fixed and deployed. A check that keeps announcing a
+    problem you solved is the fastest way to teach someone to ignore it.
     """
     rows = _rows(conn, """
         SELECT window_end,
@@ -211,7 +219,9 @@ def check_bulletin_attribution(conn, window_hours: float,
                    || coalesce(b.sections_json->'from_iran', '[]'::jsonb)
                    || coalesce(b.sections_json->'regional', '[]'::jsonb)) e
          WHERE b.status = 'completed'
-           AND b.window_end > now() - (%s * interval '1 hour')
+           AND b.window_end = (SELECT max(window_end) FROM iran_bulletins
+                                WHERE status = 'completed'
+                                  AND window_end > now() - (%s * interval '1 hour'))
          GROUP BY b.window_end
     """, (window_hours,))
     findings = []
