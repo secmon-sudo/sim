@@ -114,19 +114,39 @@ _CATALOGUES = {
     "aion": ("https://api.aionlabs.ai/v1/models", "AION_API_KEY"),
 }
 
+# Catalogues that are documented as public and answer 401 to a bad bearer, so the
+# honest way to list them is with no credential at all — and they stay listable
+# before anyone has signed up.
+_KEYLESS_CATALOGUES = frozenset({"aion"})
+
+# urllib's default User-Agent is "Python-urllib/3.x" and edge providers block it.
+# Measured on Aion 2026-09-06, same URL, same second: no header 200, curl's UA 200,
+# a browser UA 200, "Python-urllib/3.12" 403. Groq's catalogue has been answering
+# the same 403 in every probe run for days and was written off as a key problem.
+#
+# This is a failure that lies about its cause — 403 reads as "your credential is
+# wrong" and sends you to the dashboard — so the identity goes on every catalogue
+# request rather than on the one provider that exposed it.
+_CATALOGUE_UA = "sim-probe/1.0 (+https://github.com/secmon-sudo/sim)"
+
 
 def list_models(provider: str) -> int:
     """Print the model ids the key for `provider` can actually see."""
     url, key_env = _CATALOGUES[provider]
     key = os.environ.get(key_env, "")
-    if not key:
+    if not key and provider not in _KEYLESS_CATALOGUES:
         print(f"=== {provider}: {key_env} not set, skipping catalogue ===")
         return 0
-    # Gemini takes the key in the query string, Groq as a bearer header.
-    if provider == "gemini":
-        req = urllib.request.Request(f"{url}&key={key}")
+    # Gemini takes the key in the query string, Groq as a bearer header, and the
+    # keyless ones refuse the header outright (see _KEYLESS_CATALOGUES).
+    headers = {"User-Agent": _CATALOGUE_UA}
+    if provider in _KEYLESS_CATALOGUES:
+        req = urllib.request.Request(url, headers=headers)
+    elif provider == "gemini":
+        req = urllib.request.Request(f"{url}&key={key}", headers=headers)
     else:
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+        headers["Authorization"] = f"Bearer {key}"
+        req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=45) as r:
             data = json.loads(r.read())
