@@ -17,6 +17,11 @@ name: Iran Theatre Bulletin
 # no reason to make them contend for the same minute.
 on:
   workflow_dispatch:       # cron-job.org (günlük 08:00 UTC) veya GitHub UI'dan el ile
+    inputs:
+      dispatch:
+        description: "Telegram'a gönder — test için KAPAT (bülteni yine üretilir, kaydedilir, R2'ye çıkar)"
+        type: boolean
+        default: true
 
 concurrency:
   group: iran-bulletin
@@ -44,6 +49,10 @@ env:
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  # A test re-run of a report workflow publishes to the people who read it.
+  # On 2026-09-06 the bulletin was re-dispatched three times while a bug was
+  # being fixed and the first two were the broken ones.
+  SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
   TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}

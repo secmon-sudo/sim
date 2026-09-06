@@ -241,6 +241,27 @@ def generate_html_report_payload(
     return html_content
 
 
+# A test re-run of a report workflow publishes to the people who read the
+# reports. That is not hypothetical: on 2026-09-06 the Iran bulletin was
+# re-dispatched three times while a direction-extraction bug was being fixed, and
+# the first two were the broken ones — two bad bulletins in a reader's Telegram
+# before the good one arrived.
+#
+# Set SIM_REPORT_DISPATCH=0 to run a report end to end, write it to the database
+# and upload it to R2, while sending nothing. The gate lives HERE rather than in
+# each caller so it cannot be forgotten by the next report that is added.
+def dispatch_enabled() -> bool:
+    return os.environ.get("SIM_REPORT_DISPATCH", "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
+def _suppressed(what: str) -> bool:
+    if dispatch_enabled():
+        return False
+    logger.warning("SIM_REPORT_DISPATCH is off — %s built but NOT sent", what)
+    return True
+
+
 def send_weekly_report_telegram(
     week_start: str,
     week_end: str,
@@ -259,6 +280,8 @@ def send_weekly_report_telegram(
     scorecard: optional one-liner grading LAST week's forecast against measured
     outcomes (from the forecast resolver), shown under the global direction.
     """
+    if _suppressed("weekly forecast"):
+        return None
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
 
@@ -346,6 +369,8 @@ def send_flash_update_telegram(
     r2_url: Optional[str] = None
 ) -> Optional[str]:
     """Formats and dispatches a critical Flash Update to Telegram."""
+    if _suppressed("flash update"):
+        return None
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
 
@@ -408,6 +433,8 @@ def send_sitrep_telegram(
     2. The styled HTML report as a document attachment (sendDocument) —
        opens directly in the phone's browser.
     """
+    if _suppressed("SITREP/bulletin"):
+        return None
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
 
@@ -487,6 +514,8 @@ def send_digest_telegram(
     impact) — readable on a phone without opening anything. The HTML document
     follows for the full one-pager.
     """
+    if _suppressed("digest"):
+        return None
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
 

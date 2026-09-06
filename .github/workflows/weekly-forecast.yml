@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 0 * * 0'    # Her Pazar 00:00 UTC (Haftalık Çalışma)
   workflow_dispatch:       # GitHub UI üzerinden el ile tetikleme
+    inputs:
+      dispatch:
+        description: "Telegram'a gönder — test için KAPAT (tahmini yine üretilir, kaydedilir, R2'ye çıkar)"
+        type: boolean
+        default: true
 
 concurrency:
   group: weekly-forecast
@@ -25,6 +30,10 @@ env:
   DATABASE_URL:         ${{ secrets.DATABASE_URL }}
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
+  # A test re-run of a report workflow publishes to the people who read it.
+  # On 2026-09-06 the bulletin was re-dispatched three times while a bug was
+  # being fixed and the first two were the broken ones.
+  SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
   TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}

@@ -179,3 +179,44 @@ def test_escaped_content_survives_truncation_intact():
     text = _send(digest)
     assert "&amp" not in text.replace("&amp;", "")
     assert html.unescape(text)  # decodes without raising
+
+
+class TestDispatchGate:
+    """A test re-run of a report workflow publishes to the people who read it.
+
+    On 2026-09-06 the Iran bulletin was re-dispatched three times while a
+    direction-extraction bug was being fixed, and the first two were the broken
+    ones — two bad bulletins in a reader's Telegram before the good one arrived.
+    The gate lives in the notifier rather than in each caller so the next report
+    that gets added cannot forget it.
+    """
+
+    def test_on_by_default(self, monkeypatch):
+        from src.services import telegram_report_notifier as n
+
+        monkeypatch.delenv("SIM_REPORT_DISPATCH", raising=False)
+        assert n.dispatch_enabled() is True
+
+    def test_every_falsy_spelling_turns_it_off(self, monkeypatch):
+        from src.services import telegram_report_notifier as n
+
+        for value in ("0", "false", "FALSE", "no", "off", " Off "):
+            monkeypatch.setenv("SIM_REPORT_DISPATCH", value)
+            assert n.dispatch_enabled() is False, value
+
+    def test_no_report_sender_sends_when_it_is_off(self, monkeypatch):
+        """All four, because forgetting one is the whole failure mode."""
+        import httpx
+
+        from src.services import telegram_report_notifier as n
+
+        monkeypatch.setenv("SIM_REPORT_DISPATCH", "0")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+        monkeypatch.setenv("TELEGRAM_ALERTS_CHAT_ID", "c")
+
+        def _boom(*a, **k):
+            raise AssertionError("a report was sent with dispatch off")
+
+        monkeypatch.setattr(httpx, "post", _boom)
+        assert n.send_sitrep_telegram("IR", "İran", "a", "b", [], "<html>") is None
+        assert n.send_digest_telegram({}, "a", "b", "<html>") is None
