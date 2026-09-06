@@ -1,0 +1,74 @@
+name: SIM LLM Spend
+
+# What did the LLMs cost, on what, and does it match the bill?
+#
+# Three things in one report, because separately none of them is decidable:
+#   * tokens by pipeline stage, from system_telemetry
+#   * dollars, priced from OpenRouter's PUBLIC model list (no key needed, and it
+#     cannot drift the way a table in the repo would)
+#   * reconciliation against what OpenRouter itself says the key has spent
+#
+# The reconciliation is the point. Our figure is derived from token counts we
+# recorded; theirs is the bill. They agreed to 2.4% on 2026-09-06, which is the
+# only evidence the derived number can be trusted between statements — and
+# output_health's credit alarm depends on exactly that.
+#
+# Read-only: no LLM call, no row written, nothing dispatched. Costs nothing to run.
+on:
+  schedule:
+    - cron: "0 5 * * 1"       # Mondays 05:00 UTC, before the weekly slot probe
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Kaç günlük dönem"
+        type: string
+        default: "7"
+      by:
+        description: "Kırılım: purpose (hangi aşama) veya model (hangi model)"
+        type: choice
+        options: ["purpose", "model"]
+        default: "model"
+
+concurrency:
+  group: llm-spend
+  cancel-in-progress: false
+
+env:
+  DATABASE_URL:         ${{ secrets.DATABASE_URL }}
+  # Only used to ask OpenRouter what it thinks the key has spent. Prices come
+  # from the public catalogue and need no credential at all.
+  OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
+
+jobs:
+  spend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Report spend
+        shell: bash
+        run: |
+          mkdir -p logs
+          python -m scripts.llm_spend \
+            --days "${{ inputs.days || 7 }}" \
+            --by "${{ inputs.by || 'model' }}" 2>&1 | tee logs/spend.txt
+          # Also in the run summary, so the answer is readable without
+          # downloading an artifact.
+          {
+            echo '```'
+            cat logs/spend.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-spend-${{ github.run_id }}
+          path: logs/spend.txt
+          retention-days: 90
