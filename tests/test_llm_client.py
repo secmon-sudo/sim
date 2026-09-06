@@ -564,3 +564,56 @@ def test_a_429_with_no_headers_still_logs_something_readable():
     resp = httpx.Response(429, text="", request=httpx.Request("POST", "https://x/y"))
     assert llm_client._rate_limit_headers(resp) == "no limit headers"
     assert llm_client._error_detail(resp) == "<empty body>"
+
+
+# ── Two different 400s (Groq error log, 7 days to 2026-09-06) ──
+
+
+def _json_400(code):
+    return httpx.Response(
+        400, json={"error": {"code": code, "message": code}},
+        request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+    )
+
+
+def test_a_bad_generation_does_not_disable_the_guard_against_bad_generations(
+        monkeypatch):
+    """json_validate_failed means the endpoint ACCEPTED response_format and the
+    model's own output failed validation. Stripping the constraint answers "the
+    model produced bad JSON" by removing the thing that stops it. Groq logged 8
+    of these in seven days, each disabling json mode for the rest of a run."""
+    from src.core import llm_client as c
+
+    sidelined = []
+    monkeypatch.setattr(c, "_sideline_json_mode", lambda a: sidelined.append(a))
+    calls = []
+
+    def _post(url, **k):
+        calls.append(k.get("json", {}))
+        return _json_400("json_validate_failed")
+
+    monkeypatch.setattr(httpx, "post", _post)
+    with pytest.raises(httpx.HTTPStatusError):
+        c._send_request(_acct("openai/gpt-oss-120b", provider="groq"),
+                        [{"role": "user", "content": "json please"}],
+                        max_tokens=64, json_mode=True)
+    assert sidelined == [], "json mode must survive one bad generation"
+    assert len(calls) == 1, "and there must be no bare retry"
+
+
+def test_a_refused_response_format_still_disables_json_mode(monkeypatch):
+    """The other 400 is a fact about the SLOT, and the bare retry is the probe
+    that establishes it. That behaviour is unchanged."""
+    from src.core import llm_client as c
+
+    sidelined = []
+    monkeypatch.setattr(c, "_sideline_json_mode", lambda a: sidelined.append(a))
+    seq = [_json_400("invalid_request_error"), _resp(_GOOD)]
+    seq[1].status_code = 200
+    seq[1].is_success = True
+
+    monkeypatch.setattr(httpx, "post", lambda url, **k: seq.pop(0))
+    c._send_request(_acct("openai/gpt-oss-120b", provider="groq"),
+                    [{"role": "user", "content": "json please"}],
+                    max_tokens=64, json_mode=True)
+    assert len(sidelined) == 1

@@ -166,6 +166,23 @@ def _rate_limit_headers(response: httpx.Response) -> str:
     return ", ".join(f"{k}={v}" for k, v in sorted(interesting.items())) or "no limit headers"
 
 
+# Groq's own machine-readable reason for a 400. The distinction it draws is the
+# one that matters here and cannot be read from the status code.
+_MODEL_OUTPUT_400_CODES = frozenset({"json_validate_failed"})
+
+
+def _error_code(response: httpx.Response) -> str:
+    """The provider's `error.code`, or "" when there isn't one."""
+    try:
+        body = response.json()
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict):
+            return str(err.get("code") or "")
+        return str(body.get("code") or "") if isinstance(body, dict) else ""
+    except Exception:
+        return ""
+
+
 def _parse_retry_after(response: httpx.Response) -> float | None:
     """Extract a backoff hint (seconds) from a 429 response.
 
@@ -323,7 +340,16 @@ def _send_request(acct: LLMAccount, messages: list[dict], max_tokens: int = 1024
     # propagates untouched. Costs one extra request on a rare path — and only once per
     # model, since the sideline is sticky. (The retry isn't charged to the account's
     # token bucket, which is spent per call_llm attempt, not per HTTP request.)
-    if sending_json_mode and response.status_code == 400:
+    # Two different 400s wear the same status code, and treating them alike was
+    # backwards. "The endpoint refuses response_format" is a fact about the SLOT
+    # and retrying bare is the right probe. `json_validate_failed` is a fact about
+    # one GENERATION: the endpoint accepted response_format and the model's own
+    # output failed validation. Stripping the constraint there answers "the model
+    # produced bad JSON" by removing the thing that stops it producing bad JSON —
+    # and Groq logged 8 of these in the seven days to 2026-09-06, each one
+    # disabling json mode for the rest of that run.
+    if (sending_json_mode and response.status_code == 400
+            and _error_code(response) not in _MODEL_OUTPUT_400_CODES):
         bare = {k: v for k, v in payload.items() if k != "response_format"}
         retry = _post(bare)
         if retry.is_success:
