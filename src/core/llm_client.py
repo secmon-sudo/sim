@@ -40,14 +40,15 @@ PROVIDER_ENDPOINTS = {
     # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
     # precondition even though usage stays at 0. Anonymous access is 401.
     "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
-    # SambaNova (2026-09-06, probe only). First-party inference on their own
-    # hardware, OpenAI-compatible, bearer auth. Paid per token — it is in here to
-    # be MEASURED against the quality tier, not because anything routes to it.
+    # SambaNova (2026-09-06). PROBED AND BLOCKED: every model answers HTTP 402
+    # "A payment method is required" until a card is on file. The catalogue is
+    # readable without one — 7 models, which is how Meta-Llama-3.3-70B was
+    # disqualified on its 3,072-token completion ceiling — but no completion is.
     "sambanova": "https://api.sambanova.ai/v1/chat/completions",
-    # Vercel AI Gateway (2026-09-06, probe only). An aggregator in front of 373
-    # models, which is the shape AnyAPI was rejected for: whether it forwards,
-    # normalizes or drops per-model parameters is unknown until probed. Same
-    # OpenAI-compatible surface; the account's $5/month credit is the spend cap.
+    # Vercel AI Gateway (2026-09-06). PROBED AND BLOCKED the same way: HTTP 403
+    # "AI Gateway requires a valid credit card on file", including on the models
+    # its own catalogue prices at $0.00. The $5/month credit is not reachable
+    # without the card, so "free tier" here means free ONCE BILLING EXISTS.
     "vercel": "https://ai-gateway.vercel.sh/v1/chat/completions",
     # Cloudflare Workers AI (2026-09-04). No entry here on purpose: its
     # OpenAI-compatible route is
