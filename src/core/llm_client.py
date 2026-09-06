@@ -40,6 +40,12 @@ PROVIDER_ENDPOINTS = {
     # the gate is `balance > 0`, not `cost <= balance` — so a nonzero balance is a
     # precondition even though usage stays at 0. Anonymous access is 401.
     "pollinations": "https://gen.pollinations.ai/v1/chat/completions",
+    # Aion Labs (2026-09-06). A daily free token allowance with NO CARD required,
+    # which is the property that distinguishes it from the two providers below.
+    # The allowance (~20K tokens/day) is far too small for the quality tier's
+    # ~76K/day, so it is not a cascade candidate — it is sized for exactly one
+    # job, the bulletin's direction extraction at ~13K/day.
+    "aion": "https://api.aionlabs.ai/v1/chat/completions",
     # SambaNova (2026-09-06). PROBED AND BLOCKED: every model answers HTTP 402
     # "A payment method is required" until a card is on file. The catalogue is
     # readable without one — 7 models, which is how Meta-Llama-3.3-70B was

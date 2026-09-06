@@ -109,6 +109,9 @@ _CATALOGUES = {
     # SITREP's 6,000 budget, so it is disqualified by the catalogue alone.
     "sambanova": ("https://api.sambanova.ai/v1/models", "SAMBANOVA_API_KEY"),
     "vercel": ("https://ai-gateway.vercel.sh/v1/models", "VERCEL_AI_API_KEY"),
+    # Aion Labs. The catalogue is the first question here, not the second: the
+    # repo that named this provider gives a base URL and no model ids at all.
+    "aion": ("https://api.aionlabs.ai/v1/models", "AION_API_KEY"),
 }
 
 
@@ -176,6 +179,7 @@ _DEFAULT_KEY_ENV = {
     "cloudflare": "CLOUDFLARE_API_TOKEN",
     "sambanova": "SAMBANOVA_API_KEY",
     "vercel": "VERCEL_AI_API_KEY",
+    "aion": "AION_API_KEY",
 }
 
 

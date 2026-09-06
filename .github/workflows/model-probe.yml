@@ -61,6 +61,7 @@ env:
   # exist so --prose can measure them on the real Turkish SITREP prompt.
   SAMBANOVA_API_KEY:     ${{ secrets.SAMBANOVA_API_KEY }}
   VERCEL_AI_API_KEY:     ${{ secrets.VERCEL_AI_API_KEY }}
+  AION_API_KEY:          ${{ secrets.AION_API_KEY }}
 
 jobs:
   probe:
