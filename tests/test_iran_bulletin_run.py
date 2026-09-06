@@ -59,11 +59,14 @@ def _quiet(monkeypatch):
     monkeypatch.setattr(run, "upload_report_to_r2", lambda *a, **k: "https://r2/x")
     monkeypatch.setattr(run, "send_sitrep_telegram", lambda **k: "msg-1")
     monkeypatch.setattr(run, "build_bulletin_router", lambda: object())
+    # The narrative rides the QUALITY cascade, not the direction router — see
+    # run_iran_bulletin. Patched here so the test never builds a real one.
+    monkeypatch.setattr(run, "build_quality_router", lambda: object())
 
 
 class TestRun:
     def test_an_empty_window_dispatches_nothing(self, monkeypatch, _quiet):
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: {
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: {
             "status": "empty", "events": [], "sections": ib.group_into_sections([]),
             "narrative": ""})
 
@@ -77,7 +80,7 @@ class TestRun:
         assert conn.inserted, "an empty run is still a run and must be recorded"
 
     def test_a_completed_run_reports_its_section_split(self, monkeypatch, _quiet):
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result(2, 3, 1))
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result(2, 3, 1))
         out = run.run_iran_bulletin(_Conn())
         assert out["events"] == 6
         assert out["sections"][ib.SECTION_TITLES[ib.SECTION_ON_IRAN]] == 2
@@ -85,7 +88,7 @@ class TestRun:
         assert out["sections"][ib.SECTION_TITLES[ib.SECTION_REGIONAL]] == 1
 
     def test_a_telegram_outage_does_not_fail_the_run(self, monkeypatch, _quiet):
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
 
         def _boom(**k):
             raise RuntimeError("telegram down")
@@ -98,7 +101,7 @@ class TestRun:
 
     def test_an_r2_outage_still_dispatches(self, monkeypatch, _quiet):
         sent = {}
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
 
         def _boom(*a, **k):
             raise RuntimeError("r2 down")
@@ -116,7 +119,7 @@ class TestRun:
         unset. That host does not resolve, so the card would carry a link that
         fails on SSL — which is exactly what the 4 Sep bulletin shipped."""
         sent = {}
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
         monkeypatch.setattr(
             run, "upload_report_to_r2",
             lambda *a, **k: "https://pub-default.r2.dev/iran_bulletin_20260904.html")
@@ -129,7 +132,7 @@ class TestRun:
 
     def test_a_real_r2_link_is_passed_through(self, monkeypatch, _quiet):
         sent = {}
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
         monkeypatch.setattr(run, "send_sitrep_telegram",
                             lambda **k: sent.update(k) or "msg-1")
         run.run_iran_bulletin(_Conn())
@@ -138,7 +141,7 @@ class TestRun:
     def test_a_storage_outage_does_not_lose_a_dispatched_report(
             self, monkeypatch, _quiet):
         """_save swallows: the report is already in someone's hands."""
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
         out = run.run_iran_bulletin(_Conn(fail_on_insert=True))
         assert out["success"] is True
 
@@ -238,7 +241,7 @@ class TestReportIdentity:
         """Iran gets its own SITREP the same morning into the same chat; the
         second file to arrive would overwrite the first on the reader's phone."""
         sent = {}
-        monkeypatch.setattr(run, "build_bulletin", lambda *a: _result())
+        monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
         monkeypatch.setattr(run, "send_sitrep_telegram",
                             lambda **k: sent.update(k) or "m")
         run.run_iran_bulletin(_Conn())
@@ -292,3 +295,51 @@ class TestGroupedAppendix:
         positions = [html.index(_esc(ib.SECTION_TITLES[k])) for k in
                      (ib.SECTION_ON_IRAN, ib.SECTION_FROM_IRAN, ib.SECTION_REGIONAL)]
         assert positions == sorted(positions)
+
+
+class TestRouterSeparation:
+    """Conflating these two cost the 6 Sep bulletin entirely.
+
+    Narrowing the direction slots to one Groq model on 5 Sep also handed Groq's
+    per-request size ceiling the NARRATIVE, which sends the whole day — 11,064
+    tokens that morning — and Groq refused it. The report did not publish.
+    """
+
+    def test_the_narrative_gets_the_quality_cascade(self, monkeypatch, _quiet):
+        seen = {}
+        direction = object()
+        quality = object()
+        monkeypatch.setattr(run, "build_bulletin_router", lambda: direction)
+        monkeypatch.setattr(run, "build_quality_router", lambda: quality)
+
+        def _capture(db, router, *a, **k):
+            seen["direction"] = router
+            seen["narrative"] = k.get("narrative_router")
+            return _result()
+
+        monkeypatch.setattr(run, "build_bulletin", _capture)
+        run.run_iran_bulletin(_Conn())
+        assert seen["direction"] is direction
+        assert seen["narrative"] is quality
+
+    def test_build_bulletin_falls_back_to_one_router(self, monkeypatch):
+        """Every existing caller passes a single router; the split must not make
+        narrative_router mandatory."""
+        from src.services import iran_bulletin as ib
+
+        used = []
+        monkeypatch.setattr(ib, "fetch_theatre_events", lambda *a: [
+            {"title": "t", "country_iso": "IR", "actor": ib.US_SIDE,
+             "target": ib.IRAN_SIDE, "standing": ib.STANDING_CONFIRMED,
+             "severity": 90, "domain": "d.com", "corroborating_sources": []}])
+        monkeypatch.setattr(ib, "extract_direction", lambda r, e, **k: e)
+        monkeypatch.setattr(ib, "log_llm_telemetry", lambda *a, **k: None)
+        monkeypatch.setattr(ib, "call_llm",
+                            lambda **k: used.append(k["router"]) or
+                            {"content": "BAŞLIK\nmetin", "model": "m"})
+        from datetime import datetime, timezone
+        only = object()
+        ib.build_bulletin(None, only,
+                          datetime(2026, 9, 6, tzinfo=timezone.utc),
+                          datetime(2026, 9, 7, tzinfo=timezone.utc))
+        assert used == [only]

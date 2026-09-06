@@ -23,7 +23,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from src.core import counters
-from src.core.llm_router import LLMRouter, build_bulletin_router
+from src.core.llm_router import (
+    LLMRouter,
+    build_bulletin_router,
+    build_quality_router,
+)
 from src.pipeline.weekly_forecast import upload_report_to_r2
 from src.services.iran_bulletin import (
     SECTION_FROM_IRAN,
@@ -140,15 +144,27 @@ def run_iran_bulletin(db_conn, router: Optional[LLMRouter] = None,
     window_end = datetime.now(timezone.utc).replace(tzinfo=None)
     window_start = window_end - timedelta(hours=window_hours)
 
-    # Direction extraction has its own measured router; the narrative rides the
-    # same one rather than the quality cascade, because the bulletin's prose is a
-    # structured account of supplied facts, not the free narration the quality
-    # slots exist for — and because those slots are already saturated by five
-    # country SITREPs at the same hour (measured 3 Sep: Mistral 429 on the fifth).
+    # Two routers, because they are two different jobs.
+    #
+    # Direction extraction gets the slots measured for direction accuracy, in
+    # small batches. The narrative gets the QUALITY cascade — it is prose, it
+    # sends the whole day (11,064 tokens on 6 Sep), and Groq's per-request size
+    # ceiling refuses that outright.
+    #
+    # The narrative used to ride the direction router, on the reasoning that the
+    # quality slots were "already saturated by five country SITREPs at the same
+    # hour (measured 3 Sep: Mistral 429 on the fifth)". Both halves of that have
+    # expired: Mistral is gone from the cascade entirely, its replacement is a
+    # paid slot with room, and the SITREP finishes at 07:32 against this run's
+    # 08:00. What the old arrangement did instead was couple the two, so
+    # narrowing the direction slots to one Groq model on 5 Sep also handed Groq's
+    # size ceiling the narrative — and the 6 Sep bulletin did not publish at all.
     router = router or build_bulletin_router()
+    narrative_router = build_quality_router()
 
     try:
-        result = build_bulletin(db_conn, router, window_start, window_end)
+        result = build_bulletin(db_conn, router, window_start, window_end,
+                                narrative_router=narrative_router)
     except Exception as exc:
         logger.exception("Iran bulletin failed")
         _save(db_conn, window_start, window_end, "failed", error=str(exc)[:500])

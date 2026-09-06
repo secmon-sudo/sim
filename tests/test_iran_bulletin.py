@@ -242,7 +242,7 @@ class TestBulletinRouter:
         # assert a direction the text does not carry; gemini-3.5-flash-lite
         # (removed 5 Sep) returns short replies whose missing items silently
         # become "unattributed" — 51 of 73 events in one live bulletin.
-        assert models == ["qwen/qwen3.8-27b"]
+        assert models == ["qwen/qwen3.8-27b", "gemini-3.5-flash-lite"]
 
     def test_no_measured_key_yields_an_empty_router_not_a_fallback(self, monkeypatch):
         """An absent slot leaves events unattributed and the bulletin says so;
@@ -580,3 +580,12 @@ class TestShortReplyIsCounted:
         OUTPUT tokens per minute before it runs. max_tokens is 50*batch + 512, so
         12 asked for 1,112 and the primary slot could not serve one batch."""
         assert 50 * ib.DIRECTION_BATCH_SIZE + 512 < 1000
+
+
+def test_direction_has_more_than_one_slot():
+    """6 Sep: the list was narrowed to one model the day before, qwen hit its
+    rate limit, every batch raised LLMAllThrottled and the bulletin failed
+    outright. Below two slots there is no availability, whatever the accuracy."""
+    from src.core.llm_router import BULLETIN_MEASURED_MODELS
+
+    assert len(BULLETIN_MEASURED_MODELS) >= 2

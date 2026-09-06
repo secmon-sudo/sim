@@ -42,7 +42,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.core import counters
 from src.core.llm_client import call_llm, log_llm_telemetry
@@ -555,11 +555,23 @@ def narrative_is_usable(text: str) -> bool:
 
 
 def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
-                   window_end: datetime, max_tokens: int = 6000) -> Dict[str, Any]:
+                   window_end: datetime, max_tokens: int = 6000,
+                   narrative_router: Optional[LLMRouter] = None) -> Dict[str, Any]:
     """Fetch, attribute, group and narrate the theatre bulletin.
 
     Returns the narrative plus the grouped sections, so the caller can render and
     dispatch without re-deriving either.
+
+    Two routers, because these are two different jobs and conflating them cost
+    the 6 Sep bulletin entirely. Direction extraction wants slots MEASURED for
+    direction accuracy and sends small batches; the narrative wants prose and
+    sends the whole day — 11,064 tokens that morning. Running both on the
+    direction router meant that narrowing the direction slots to one Groq model
+    also handed Groq's per-request size ceiling the narrative, which it refused,
+    and the report did not publish at all.
+
+    ``narrative_router`` falls back to ``router`` so every existing caller and
+    test keeps working; production passes the quality cascade.
     """
     events = fetch_theatre_events(db_conn, window_start, window_end)
     if not events:
@@ -592,7 +604,7 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
     )
 
     result = call_llm(
-        router=router,
+        router=narrative_router or router,
         prompt=_narrative_prompt(sections, window_start, window_end),
         system_prompt=_NARRATIVE_SYSTEM_PROMPT,
         max_tokens=max_tokens,

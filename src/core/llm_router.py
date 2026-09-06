@@ -558,11 +558,22 @@ def build_llm_router() -> LLMRouter:
 # tokens where twelve items need about 600) and every item it omits takes the
 # unattributed default, so the failure is invisible in the report.
 #
-# That leaves one slot. Deliberately: a second slot whose answer is "unattributed"
-# is worse than no second slot, because extraction failing outright is visible in
-# the counters while this was not.
+# gemini-3.5-flash-lite RESTORED 2026-09-06, provisionally, and the reason the
+# previous paragraph was wrong is worth keeping. It ended "that leaves one slot,
+# deliberately: a second slot whose answer is unattributed is worse than no
+# second slot". One slot turned out to be worse than both: qwen hit its rate
+# limit the next morning, every batch raised LLMAllThrottled, and the bulletin
+# failed outright. Availability is not a nice-to-have below two.
+#
+# The restoration is a hypothesis with a guard, not a reversal. Its measured
+# failure was a LENGTH one — 442 completion tokens where twelve items needed
+# about 600 — and the batch is 8 now rather than 12, needing roughly 400. If that
+# reading is wrong, output_health.check_bulletin_attribution pages the moment the
+# unattributed share crosses 50%, which is how the original collapse was found
+# within a morning. Check tomorrow's share before treating this as settled.
 BULLETIN_MEASURED_MODELS = (
     "qwen/qwen3.8-27b",
+    "gemini-3.5-flash-lite",
 )
 
 
