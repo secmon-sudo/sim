@@ -355,6 +355,86 @@ class TestPageDeduplication:
         assert dm._unreported_findings(None, [], 20.0) == []
 
 
+class TestThePageIsRecoverableAfterTheFact:
+    """The record used to hold {"keys": [...]} and nothing else.
+
+    On 2026-09-06 a health page fired with TELEGRAM_OPS_CHAT_ID unset, so it went to
+    the user-facing channel; the only thing that survived in the database was that
+    `bulletin_unattributed` had fired, never what it said. The numbers are what make
+    a health record worth keeping — they are the only way to see a finding getting
+    worse rather than merely recurring.
+    """
+
+    class _Conn:
+        def __init__(self):
+            self.inserted = None
+
+        def execute(self, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                self.inserted = params
+
+            class _Res:
+                def fetchone(self_inner):
+                    return None
+            return _Res()
+
+        def commit(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _run(self, findings):
+        import json
+        from unittest.mock import patch
+
+        import scripts.deadman_check as dm
+
+        conn = self._Conn()
+        with patch.object(dm.psycopg, "connect", return_value=conn), \
+             patch.object(dm, "run_checks", return_value=findings), \
+             patch.object(dm, "send_ops_alert", return_value=True) as send:
+            paged = dm.check_output_health("postgres://x", 24.0)
+        return paged, json.loads(conn.inserted[1]), send
+
+    def test_the_finding_text_is_stored_beside_the_keys(self):
+        paged, record, _ = self._run([
+            oh.Finding("sitrep_no_citations", "3 SITREP(s) with no working link",
+                       "IR, LB, ID"),
+        ])
+        assert paged is True
+        assert record["keys"] == ["sitrep_no_citations"]
+        assert record["findings"] == [{
+            "key": "sitrep_no_citations",
+            "message": "3 SITREP(s) with no working link",
+            "detail": "IR, LB, ID",
+        }]
+
+    def test_the_dedupe_reader_still_only_needs_keys(self):
+        # The enriched record must stay readable by _unreported_findings, which keys
+        # on `keys` alone — otherwise every page would repeat an hour later.
+        import scripts.deadman_check as dm
+
+        _, record, _ = self._run([oh.Finding("k", "m", "d")])
+
+        class _Res:
+            def fetchone(self):
+                return (record,)
+
+        class _C:
+            def execute(self, *a, **k):
+                return _Res()
+
+        assert dm._unreported_findings(_C(), [oh.Finding("k", "m")], 20.0) == []
+
+    def test_the_page_still_goes_out(self):
+        _, _, send = self._run([oh.Finding("k", "m")])
+        assert send.called
+
+
 class TestOpsChannelSeparation:
     """The first health page landed in the channel real users read, in front of
     them, saying "minimax-m2.7" and "llm_contract_rejected=1". Engineering

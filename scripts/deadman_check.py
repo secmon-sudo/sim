@@ -253,11 +253,23 @@ def check_output_health(db_url: str, window_hours: float,
         # The record of what was paged is written BEFORE the send, and covers the
         # whole set rather than only what was sent. A Telegram outage must not
         # turn into a repeat page an hour later.
+        # `keys` stays exactly as _unreported_findings reads it. `findings` is added
+        # beside it because the numbers only ever existed in the Telegram message: on
+        # 2026-09-06 a page went to the wrong channel (TELEGRAM_OPS_CHAT_ID unset) and
+        # all that survived was {"keys": ["bulletin_unattributed"]} — that a check
+        # fired, never what it said. A health record you cannot read back is a health
+        # record that cannot show a trend, and the trend is the reason to keep one.
         try:
             conn.execute(
                 "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",
                 (OUTPUT_HEALTH_EVENT,
-                 json.dumps({"keys": sorted({f.key for f in findings})})),
+                 json.dumps({
+                     "keys": sorted({f.key for f in findings}),
+                     "findings": [
+                         {"key": f.key, "message": f.message, "detail": f.detail}
+                         for f in findings
+                     ],
+                 })),
             )
             conn.commit()
         except Exception:
