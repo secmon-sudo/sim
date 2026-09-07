@@ -56,7 +56,6 @@ env:
   # On 2026-09-06 the bulletin was re-dispatched three times while a bug was
   # being fixed and the first two were the broken ones.
   SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
-  TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
   R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}

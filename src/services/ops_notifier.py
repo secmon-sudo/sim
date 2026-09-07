@@ -12,14 +12,20 @@ Design rules:
     ping must not mask the original problem.
   - No retry/backoff machinery. If the one POST fails, we log and move on — a
     health ping that hangs is worse than one that is occasionally missed.
-  - Posts to TELEGRAM_OPS_CHAT_ID, falling back to the alert channel only when
-    that is unset. This module used to say a separate ops channel "isn't worth
-    the config", and that was true while ops pings meant "the pipeline crashed" —
-    a few a month. On 2026-09-04 they became regular: hourly output-health checks
-    and a weekly slot regression. The first health page duly landed in the
-    channel real users read, in front of them, saying "minimax-m2.7" and
-    "llm_contract_rejected=1". Engineering diagnostics and user-facing alerts are
-    different audiences and now have different chats.
+  - Posts to the alert channel. There is one chat, on purpose.
+
+    This module carried a TELEGRAM_OPS_CHAT_ID for three days. It was added on
+    2026-09-04, when ops pings went from "the pipeline crashed" a few times a
+    month to hourly output-health checks and a weekly slot regression, and the
+    first health page landed in the channel real users read saying "minimax-m2.7"
+    and "llm_contract_rejected=1". The argument was that engineering diagnostics
+    and user-facing alerts are different audiences.
+
+    The secret was never set, so for those three days every page went to the alert
+    channel anyway — with a warning saying it should not have. On 2026-09-07 the
+    operator decided not to run a second chat. That makes the alert channel the
+    ops channel by decision rather than by omission, and a warning about a settled
+    decision is noise that teaches people to skip warnings.
 """
 
 import html
@@ -37,17 +43,7 @@ def send_ops_alert(text: str, *, title: str = "SIM PIPELINE HEALTH") -> bool:
     `text` is treated as plain text and HTML-escaped; `title` becomes a bold header.
     """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    # The fallback is deliberate rather than lazy: losing a page about a dead
-    # pipeline is worse than showing one to a reader. But it warns every time,
-    # because the fallback IS the problem it is protecting against.
-    chat_id = os.environ.get("TELEGRAM_OPS_CHAT_ID")
-    if not chat_id:
-        chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
-        if chat_id:
-            logger.warning(
-                "TELEGRAM_OPS_CHAT_ID is not set — sending an engineering page to "
-                "the USER-FACING alert channel. Set it to a private ops chat."
-            )
+    chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
     if not bot_token or not chat_id:
         logger.warning("Ops alert skipped: missing TELEGRAM_BOT_TOKEN or a chat id")
         return False

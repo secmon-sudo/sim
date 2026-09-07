@@ -75,7 +75,6 @@ env:
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
   # See iran-bulletin.yml: a test re-run publishes to real readers.
   SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
-  TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
   R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}

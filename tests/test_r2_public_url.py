@@ -53,6 +53,18 @@ class TestUploadReportToR2:
             url = wf.upload_report_to_r2("a.html", b"x", "text/html")
         assert url is None or "pub-default.r2.dev" not in url
 
+    def test_the_private_archive_notice_is_said_once_not_per_upload(self, _r2_creds,
+                                                                    monkeypatch, caplog):
+        """A SITREP run uploads six files. Six identical lines an hour about a
+        settled decision is how a log stops being read."""
+        monkeypatch.setattr(wf, "_ANNOUNCED_PRIVATE_ARCHIVE", False)
+        with caplog.at_level("INFO"), patch.object(wf.boto3, "client",
+                                                   return_value=MagicMock()):
+            for i in range(6):
+                wf.upload_report_to_r2(f"a{i}.html", b"x", "text/html")
+        said = [r for r in caplog.records if "private archive" in r.message]
+        assert len(said) == 1
+
     def test_missing_credentials_still_return_none(self, monkeypatch):
         monkeypatch.delenv("R2_ACCOUNT_ID", raising=False)
         monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)

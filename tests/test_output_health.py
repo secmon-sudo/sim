@@ -402,9 +402,9 @@ class TestPageDeduplication:
 class TestThePageIsRecoverableAfterTheFact:
     """The record used to hold {"keys": [...]} and nothing else.
 
-    On 2026-09-06 a health page fired with TELEGRAM_OPS_CHAT_ID unset, so it went to
-    the user-facing channel; the only thing that survived in the database was that
-    `bulletin_unattributed` had fired, never what it said. The numbers are what make
+    On 2026-09-06 a health page fired with three findings and the only thing that
+    survived in the database was that `bulletin_unattributed` had fired, never what
+    it said. The numbers are what make
     a health record worth keeping — they are the only way to see a finding getting
     worse rather than merely recurring.
     """
@@ -505,25 +505,24 @@ class TestOpsChannelSeparation:
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
         return ops_notifier, captured
 
-    def test_the_ops_chat_is_preferred(self, monkeypatch):
+    def test_the_page_goes_to_the_alert_channel(self, monkeypatch):
         notifier, sent = self._sent(monkeypatch)
-        monkeypatch.setenv("TELEGRAM_OPS_CHAT_ID", "-100OPS")
         monkeypatch.setenv("TELEGRAM_ALERTS_CHAT_ID", "-100USERS")
         notifier.send_ops_alert("bir şey")
-        assert sent["chat_id"] == "-100OPS"
+        assert sent["chat_id"] == "-100USERS"
 
-    def test_it_falls_back_rather_than_losing_a_page(self, monkeypatch):
-        """Losing a page about a dead pipeline is worse than showing one to a
-        reader — but the fallback warns every time, because it IS the problem."""
+    def test_a_stale_ops_chat_id_in_the_environment_is_ignored(self, monkeypatch):
+        """The second chat was removed on 2026-09-07, deliberately. An env var
+        left behind on some machine must not quietly resurrect it and start
+        sending pages somewhere nobody is reading."""
         notifier, sent = self._sent(monkeypatch)
-        monkeypatch.delenv("TELEGRAM_OPS_CHAT_ID", raising=False)
+        monkeypatch.setenv("TELEGRAM_OPS_CHAT_ID", "-100OPS")
         monkeypatch.setenv("TELEGRAM_ALERTS_CHAT_ID", "-100USERS")
         notifier.send_ops_alert("bir şey")
         assert sent["chat_id"] == "-100USERS"
 
     def test_no_chat_at_all_sends_nothing(self, monkeypatch):
         notifier, sent = self._sent(monkeypatch)
-        monkeypatch.delenv("TELEGRAM_OPS_CHAT_ID", raising=False)
         monkeypatch.delenv("TELEGRAM_ALERTS_CHAT_ID", raising=False)
         assert notifier.send_ops_alert("bir şey") is False
         assert not sent

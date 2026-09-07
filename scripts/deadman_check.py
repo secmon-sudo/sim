@@ -255,10 +255,10 @@ def check_output_health(db_url: str, window_hours: float,
         # turn into a repeat page an hour later.
         # `keys` stays exactly as _unreported_findings reads it. `findings` is added
         # beside it because the numbers only ever existed in the Telegram message: on
-        # 2026-09-06 a page went to the wrong channel (TELEGRAM_OPS_CHAT_ID unset) and
-        # all that survived was {"keys": ["bulletin_unattributed"]} — that a check
-        # fired, never what it said. A health record you cannot read back is a health
-        # record that cannot show a trend, and the trend is the reason to keep one.
+        # 2026-09-06 a page fired with three findings and all that survived here was
+        # {"keys": ["bulletin_unattributed"]} — that a check fired, never what it
+        # said. A health record you cannot read back is a health record that cannot
+        # show a trend, and the trend is the reason to keep one.
         try:
             conn.execute(
                 "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",

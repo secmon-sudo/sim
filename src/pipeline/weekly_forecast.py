@@ -68,6 +68,10 @@ def get_country_name(db_conn, country_iso: str) -> str:
         return country_iso.upper()
 
 
+# Set once the private-archive notice has been logged. See upload_report_to_r2.
+_ANNOUNCED_PRIVATE_ARCHIVE = False
+
+
 def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Optional[str]:
     """Upload a report to R2 and return its PUBLIC URL, or None when it has none.
 
@@ -86,6 +90,12 @@ def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Opt
 
     A sentinel every consumer must remember is a defect waiting for the next
     consumer. Returning None puts the decision where the knowledge is.
+
+    On 2026-09-07 the operator decided not to publish a public base at all: the
+    bucket is a private archive and the reports reach people as Telegram documents.
+    So None is the normal answer here, not a fault — which is why the no-base branch
+    says so once per process instead of warning on every upload. Setting
+    R2_PUBLIC_URL_BASE still works and still turns the links on.
     """
     account_id = os.environ.get("R2_ACCOUNT_ID")
     access_key = os.environ.get("R2_ACCESS_KEY_ID")
@@ -114,13 +124,17 @@ def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Opt
             ContentType=content_type
         )
         if not public_url_base:
-            # The object exists; nobody can reach it. Warned rather than silent,
-            # because "the archive is unreachable" is a config fact worth seeing.
-            logger.warning(
-                "Uploaded %s to R2 bucket %s, but R2_PUBLIC_URL_BASE is not set — "
-                "the file has no public URL, so no link will be published",
-                filename, bucket_name,
-            )
+            # The object exists; it has no public address, by decision. Said once
+            # per process rather than per upload: a SITREP run uploads six files,
+            # and a line repeated six times an hour about a settled choice is how a
+            # log stops being read.
+            global _ANNOUNCED_PRIVATE_ARCHIVE
+            if not _ANNOUNCED_PRIVATE_ARCHIVE:
+                _ANNOUNCED_PRIVATE_ARCHIVE = True
+                logger.info(
+                    "R2 bucket %s is a private archive (R2_PUBLIC_URL_BASE unset); "
+                    "files are uploaded, no public links are published", bucket_name,
+                )
             return None
         url = f"{public_url_base.rstrip('/')}/{filename}"
         logger.info("Uploaded %s to R2. Public URL: %s", filename, url)
