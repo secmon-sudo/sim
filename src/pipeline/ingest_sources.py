@@ -373,6 +373,27 @@ def _parse_feed_lenient(text: str, now_utc: datetime, max_age: float, stats: dic
     return items
 
 
+def _record_feed_failure(url: str, stats: dict | None) -> None:
+    """Count an unreachable feed by host, so a dead source is visible in telemetry.
+
+    The bot-protection branch already logs "drop the source if this persists", but
+    nothing measured persistence: insightcrime.org answered 403 on 16 of 16 production
+    runs between 2026-08-29 and 2026-09-07 and the only evidence was a warning line
+    somebody had to read. A per-host count in the Pass A stats makes a feed that has
+    stopped working as visible as one that never existed.
+
+    Keyed by host rather than URL because the Google News queries share one — a run
+    where that host fails 40 times is an outage, and it should read as one number.
+    """
+    if stats is None:
+        return
+    from urllib.parse import urlparse
+
+    host = urlparse(url).netloc or url[:40]
+    failures = stats.setdefault("feeds_unreachable", {})
+    failures[host] = failures.get(host, 0) + 1
+
+
 def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | None = None) -> list[dict]:
     """Fetch and parse an RSS or Atom feed. Returns items with parsed pub_date."""
     import xml.etree.ElementTree as ET
@@ -394,9 +415,11 @@ def fetch_rss_feed(query_info: dict, is_direct_url: bool = False, stats: dict | 
         resp = _http_get_with_retry(url, headers=headers, timeout=15.0, max_retries=2, backoff_base=2.0)
         if resp is None:
             logger.warning("RSS fetch failed for: %s", url[:80])
+            _record_feed_failure(url, stats)
             return []
     except Exception:
         logger.warning("RSS fetch failed for: %s", url[:80])
+        _record_feed_failure(url, stats)
         return []
 
     items = []
