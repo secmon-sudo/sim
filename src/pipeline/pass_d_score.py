@@ -331,6 +331,32 @@ def compute_confidence(llm_confidence: float, anchor_confidence: float, diversit
     return max(0.0, min(1.0, round(raw, 3)))
 
 
+def source_credibility_multiplier(domain: str | None) -> float:
+    """Confidence weighting for a publisher, matching subdomains to their parent.
+
+    Extracted from score_single_event so Pass E can weight a recomputed confidence the
+    same way. Pass E re-derives severity and confidence after an anchor upgrade and
+    overwrites the stored values with them, so any step it skips is not a missing
+    refinement — it is a different number written over Pass D's.
+
+    NOT core.source_credibility.get_source_credibility, which answers the same question
+    for a different purpose: it returns DEFAULT_CREDIBILITY (0.6) for a domain it does
+    not know, because the forecast and flash paths score a publisher's trustworthiness.
+    Here the value MULTIPLIES a confidence that was computed on other evidence, so an
+    unrecognised domain has to be neutral (1.0) rather than a 40% penalty for absence
+    from a hand-written list.
+    """
+    if not domain:
+        return 1.0
+    domain = domain.lower()
+    if domain in SOURCE_CREDIBILITY:
+        return SOURCE_CREDIBILITY[domain]
+    for parent_domain, score in SOURCE_CREDIBILITY.items():
+        if domain.endswith("." + parent_domain):
+            return score
+    return 1.0
+
+
 def compute_diversity_score(db_conn, storyline_id: str | None) -> float:
     """Compute source diversity score based on unique domains covering this storyline.
 
@@ -973,18 +999,8 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         system_conf = compute_confidence(llm_conf, anchor["confidence"], diversity)
 
         # Apply source credibility weighting
-        credibility_multiplier = 1.0
-        domain = event.get("source_domain")
-        if domain:
-            domain = domain.lower()
-            if domain in SOURCE_CREDIBILITY:
-                credibility_multiplier = SOURCE_CREDIBILITY[domain]
-            else:
-                for parent_domain, score in SOURCE_CREDIBILITY.items():
-                    if domain.endswith("." + parent_domain):
-                        credibility_multiplier = score
-                        break
-        system_conf = float(system_conf * credibility_multiplier)
+        system_conf = float(system_conf * source_credibility_multiplier(
+            event.get("source_domain")))
 
         # 5. Evaluate alert tier
         alert_data = {

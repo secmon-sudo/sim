@@ -4,18 +4,32 @@ Blueprint V20.1 §4 PASS E
 
 Strictly NO LLM. Re-evaluates anchors on concatenated text,
 clears Top-10 arrays on anchor upgrade, and recalculates scores.
+
+An upgrade rewrites severity, confidence and alert_tier, which means Pass E has to
+recompute them with the SAME recipe Pass D used. It did not: it skipped the casualty
+and aviation contributions to severity, the diversity and credibility weights on
+confidence, and — the one that changed pages — four of the twelve fields the tier gates
+read. Measured over the 17 production runs to 2026-09-07, 13 of 55 escalations were
+that gap alone: articles Pass D had already refused to page as commentary or followup,
+handed the tier back because report_kind never reached the gate.
 """
 
 import json
 import logging
 
-from src.core.alerts import evaluate_alert_tier, tier_rank
+from src.core.alerts import evaluate_alert_tier_verbose, tier_rank
 from src.core.anchor import get_anchor_confidence_level, normalize_anchor
 from src.pipeline.pass_d_score import (
+    MAX_SEVERITY,
     _safe_float,
+    apply_planned_closure_downrank,
     apply_safety_downrank,
+    compute_aviation_bonus,
     compute_confidence,
+    compute_diversity_score,
     compute_severity,
+    dispatch_alert,
+    source_credibility_multiplier,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,28 +64,32 @@ def _anchor_country(db_conn, iata_code: str) -> str | None:
     return row[0] if row and row[0] else None
 
 
-def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
+def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool, str | None]:
     """
     Reconcile a single scored event.
 
     1. Re-evaluate anchor using concatenated text from all storyline events
     2. If anchor upgraded, recalculate severity and confidence
-    3. Mark as reconciled
+    3. Dispatch when the upgrade RAISES the tier
+    4. Mark as reconciled
 
-    Returns True if event was reconciled.
+    Returns (reconciled, anchor_upgraded, dispatch_result). dispatch_result is None
+    unless the tier rose, in which case it is dispatch_alert's own verdict.
     """
     try:
         row = db_conn.execute(
             """SELECT id, event_type, anchor_name_raw, anchor_name_norm,
                       anchor_confidence, storyline_id, storyline_hint,
                       llm_parsed_output, severity_score, system_confidence,
-                      alert_tier, source_title
+                      alert_tier, source_title, country_iso, source_url,
+                      source_domain, occurred_at_est, ingested_at,
+                      published_at, date_verified, corroborating_sources
                FROM events WHERE id = %s AND status = 'scored'""",
             (event_id,),
         ).fetchone()
 
         if not row:
-            return False, False
+            return False, False, None
 
         event_id = str(row[0])
         event_type = row[1]
@@ -84,6 +102,29 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
         # Needed by the aftermath gate in evaluate_alert_tier — without it an anchor
         # upgrade would re-promote a roundup that Pass D correctly refused to page.
         source_title = row[11]
+
+        # The same event dict Pass D built, for the same three consumers: the aviation
+        # bonus reads the headline and hint, the tier gates read article shape and date
+        # provenance, and dispatch_alert reads the notification fields. Assembling it
+        # here rather than passing bare columns is what keeps the two passes honest —
+        # a field Pass D adds to the gate is one Pass E cannot silently omit.
+        event = {
+            "id": event_id,
+            "event_type": event_type,
+            "anchor_name_raw": raw_anchor,
+            "country_iso": row[12],
+            "llm_parsed": llm_parsed,
+            "storyline_hint": row[6],
+            "storyline_id": str(storyline_id) if storyline_id else None,
+            "occurred_at_est": row[15],
+            "occurred_at_is_fallback": row[15] is None,
+            "ingested_at": row[16],
+            "source_title": source_title,
+            "source_url": row[13],
+            "source_domain": row[14],
+            "date_verified": bool(row[18]),
+            "corroborating_sources": row[19],
+        }
 
         # 1. Gather each sibling's location text as a SEPARATE candidate.
         #
@@ -156,14 +197,26 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
                 except Exception:
                     pass
 
-                # Recalculate severity (keep safety de-prioritization consistent)
+                # Recompute severity with Pass D's full chain. Passing llm_parsed is
+                # what restores the casualty bonus; the aviation bonus and the planned
+                # closure cap were missing outright. Every one of them was a term Pass D
+                # had already applied and Pass E then overwrote with a number computed
+                # without it — an anchor upgrade could LOWER a stored severity.
                 anchor_data = {"confidence": new_conf, "czib_flag": czib}
-                new_severity = compute_severity(event_type, anchor_data, db_conn)
+                new_severity = compute_severity(event_type, anchor_data, db_conn, llm_parsed)
+                new_severity = min(new_severity + compute_aviation_bonus(event, anchor_data),
+                                   MAX_SEVERITY)
+                new_severity = apply_planned_closure_downrank(event_type, new_severity,
+                                                             llm_parsed)
                 new_severity, is_safety = apply_safety_downrank(event_type, new_severity, llm_parsed)
 
-                # Recalculate confidence
+                # ...and the same for confidence: source diversity and publisher
+                # credibility are both inputs Pass D weights and Pass E dropped.
                 llm_conf = _safe_float(llm_parsed.get("confidence", 0.5))
-                new_system_conf = compute_confidence(llm_conf, new_conf)
+                diversity = compute_diversity_score(db_conn, storyline_id)
+                new_system_conf = compute_confidence(llm_conf, new_conf, diversity)
+                new_system_conf = float(new_system_conf * source_credibility_multiplier(
+                    event.get("source_domain")))
 
                 # Re-evaluate the alert tier against the values we just rewrote.
                 # Without this the row kept a tier derived from the PRE-upgrade
@@ -172,7 +225,7 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
                 # observed run. It matters more now that resolving a location is
                 # itself a tier gate: an upgrade is exactly the event that turns an
                 # unlocated event into a located one.
-                new_tier = evaluate_alert_tier({
+                new_tier, veto = evaluate_alert_tier_verbose({
                     "severity_score": new_severity,
                     "system_confidence": new_system_conf,
                     "anchor_confidence": new_level,
@@ -181,7 +234,19 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
                     "anchor_name_norm": new_norm,
                     "latitude": lat,
                     "source_title": source_title,
+                    # The four fields this dict used to be missing. report_kind is the
+                    # one that cost pages: 13 of 55 escalations over the 17 runs to
+                    # 2026-09-07 were commentary or followup articles that Pass D had
+                    # vetoed and Pass E promoted back, because an absent report_kind
+                    # reads as new_incident by design (the gate fails open).
+                    "report_kind": llm_parsed.get("report_kind"),
+                    "date_verified": event["date_verified"],
+                    "published_at": row[17],
+                    "corroborating_sources": event["corroborating_sources"],
                 })
+                if veto:
+                    logger.info("Pass E tier vetoed for event %s after upgrade: %s",
+                                event_id[:8], veto)
 
                 # Update with upgraded anchor
                 with db_conn.transaction():
@@ -204,18 +269,38 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
                     )
                 db_conn.commit()
 
-                # An upgrade that RAISES the tier is a real escalation that Pass D
-                # already declined to page. Pass E deliberately does not dispatch —
-                # suppression/escalation state lives in Pass D — so surface it loudly
-                # instead of deciding silently. This path has never executed in
-                # production; if it starts to, the log is the signal to wire paging.
+                # An upgrade that RAISES the tier is a real escalation. This used to
+                # log and stop, on the reasoning that suppression state lives in Pass D
+                # — but the state lives in the alert_suppression TABLE, and dispatch_alert
+                # is the function that reads it, so calling it here reuses the same
+                # ledger rather than opening a second one. The path is no longer
+                # theoretical: over the 17 runs to 2026-09-07 it fired 55 times, 42 of
+                # them genuine once the gates above see their full inputs, 17 of those
+                # ALERT→CRITICAL — refinery strikes and airport closures that reached
+                # the SITREP while nobody was paged.
+                #
+                # Volume is the suppression keys' problem, which is what they are for:
+                # a claim already at or above the new tier mutes the card, so a storyline
+                # that merely re-resolves its anchor across six reports pages once.
+                # No dup_adjudicator is passed — Pass E is strictly NO LLM — which means
+                # a fragmented storyline can still reach a second card; that is the
+                # direction this pass is allowed to be wrong in.
+                dispatch_result = None
                 if tier_rank(new_tier) > tier_rank(current_tier):
-                    logger.warning(
-                        "Event %s escalated %s→%s on anchor upgrade but was NOT paged "
-                        "(Pass E does not dispatch)",
-                        event_id[:8], current_tier or "none", new_tier,
+                    event.update({
+                        "severity_score": new_severity,
+                        "system_confidence": new_system_conf,
+                        "anchor_confidence": new_level,
+                        "anchor_name_norm": new_norm,
+                        "country_iso": country or event["country_iso"],
+                        "alert_tier": new_tier,
+                    })
+                    dispatch_result = dispatch_alert(db_conn, event, event_id)
+                    logger.info(
+                        "Event %s escalated %s→%s on anchor upgrade: dispatch=%s",
+                        event_id[:8], current_tier or "none", new_tier, dispatch_result,
                     )
-                return True, True
+                return True, True, dispatch_result
 
         # No upgrade — just mark as reconciled
         with db_conn.transaction():
@@ -226,7 +311,7 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
                 (event_id,),
             )
         db_conn.commit()
-        return True, False
+        return True, False, None
 
     except Exception:
         try:
@@ -234,7 +319,7 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool]:
         except Exception:
             pass
         logger.exception("Error reconciling event %s", event_id)
-        return False, False
+        return False, False, None
 
 
 def run_pass_e(db_conn) -> dict:
@@ -248,6 +333,12 @@ def run_pass_e(db_conn) -> dict:
         "events_reconciled": 0,
         "anchor_upgrades": 0,
         "events_failed": 0,
+        # An upgrade that raised the tier, and what dispatch_alert did with it. Split
+        # the same way Pass D splits its own: 'sent' is the only value that means a
+        # card exists, and the suppressed/skipped counts are how the suppression
+        # ledger is shown to be doing the collapsing rather than the pass staying quiet.
+        "tier_escalations": 0,
+        "escalation_dispatch": {},
     }
 
     try:
@@ -261,13 +352,18 @@ def run_pass_e(db_conn) -> dict:
             # existed. That is the same shape of blindness the upgrade path itself
             # had — the mechanism was repaired on 2026-08-17 and would still have
             # reported nothing.
-            ok, upgraded = reconcile_single_event(db_conn, str(row[0]))
+            ok, upgraded, dispatch_result = reconcile_single_event(db_conn, str(row[0]))
             if ok:
                 stats["events_reconciled"] += 1
                 if upgraded:
                     stats["anchor_upgrades"] += 1
             else:
                 stats["events_failed"] += 1
+            if dispatch_result:
+                stats["tier_escalations"] += 1
+                stats["escalation_dispatch"][dispatch_result] = (
+                    stats["escalation_dispatch"].get(dispatch_result, 0) + 1
+                )
 
     except Exception:
         logger.exception("Error in Pass E")
