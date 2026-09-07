@@ -1060,6 +1060,49 @@ def _word_set(text: str) -> set[str]:
     return set(_word_set_cached(text))
 
 
+# A CHARACTER-n-gram bound in front of the char-ratio matcher.
+#
+# title_similarity already carries difflib's own cheap upper bounds, and profiling on
+# 2026-09-07 showed how little they buy on this corpus: of 120,000 comparisons,
+# real_quick_ratio rejected ~11k and quick_ratio ~24k, so 80,925 — 67% — still ran the
+# full O(n*m) matcher. That is arithmetic, not bad luck: quick_ratio bounds the ratio
+# by the multiset of CHARACTERS two strings share, and any two English headlines share
+# most of the alphabet. Measured, find_longest_match was 29.9s of the 55.1s the whole
+# function took, and title_similarity 53.0s of it — 96%.
+#
+# So the bound has to look at character ORDER, which is what the ratio itself is about.
+# Three candidates were calibrated against the 837 dropped-duplicate pairs production
+# actually recorded — the ones that MUST keep matching — and against the workload:
+#
+#                      min on real matches      rejects of 120k workload
+#   word jaccard              0.059                     89.6%
+#   plural-folded words       0.125                     97.1%
+#   character 4-grams         0.177                     99.2%
+#
+# The word bounds are weak for a reason worth stating: real paraphrases differ by
+# morphology ("airports closed" / "airport closures"), which costs a word-set metric
+# nearly everything and a character metric almost nothing. The same effect broke
+# storyline linking in August.
+#
+# 0.10 is deliberately well under the 0.177 floor rather than next to it. Unrelated
+# pairs sit at a median of 0.008 and a 99th percentile of 0.165, so the separation is
+# real but not wide, and a bound calibrated to the last observed match is a bound that
+# breaks on the next corpus. At 0.10 the gate rejects 96.8% of comparisons and would
+# still have to see a real match 43% below anything yet observed before it cost one.
+#
+# This is a HEURISTIC, not difflib's provable bound. scripts/replay_dedup is what
+# makes that safe to say: both modes replay identical against the pre-change baseline.
+_TITLE_CGRAM_FLOOR = _DEDUP.get("title_cgram_floor", 0.10)
+
+
+@lru_cache(maxsize=16384)
+def _char_ngrams_cached(text: str, n: int = 4) -> frozenset[str]:
+    norm = normalize_title(text)
+    if len(norm) <= n:
+        return frozenset([norm]) if norm else frozenset()
+    return frozenset(norm[i:i + n] for i in range(len(norm) - n + 1))
+
+
 @lru_cache(maxsize=8192)
 def _shingles_cached(text: str, n: int = 4) -> frozenset[str]:
     words = normalize_title(text).split()
@@ -1076,7 +1119,12 @@ def _shingles(text: str, n: int = 4) -> set[str]:
 def _jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
-    return len(a & b) / len(a | b)
+    # |a| + |b| - |a&b| rather than len(a | b): once the character-n-gram bound made
+    # this the hot path — 344,095 calls and the largest single cost in the profile —
+    # the second set allocation was most of what it did. Integer arithmetic on the
+    # same intersection, so the quotient is bit-identical, not merely close.
+    inter = len(a & b)
+    return inter / (len(a) + len(b) - inter)
 
 
 def title_token_similarity(title_a: str, title_b: str) -> float:
@@ -1115,6 +1163,7 @@ def find_content_duplicate(recent_events: list[tuple], title: str,
     # shingles each time would hand back exactly what the cache saves. Nothing here
     # mutates them.
     title_tokens = _word_set_cached(title)
+    title_cgrams = _char_ngrams_cached(title)
     text_shingles = _shingles_cached(canonical_text) if len(canonical_text) > 100 else None
 
     for idx, entry in enumerate(recent_events):
@@ -1133,9 +1182,12 @@ def find_content_duplicate(recent_events: list[tuple], title: str,
         if places_disagree(title, f"{existing_title} {existing_place}".strip()):
             continue
 
-        # Signal 1: char-ratio title similarity (primary)
-        if title_similarity(title, existing_title, _TITLE_SIM_THRESHOLD) >= _TITLE_SIM_THRESHOLD:
-            return idx
+        # Signal 1: char-ratio title similarity (primary), behind the character
+        # n-gram bound. See _TITLE_CGRAM_FLOOR — difflib's own bounds let 67% of
+        # comparisons through to the O(n*m) matcher, and this one lets 3% through.
+        if _jaccard(title_cgrams, _char_ngrams_cached(existing_title)) >= _TITLE_CGRAM_FLOOR:
+            if title_similarity(title, existing_title, _TITLE_SIM_THRESHOLD) >= _TITLE_SIM_THRESHOLD:
+                return idx
 
         # Signal 2: token-set title similarity (cross-source rephrasing)
         if _jaccard(title_tokens, _word_set_cached(existing_title)) >= _TITLE_TOKEN_THRESHOLD:

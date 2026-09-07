@@ -25,6 +25,7 @@
     "maturation_window_hours": 2,
     "title_similarity_threshold": 0.65,
     "title_token_jaccard_threshold": 0.72,
+    "title_cgram_floor": 0.1,
     "content_shingle_threshold": 0.4
   },
   "scoring": {
