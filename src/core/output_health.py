@@ -43,6 +43,20 @@ DEFAULT_WINDOW_HOURS = 30.0
 # within a week.
 BASELINE_DAYS = 7
 
+# The share of a run's citations that may be blanked before it reads as a defect
+# rather than a bad sentence. check_sitrep_citations is a CLIFF detector — its bar
+# is zero surviving links, because that is the shape 2026-09-04 had — and a citation
+# guard that fails halfway clears it comfortably. Measured over the ten days to
+# 2026-09-07, excluding that collapse, the per-run rate has been:
+#
+#   0.0%  0.0%  0.0%  0.6%  1.1%  1.1%  2.2%  3.7%  4.1%  9.0%
+#
+# The 9.0% is gemini-3.5-flash-lite on 31 Aug, a model that is no longer in the
+# cascade; everything the current floor has produced sits at or under 4.1%. 20% is
+# therefore about twice the worst rate ever observed from a working model, which is
+# the headroom a check needs if people are going to keep reading it.
+CITATION_BLANK_RATE_MAX = 0.20
+
 
 class Finding:
     """One thing that is wrong, in the words the ops channel will show."""
@@ -96,6 +110,55 @@ def check_sitrep_citations(conn, window_hours: float) -> List[Finding]:
         "sitrep_no_citations",
         f"{len(rows)} SITREP(s) shipped with NO working source link",
         listed,
+    )]
+
+
+def check_sitrep_citation_rate(conn, window_hours: float,
+                               rate_max: float = CITATION_BLANK_RATE_MAX) -> List[Finding]:
+    """Too many of a run's citations were invented, without all of them being.
+
+    check_sitrep_citations asks whether a report has ANY surviving link, which is
+    the question 2026-09-04 posed: minimax-m2.7 shortened all 108 of that morning's
+    citations to bare domains and every report shipped with none. A guard that fails
+    that completely is easy to see. One that fails halfway is not — 54 blanked
+    citations out of 108 leaves every report full of working links and reads as
+    healthy to every check in this module.
+
+    Reports with no surviving link at all are excluded from the denominator rather
+    than counted, so a total collapse pages once (as sitrep_no_citations) instead of
+    twice. This check is only ever about the partial case.
+    """
+    rows = _rows(conn, """
+        SELECT country_iso,
+               (length(report_text) - length(replace(report_text, 'https://', ''))) / 8
+                 AS kept,
+               (length(report_text)
+                - length(replace(report_text, '[kaynak listede]', ''))) / 16
+                 AS blanked
+          FROM sitreps
+         WHERE status = 'completed'
+           AND window_end = (SELECT max(window_end) FROM sitreps
+                              WHERE status = 'completed'
+                                AND window_end > now() - (%s * interval '1 hour'))
+    """, (window_hours,))
+    scored = [r for r in rows if (r[1] or 0) > 0]
+    if not scored:
+        return []
+    kept = sum(r[1] or 0 for r in scored)
+    blanked = sum(r[2] or 0 for r in scored)
+    total = kept + blanked
+    if total == 0:
+        return []
+    rate = blanked / total
+    if rate <= rate_max:
+        return []
+    worst = sorted(scored, key=lambda r: -(r[2] or 0))[:3]
+    return [Finding(
+        "sitrep_citation_blank_rate",
+        f"{blanked} of {total} SITREP citations ({rate:.0%}) were not in the "
+        f"source list and were blanked",
+        ", ".join(f"{(r[0] or '??').strip()} {r[2]}/{(r[1] or 0) + (r[2] or 0)}"
+                  for r in worst),
     )]
 
 
@@ -361,6 +424,7 @@ DEFAULT_COUNTER_THRESHOLD = 3
 
 CHECKS = (
     check_sitrep_citations,
+    check_sitrep_citation_rate,
     check_sitrep_truncation,
     check_narrator_changed,
     check_bulletin_attribution,

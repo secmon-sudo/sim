@@ -47,6 +47,50 @@ class _Conn:
         return _Cur(self)
 
 
+class TestCitationBlankRate:
+    """The cliff detector above cannot see a guard that fails halfway.
+
+    Rows are (country_iso, kept, blanked). Measured on the ten days to 2026-09-07,
+    a working model blanks 0-4% of a run's citations; the threshold is 20%.
+    """
+
+    def test_a_normal_days_stray_citation_is_silent(self):
+        # 2026-09-07: 4 blanked of 108 across five reports.
+        conn = _Conn([("IR", 20, 2), ("LB", 24, 1), ("ID", 18, 1),
+                      ("UA", 25, 0), ("RU", 17, 0)])
+        assert oh.check_sitrep_citation_rate(conn, 30.0) == []
+
+    def test_a_half_failed_guard_pages(self):
+        conn = _Conn([("IR", 10, 10), ("UA", 12, 8)])
+        out = oh.check_sitrep_citation_rate(conn, 30.0)
+        assert len(out) == 1
+        assert out[0].key == "sitrep_citation_blank_rate"
+        assert "45%" in out[0].message
+        assert "IR 10/20" in out[0].detail
+
+    def test_a_total_collapse_is_left_to_the_zero_check(self):
+        # 2026-09-04 in shape: no report keeps a link, so this must stay silent
+        # rather than page a second time about the same incident.
+        conn = _Conn([("IR", 0, 22), ("UA", 0, 25)])
+        assert oh.check_sitrep_citation_rate(conn, 30.0) == []
+
+    def test_one_collapsed_report_does_not_drag_the_others_in(self):
+        # The collapsed report is the zero check's business; the rest are healthy.
+        conn = _Conn([("IR", 0, 22), ("UA", 30, 1), ("RU", 28, 0)])
+        assert oh.check_sitrep_citation_rate(conn, 30.0) == []
+
+    def test_no_reports_is_not_a_finding(self):
+        assert oh.check_sitrep_citation_rate(_Conn([]), 30.0) == []
+
+    def test_the_threshold_is_the_boundary_not_a_suggestion(self):
+        # Exactly at the bar is not over it.
+        assert oh.check_sitrep_citation_rate(_Conn([("IR", 8, 2)]), 30.0) == []
+        assert oh.check_sitrep_citation_rate(_Conn([("IR", 7, 3)]), 30.0) != []
+
+    def test_it_is_registered_so_it_actually_runs(self):
+        assert oh.check_sitrep_citation_rate in oh.CHECKS
+
+
 class TestCitationCollapse:
     def test_it_names_every_report_and_the_model_that_wrote_it(self):
         conn = _Conn([("IR", "minimax-m2.7"), ("UA", "minimax-m2.7")])
