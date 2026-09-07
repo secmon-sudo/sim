@@ -68,6 +68,31 @@ def get_country_name(db_conn, country_iso: str) -> str:
         return country_iso.upper()
 
 
+_EVENT_COLUMNS = (
+    "id", "source_title", "source_url", "source_domain", "event_type", "occurred_at_est",
+    "anchor_name_raw", "anchor_name_norm", "country_iso", "latitude", "longitude",
+    "severity_score", "system_confidence", "storyline_id", "storyline_hint",
+)
+
+
+def fetch_events_between(db_conn, start, end) -> List[Dict[str, Any]]:
+    """Scored events in a window, in the shape the forecast and flash paths expect.
+
+    Extracted from run_weekly_forecast when the flash detector gained a daily shadow
+    run: two callers reading the same rows through two copies of the same SELECT is
+    how the two would drift, and the flash detector's whole problem is that its
+    inputs were never the ones anybody thought they were.
+    """
+    rows = db_conn.execute(
+        f"""SELECT {', '.join(_EVENT_COLUMNS)}
+              FROM events
+             WHERE occurred_at_est >= %s AND occurred_at_est < %s
+               AND severity_score IS NOT NULL""",
+        (start, end),
+    ).fetchall()
+    return [dict(zip(_EVENT_COLUMNS, r)) for r in rows]
+
+
 # Set once the private-archive notice has been logged. See upload_report_to_r2.
 _ANNOUNCED_PRIVATE_ARCHIVE = False
 
@@ -149,6 +174,7 @@ def run_flash_detection(
     events: List[Dict[str, Any]],
     countries_data: List[Dict[str, Any]],
     max_flashes: int = 5,
+    dispatch: bool = True,
 ) -> List[Dict[str, Any]]:
     """Run the Flash Detector over the last 24h of events and dispatch alerts.
 
@@ -156,6 +182,26 @@ def run_flash_detection(
     country per run (highest-priority trigger wins — check_flash_triggers already
     skips lower triggers for Z-score-triggered countries), capped at max_flashes
     Telegram messages. Each trigger is recorded in system_telemetry.
+
+    dispatch=False is the daily SHADOW run: triggers are recorded and nothing is
+    sent. It exists because this detector has no working notion of "unusual", and
+    the evidence for that is measured rather than argued —
+
+      * every one of the 86 triggers ever recorded fired on a SUNDAY, because this
+        function is called only from the weekly forecast. A 24-hour circuit breaker
+        evaluated once every 168 hours never looks at six days in seven, and those
+        six days are not recoverable afterwards;
+      * measured over 14 days, the two triggers that read only the last 24h would
+        fire for ~9 (convergence) and ~2 (high volume) countries A DAY. Turning the
+        cadence up without a threshold would roughly double this product's paging
+        volume with cards describing an ordinary day in a war;
+      * and the reason no threshold can be set today is that nobody knows what an
+        ordinary day looks like per country, because the distribution was never
+        kept.
+
+    So the shadow run starts keeping it, at zero paging cost. Its rows are written
+    under a different event_type so the live history stays a clean record of what
+    was actually sent.
     """
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     recent_events = []
@@ -175,7 +221,8 @@ def run_flash_detection(
     if not triggers:
         return []
 
-    logger.warning("Flash Detector: %d trigger(s) fired", len(triggers))
+    logger.info("Flash Detector%s: %d trigger(s) fired",
+                "" if dispatch else " (shadow)", len(triggers))
     seen_countries: set = set()
     dispatched = 0
     for trig in triggers:
@@ -186,20 +233,24 @@ def run_flash_detection(
 
         try:
             db_conn.execute(
-                "INSERT INTO system_telemetry(event_type, value_json) VALUES ('flash_trigger', %s)",
-                (json.dumps({
+                "INSERT INTO system_telemetry(event_type, value_json) VALUES (%s, %s)",
+                ("flash_trigger" if dispatch else "flash_trigger_shadow",
+                 json.dumps({
                     "type": trig.get("type"),
                     "country_iso": country,
                     "reason": trig.get("reason"),
                     "event_ids": [str(e.get("id")) for e in trig.get("events", [])][:20],
-                }),),
+                    # The count the ids are capped away from. A shadow row exists to
+                    # be counted later, and a truncated list cannot be.
+                    "event_count": len(trig.get("events", [])),
+                 })),
             )
             db_conn.commit()
         except Exception:
             db_conn.rollback()
             logger.exception("Failed to log flash trigger telemetry for %s", country)
 
-        if dispatched < max_flashes:
+        if dispatch and dispatched < max_flashes:
             msg_id = send_flash_update_telegram(
                 trigger_type=trig.get("type", "Flash"),
                 country_iso=country or "??",
@@ -226,25 +277,7 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     logger.info("Period: %s to %s", week_start, week_end)
 
     # 1. Fetch Events
-    query_events = """
-        SELECT id, source_title, source_url, source_domain, event_type, occurred_at_est, 
-               anchor_name_raw, anchor_name_norm, country_iso, latitude, longitude, 
-               severity_score, system_confidence, storyline_id, storyline_hint
-        FROM events
-        WHERE occurred_at_est >= %s AND occurred_at_est < %s
-          AND severity_score IS NOT NULL
-    """
-    rows = db_conn.execute(query_events, (week_start, week_end)).fetchall()
-    
-    columns = [
-        "id", "source_title", "source_url", "source_domain", "event_type", "occurred_at_est",
-        "anchor_name_raw", "anchor_name_norm", "country_iso", "latitude", "longitude",
-        "severity_score", "system_confidence", "storyline_id", "storyline_hint"
-    ]
-    
-    events: List[Dict[str, Any]] = []
-    for r in rows:
-        events.append(dict(zip(columns, r)))
+    events = fetch_events_between(db_conn, week_start, week_end)
 
     if not events:
         logger.warning("No scored events found for the period: %s to %s. Aborting weekly report.", week_start, week_end)

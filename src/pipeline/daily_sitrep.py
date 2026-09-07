@@ -15,7 +15,12 @@ from src.core.airspace import build_airspace_assessment
 from src.core.llm_client import log_llm_telemetry
 from src.core import counters
 from src.core.llm_router import LLMRouter
-from src.pipeline.weekly_forecast import get_country_name, upload_report_to_r2
+from src.pipeline.weekly_forecast import (
+    fetch_events_between,
+    get_country_name,
+    run_flash_detection,
+    upload_report_to_r2,
+)
 from src.services.czib_client import fetch_active_czib_by_country
 from src.services.sitrep_generator import (
     NARRATIVE_MAX_TOKENS,
@@ -323,6 +328,27 @@ def run_daily_sitrep(db_conn, router: LLMRouter,
             results.append({"country_iso": iso, "status": "failed", "error": str(e)})
 
     digest_r2_url = run_digest(db_conn, router, results, window_start, window_end)
+
+    # Flash detector, SHADOW run — records triggers, sends nothing.
+    #
+    # The detector's window is 24 hours and its cadence was 168, so six days in
+    # seven were never examined and are not recoverable afterwards. This is the
+    # cadence the window was written for, and running it here costs nothing: the
+    # SITREP window IS the flash window, so there is no overlap to suppress.
+    #
+    # No z-scores are passed, deliberately. That input is the weekly tension-index
+    # history and it does not exist daily — so the shadow run measures exactly the
+    # two triggers that read the last 24 hours and would dominate a live daily
+    # cadence, which is what the threshold has to be set against.
+    try:
+        shadow = run_flash_detection(
+            db_conn, fetch_events_between(db_conn, window_start, window_end),
+            countries_data=[], dispatch=False,
+        )
+        logger.info("Flash shadow run: %d trigger(s) recorded, 0 dispatched",
+                    len(shadow))
+    except Exception:
+        logger.exception("Flash shadow run failed; SITREP unaffected")
 
     completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
