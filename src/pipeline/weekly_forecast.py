@@ -69,12 +69,29 @@ def get_country_name(db_conn, country_iso: str) -> str:
 
 
 def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Optional[str]:
-    """Uploads weekly forecast JSON/HTML to Cloudflare R2 bucket and returns public URL."""
+    """Upload a report to R2 and return its PUBLIC URL, or None when it has none.
+
+    None is returned in two different situations and they mean the same thing to a
+    caller: there is no address a reader can open. Either the upload did not happen,
+    or it did and the bucket has no configured public base.
+
+    This used to invent a base — "https://pub-default.r2.dev" — and hand back a URL
+    to a host that does not exist, which Telegram renders as a link that fails on
+    SSL. Every caller was then expected to know the sentinel and strip it. Three of
+    five did; the two that did not are weekly_forecast's own, and they shipped
+    https://pub-default.r2.dev/reports/weekly_report_*.html in the weekly card and
+    stored it in weekly_reports.r2_url every week from at least 2 Aug to 6 Sep 2026.
+    The Iran bulletin made the same mistake in its first week and its comment says
+    so plainly: it "inherited the bug rather than the fix".
+
+    A sentinel every consumer must remember is a defect waiting for the next
+    consumer. Returning None puts the decision where the knowledge is.
+    """
     account_id = os.environ.get("R2_ACCOUNT_ID")
     access_key = os.environ.get("R2_ACCESS_KEY_ID")
     secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
     bucket_name = os.environ.get("R2_BUCKET_NAME") or "sim-archive"
-    public_url_base = os.environ.get("R2_PUBLIC_URL_BASE") or "https://pub-default.r2.dev"
+    public_url_base = os.environ.get("R2_PUBLIC_URL_BASE")
 
     if not all([account_id, access_key, secret_key]):
         logger.warning("Cloudflare R2 credentials missing, skipping weekly report R2 upload")
@@ -96,6 +113,15 @@ def upload_report_to_r2(filename: str, content: bytes, content_type: str) -> Opt
             Body=content,
             ContentType=content_type
         )
+        if not public_url_base:
+            # The object exists; nobody can reach it. Warned rather than silent,
+            # because "the archive is unreachable" is a config fact worth seeing.
+            logger.warning(
+                "Uploaded %s to R2 bucket %s, but R2_PUBLIC_URL_BASE is not set — "
+                "the file has no public URL, so no link will be published",
+                filename, bucket_name,
+            )
+            return None
         url = f"{public_url_base.rstrip('/')}/{filename}"
         logger.info("Uploaded %s to R2. Public URL: %s", filename, url)
         return url

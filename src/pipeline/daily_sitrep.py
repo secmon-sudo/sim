@@ -196,13 +196,9 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     r2_url = None
     try:
         filename = f"sitrep_{country_iso}_{window_end:%Y%m%d}.html"
+        # None when the bucket has no public base configured — upload_report_to_r2
+        # no longer invents one, so there is nothing to strip here.
         r2_url = upload_report_to_r2(filename, html_doc.encode("utf-8"), "text/html")
-        # upload_report_to_r2 falls back to a placeholder public base when
-        # R2_PUBLIC_URL_BASE is unset — that URL doesn't exist (SSL error in
-        # Telegram), so suppress the link rather than publish a dead one.
-        if r2_url and "pub-default.r2.dev" in r2_url:
-            logger.warning("SITREP %s: R2_PUBLIC_URL_BASE not configured; omitting R2 link", country_iso)
-            r2_url = None
     except Exception:
         logger.exception("SITREP %s: R2 upload failed", country_iso)
 
@@ -286,8 +282,6 @@ def run_digest(db_conn, router: LLMRouter, results: List[Dict[str, Any]],
     try:
         r2_url = upload_report_to_r2(f"brifing_{window_end:%Y%m%d}.html",
                                      html_doc.encode("utf-8"), "text/html")
-        if r2_url and "pub-default.r2.dev" in r2_url:
-            r2_url = None
     except Exception:
         logger.exception("Digest R2 upload failed")
 

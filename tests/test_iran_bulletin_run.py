@@ -114,15 +114,16 @@ class TestRun:
         assert sent["r2_url"] is None
         assert sent["html_doc"], "the document is the report; it must still go"
 
-    def test_the_placeholder_r2_host_is_never_linked(self, monkeypatch, _quiet):
-        """upload_report_to_r2 returns pub-default.r2.dev when the public base is
-        unset. That host does not resolve, so the card would carry a link that
-        fails on SSL — which is exactly what the 4 Sep bulletin shipped."""
+    def test_no_public_base_means_no_link_on_the_card(self, monkeypatch, _quiet):
+        """The 4 Sep bulletin shipped pub-default.r2.dev/iran_bulletin_*, a host
+        that does not resolve, because this path string-matched the sentinel and
+        an earlier path did not. The suppression lives in upload_report_to_r2 now
+        (see TestUploadReportToR2 in tests/test_r2_public_url.py), so all this
+        path has to do is forward the None it is given without inventing a link.
+        """
         sent = {}
         monkeypatch.setattr(run, "build_bulletin", lambda *a, **k: _result())
-        monkeypatch.setattr(
-            run, "upload_report_to_r2",
-            lambda *a, **k: "https://pub-default.r2.dev/iran_bulletin_20260904.html")
+        monkeypatch.setattr(run, "upload_report_to_r2", lambda *a, **k: None)
         monkeypatch.setattr(run, "send_sitrep_telegram",
                             lambda **k: sent.update(k) or "msg-1")
         out = run.run_iran_bulletin(_Conn())
