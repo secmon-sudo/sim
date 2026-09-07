@@ -339,11 +339,53 @@ def test_flash_update_triggers():
     assert triggers_vol[0]["type"] == "High Volume Escalation"
     assert triggers_vol[0]["country_iso"] == "SY"
 
-    # Setup Z-Score Trigger (> 3.0)
-    triggers_z = check_flash_triggers([], country_z_scores={"IR": 3.4})
+    # Setup Z-Score Trigger (> 3.0). The Z-score comes from the country's WEEKLY
+    # tension history; recent_events is the last 24 HOURS. This assertion used to
+    # pass an EMPTY event list and expect a flash — which is what production did:
+    # 20 of 36 Z-score flashes named a country and listed no events at all.
+    z_events = [
+        {"id": f"z{i}", "country_iso": "IR", "event_type": "military_action",
+         "occurred_at_est": dt + timedelta(hours=i), "source_domain": "reuters.com",
+         "system_confidence": 0.5}
+        for i in range(3)
+    ]
+    triggers_z = check_flash_triggers(z_events, country_z_scores={"IR": 3.4})
     assert len(triggers_z) == 1
     assert triggers_z[0]["type"] == "Z-Score Exceeded"
     assert triggers_z[0]["country_iso"] == "IR"
+    assert len(triggers_z[0]["events"]) == 3
+
+
+def test_a_z_score_with_nothing_behind_it_is_not_a_flash():
+    """The single most common flash in production described nothing.
+
+    Measured over the 36 Z-score flashes recorded since 2026-07-12: 20 fired with
+    zero events in the 24-hour window, 8 with one, 2 with two. Only 6 had the three
+    that Trigger 3 already requires before it will call a country escalating.
+    """
+    from src.services.flash_detector import FLASH_MIN_WINDOW_EVENTS, check_flash_triggers
+
+    assert check_flash_triggers([], country_z_scores={"CH": 9.9}) == []
+
+    dt = datetime(2026, 9, 6, 12, 0, 0)
+    thin = [
+        {"id": f"t{i}", "country_iso": "CH", "event_type": "protest",
+         "occurred_at_est": dt + timedelta(hours=i), "source_domain": "example.com",
+         "system_confidence": 0.3}
+        for i in range(FLASH_MIN_WINDOW_EVENTS - 1)
+    ]
+    assert [t for t in check_flash_triggers(thin, country_z_scores={"CH": 9.9})
+            if t["type"] == "Z-Score Exceeded"] == []
+
+    enough = thin + [{"id": "tn", "country_iso": "CH", "event_type": "protest",
+                      "occurred_at_est": dt, "source_domain": "example.com",
+                      "system_confidence": 0.3}]
+    z_triggers = [t for t in check_flash_triggers(enough, country_z_scores={"CH": 9.9})
+                  if t["type"] == "Z-Score Exceeded"]
+    assert len(z_triggers) == 1
+    # The count belongs in the message: "Z=9.90" alone is what made these
+    # unreadable — a number about the week, offered as news about the day.
+    assert "3 events" in z_triggers[0]["reason"]
 
 
 def test_flash_trigger3_confidence_branch_is_reachable():

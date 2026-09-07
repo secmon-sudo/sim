@@ -324,6 +324,37 @@ def run_weekly_forecast(db_conn, router: LLMRouter) -> Dict[str, Any]:
     # Sort countries by TI descending
     countries_data = sorted(countries_data, key=lambda x: x["ti"], reverse=True)
 
+    # 3a-bis. Persist the tension snapshot these numbers came from.
+    #
+    # The flash detector reads z_score and nothing stores it, so its inputs cannot be
+    # audited after the run — which is why the inversion below could only be described
+    # and never measured. Over the nine Sundays to 2026-09-07 the Z-score trigger fired
+    # for BG (3x), CH, CU, BO, GH, ZW, HU and 18 other quiet countries, and NEVER for
+    # UA, RU, IR, PS, IL or LB — the six with the most events in the corpus by an order
+    # of magnitude. The mechanism is visible in the formula (a country is compared to
+    # its OWN history, and stddev is floored at 1.0, so a flat baseline makes any
+    # activity a 3-sigma event while a war zone's baseline is never exceeded) but the
+    # calibration of any floor that would fix it needs the distribution, and the
+    # distribution was being thrown away every week.
+    try:
+        db_conn.execute(
+            "INSERT INTO system_telemetry(event_type, value_json) VALUES ('country_tension', %s)",
+            (json.dumps({
+                "week_end": str(week_end),
+                "countries": [
+                    {"iso": c["country_iso"], "ti": round(float(c["ti"]), 2),
+                     "delta": round(float(c["delta"]), 2),
+                     "z": round(float(c["z_score"]), 2),
+                     "events": len(c.get("events") or [])}
+                    for c in countries_data
+                ],
+            }),),
+        )
+        db_conn.commit()
+    except Exception:
+        db_conn.rollback()
+        logger.exception("Failed to record the weekly tension snapshot")
+
     # 3b. Flash Detector — critical-event circuit breaker (zero-LLM).
     # Checks the last 24h for Z-score spikes, cross-domain convergence, and
     # high-volume escalation; dispatches Telegram flash updates. Failures here

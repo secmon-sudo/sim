@@ -47,6 +47,28 @@ FLASH_VERIFIED_CREDIBILITY_MIN = float(
     _SETTINGS.get("flash", {}).get("verified_credibility_min", 0.8)
 )
 
+# How many events from the last 24 hours a Z-score trigger must actually be able to
+# point at. The Z-score is computed from the country's WEEKLY tension-index history
+# (see weekly_forecast); recent_events is the last 24 HOURS. Nothing connected the
+# two, so a country could be anomalous for the week and silent for the day and still
+# page — with an empty event list.
+#
+# It was not a corner case. Of the 36 Z-score flashes recorded since 2026-07-12:
+#
+#     0 events   20   AL BG CD CH CU EU GH HU KG LT ML PE RS SA SO ZW
+#     1 event     8   GH KG KZ LY MM SY YE ZW
+#     2 events    2   BG BO
+#     >= 3        6   US(5) CO(6) ES(7) PL(11) YE(14) US(20)
+#
+# Twenty flash updates named a country and listed nothing. The floor is 3 because
+# that is the bar Trigger 3 already sets for "enough is happening here to page" —
+# this is the same claim, and the Z-score path was the only one making it with no
+# evidence requirement at all. The six that survive are the ones that described
+# something.
+FLASH_MIN_WINDOW_EVENTS = int(
+    _SETTINGS.get("flash", {}).get("min_window_events", 3)
+)
+
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate geodesic distance between two points in km."""
@@ -105,15 +127,29 @@ def check_flash_triggers(
     """
     triggers = []
     
-    # Trigger 1: Z-Score > 3.0 for any country
+    # Trigger 1: Z-Score > 3.0 for any country, and something to show for it.
     for country, z in country_z_scores.items():
-        if z > 3.0:
-            triggers.append({
-                "type": "Z-Score Exceeded",
-                "country_iso": country,
-                "reason": f"Tension Index Z-Score exceeded +3.0 threshold (Z={z:.2f}) in the country.",
-                "events": [e for e in recent_events if (e.get("country_iso") or "").strip().upper() == country]
-            })
+        if z <= 3.0:
+            continue
+        country_events = [e for e in recent_events
+                          if (e.get("country_iso") or "").strip().upper() == country]
+        if len(country_events) < FLASH_MIN_WINDOW_EVENTS:
+            # See FLASH_MIN_WINDOW_EVENTS. A statistic about the week is not an
+            # incident today, and a flash update that lists no events is a page
+            # about nothing.
+            logger.info(
+                "Flash: %s cleared Z=%.2f but has %d event(s) in the 24h window "
+                "(need %d) — not a flash",
+                country, z, len(country_events), FLASH_MIN_WINDOW_EVENTS,
+            )
+            continue
+        triggers.append({
+            "type": "Z-Score Exceeded",
+            "country_iso": country,
+            "reason": (f"Tension Index Z-Score exceeded +3.0 threshold (Z={z:.2f}) "
+                       f"with {len(country_events)} events in the last 24h."),
+            "events": country_events,
+        })
 
     # Group events by country for local checks (Triggers 2 & 3)
     events_by_country: Dict[str, List[Dict[str, Any]]] = {}
