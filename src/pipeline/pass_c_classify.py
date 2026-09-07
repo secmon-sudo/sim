@@ -20,12 +20,14 @@ from src.core.llm_client import LLMAllThrottled, LLMRequestTooLarge, call_llm, l
 from src.core.llm_router import LLMRouter
 from src.core.storyline import strip_date_hint
 from src.pipeline.ingest_filters import (
+    _CIVILIAN_COLLOCATION_PATTERN,
     _HIGH_SIGNAL_TERMS,
     _SECURITY_KEYWORD_PATTERN,
     _is_airport_intrusion,
     _is_aviation_security_incident,
     _is_bare_security_incident,
     _is_flight_disruption,
+    _is_official_security_alert,
     _is_screening_breach,
     is_noise,
 )
@@ -145,7 +147,7 @@ HOSTILE_ACT_PATTERN = re.compile(
     # Verb forms of the same acts — "the enemy ATTACKED Kharkiv", "vessels ATTACKED".
     r"|attacked|bombed|shelled|stormed|detonated|hijacked|opened fire|shot dead|shot down"
     # Weapon + verb — "Russian drones TARGET Naftogaz", "drones HIT Erbil".
-    r"|(drones?|missiles?|rockets?|uavs?)\s+(target(ed|s)?|hit|struck|strike[sd]?)"
+    r"|(drones?|missiles?|rockets?|uavs?)\s+(target(ed|s)?|hit|struck|strike[sd]?|attacks?|attacking)"
     # ── Casualty verbs ────────────────────────────────────────────────────────
     # "kill" is the single most common verb in conflict reporting and was absent from
     # this vocabulary in every form, as were injure/wound/down. The whole list was
@@ -190,7 +192,19 @@ HOSTILE_ACT_PATTERN = re.compile(
     # 1. Bare act noun + preposition: "attack ON the naval base", "attacks ON civilians".
     #    The noun is deliberately not listed alone — "under attack from critics" is a
     #    metaphor, and the preposition frame is what separates it from an incident.
-    r"|(attacks?|strikes?|assaults?|offensives?|raids?|bombardments?)\s+(on|against)\b"
+    # "at", "near" and "inside" are the same frame: "hybrid attack AT Leipzig
+    # Airport", "russian attack NEAR Kyiv", "strike NEAR Kyiv train station".
+    # Three of the six misses the 2026-09-07 vocabulary audit found were this one
+    # missing preposition. The idiom this frame is careful about — "strikes at the
+    # heart of" — appears 0 times in a week of headlines, and "strikes at" at all
+    # appears once, against 18 for "attacks at".
+    r"|(attacks?|strikes?|assaults?|offensives?|raids?|bombardments?)\s+(on|against|near|inside)\b"
+    #    "at" is split off because "strike" is the one noun here with a live
+    #    idiomatic sense in that position — "the bill strikes AT the heart of" —
+    #    while "attack at", "raid at" and "assault at" have none. Measured over a
+    #    week of headlines: "attacks at" 18, "strikes at" 1, "strikes at the
+    #    heart of" 0. Excluding one word costs nothing and removes the whole class.
+    r"|(attacks?|assaults?|offensives?|raids?|bombardments?)\s+at\b"
     # 2. Delivery verb + act: "LAUNCHED a coordinated attack", "CARRIED OUT a strike".
     r"|(launch(ed|es|ing)?|carr(y|ies|ied)\s+out|conduct(ed|s|ing)?|mount(ed|s|ing)?|"
     r"unleash(ed|es|ing)?)\s+(the\s+|a\s+|an\s+|its\s+|their\s+|[\w'’-]+\s+){0,3}"
@@ -200,10 +214,18 @@ HOSTILE_ACT_PATTERN = re.compile(
     #    Vodyanoe"), and the armed subject is what keeps these bare verbs safe: "Boys,
     #    ages 4 and 7 … HIT woman walking her dog" and "Trucker CAPTURES pilot's
     #    maneuver" both carry the verb, neither has one.
+    #    The verb list held "attacked" and, through this frame, everything except
+    #    the present tense of the most common verb in the vocabulary: "Russian
+    #    Forces ATTACK Ukrnafta Facilities Four Times Across Three Ukrainian
+    #    Regions" scored 0 while "Russian forces attacked Ukrnafta facilities"
+    #    scored 25. Same blindness the keyword filter had in August ("killed" but
+    #    not "kills"), found here by the 2026-09-07 vocabulary audit. The armed
+    #    subject is what keeps the bare noun out: "attacks" alone matches 73
+    #    archived headlines in a week, anchored it matches 12.
     r"|(forces|troops|army|navy|air force|militants?|gunmen|rebels?|insurgents?|"
     r"fighters?|jets?|warplanes?|artillery|militia|units?)\s+([\w'’-]+\s+){0,2}"
     r"(hits?|struck|strikes?|target(ed|s)?|seiz(e|ed|es)|captur(e|ed|es)|overran|"
-    r"overrun|shell(ed|s)?|storm(ed|s)?|raid(ed|s)?)"
+    r"overrun|shell(ed|s)?|storm(ed|s)?|raid(ed|s)?|attacks?|attacking)"
     # 4. Kinetic verb + military/energy asset, for the headlines whose subject is a bare
     #    country name no subject list can hold ("Ukraine HITS Russia's Novorossiysk
     #    PORT"). The asset object plays the role the armed subject plays in frame 3.
@@ -248,7 +270,14 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # BOMBED at the box office", "stock market ATTACKED by inflation fears". is_noise()
     # catches both, so a verb-only match is scored as ordinary security vocabulary and
     # left subject to that veto, while a noun-phrase hit still overrides it.
-    has_hostile_act = bool(HOSTILE_ACT_PATTERN.search(blob))
+    # Scrubbed, not vetoed — the same treatment _is_bare_security_incident gives
+    # these collocations and for the same reason: "heart attack", "panic attack",
+    # "bird strike" are not security nouns in any frame, but a real incident
+    # reported in the same headline still has to match. Applied here once the
+    # frames admit "attack at": before that, "Man dies of heart attack AT Delhi
+    # metro station" was not reachable by any of them, and afterwards it was.
+    has_hostile_act = bool(HOSTILE_ACT_PATTERN.search(
+        _CIVILIAN_COLLOCATION_PATTERN.sub(" ", blob)))
     has_casualty = bool(_CASUALTY_NUM_PATTERN.search(blob))
     noisy = is_noise(f"{title} {text[:500]}")
     # Aviation stopped flying, and not because of weather — the security scope.
@@ -285,9 +314,16 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # 2026-08-31: 8 such headlines in seven days, all prescreen-archived, including a
     # Manchester breach that diverted 20+ flights and a stowaway found dead at Gatwick.
     has_airport_intrusion = _is_airport_intrusion(title)
+    # An embassy or ministry telling people a place is dangerous — the news-path
+    # twin of the travel-advisory feeds. Counted as ordinary security vocabulary
+    # (no floor of its own): the three-way conjunction is already tight, and this
+    # class is a warning rather than an incident, so it should compete on the
+    # normal score rather than be guaranteed a classification call.
+    has_official_alert = _is_official_security_alert(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or has_screening_breach or has_aviation_incident
                     or has_bare_incident or has_airport_intrusion
+                    or has_official_alert
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
@@ -321,6 +357,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_aviation_incident": has_aviation_incident,
         "has_bare_incident": has_bare_incident,
         "has_airport_intrusion": has_airport_intrusion,
+        "has_official_alert": has_official_alert,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }

@@ -356,8 +356,22 @@ _AVIATION_CONTEXT_PATTERN = re.compile(
 _DISRUPTION_PATTERN = re.compile(
     r"\b(suspend|suspends|suspended|suspending|suspension|suspensions|"
     r"halt|halts|halted|cancel|cancels|cancelled|canceled|cancelling|"
-    r"canceling|cancellation|cancellations|grounded|reroute|reroutes|"
-    r"rerouted|closure|closures|disruption|disruptions)\b",
+    r"canceling|cancellation|cancellations|grounded|grounds|reroute|reroutes|"
+    r"rerouted|closure|closures|disruption|disruptions|"
+    # The noun "closure" has been here since this pattern was written; the VERB
+    # it comes from was not, and sat in the weak list where it needs a security
+    # nexus to count. So "Eight Indonesian airports CLOSED due to Anak Krakatau
+    # volcanic ash, 170,000 travellers affected" scored 0 and was prescreen-
+    # archived, on the same day that story led the SITREP and paged CRITICAL —
+    # the airspace_closure event type this pipeline reports, invisible to the
+    # gate that decides whether an LLM ever reads it.
+    #
+    # Measured 2026-09-07 over 7 days: an aviation noun within 40 characters of
+    # a close/shut verb matches 27 prescreen-archived headlines, 24 of them the
+    # Anak Krakatau closures. The maintenance false positive this vocabulary is
+    # normally careful about — "terminal closed for renovation" — matches ZERO
+    # headlines in the same week, across every status.
+    r"close|closes|closed|closing|shut|shuts|shutting|shuts down|shut down)\b",
     re.IGNORECASE,
 )
 
@@ -391,7 +405,16 @@ _AVIATION_HEADLINE_PATTERN = re.compile(
 _WEAK_DISRUPTION_PATTERN = re.compile(
     r"\b(disrupt|disrupts|disrupted|disrupting|delay|delays|delayed|"
     r"divert|diverts|diverted|diversion|diversions|stranded|grounding|"
-    r"shutdown|closed)\b",
+    # "chaos" is how the travel desks write a disruption they have not yet
+    # attributed — "Iran-Kuwait strikes trigger fresh flight chaos in Gulf",
+    # "San Diego Airport Chaos: Drones, Balloon Trigger Ground Stop". It belongs
+    # in the WEAK list precisely because the same word covers a wet Tuesday at
+    # Delhi: of the 10 archived headlines it matches in a week, 6 are security or
+    # volcanic and 3 are rain and generic delays. The security-nexus requirement
+    # is what separates them — none of the three weather ones carries one, and
+    # is_noise() does NOT catch them (checked, 2026-09-07), so the nexus is doing
+    # the work here rather than backing up a filter that already would.
+    r"chaos|shutdown|closed)\b",
     re.IGNORECASE,
 )
 _SECURITY_NEXUS_PATTERN = re.compile(
@@ -501,7 +524,14 @@ _AVIATION_INCIDENT_PATTERN = re.compile(
     r"gnss|gps jamming|gps spoofing|jamming|spoofing|"
     r"drone sighting|drones? spotted|drones? sighted|uav sighting|"
     r"cockpit|stowaways?|runway incursion|near miss|near-miss|"
-    r"bomb threat|bomb scare|bomb hoax|hoax call)\b",
+    r"bomb threat|bomb scare|bomb hoax|hoax call|"
+    # The word the press uses for an aviation-security event before anyone will
+    # call it an attack. The Leipzig explosive-drone case was reported for a week
+    # as "the drone incident" and 24 of those filings were prescreen-archived;
+    # requiring an aviation noun alongside it (which _is_aviation_security_incident
+    # already does) narrows that to 8 and drops the diplomatic aftermath that has
+    # no aviation word in the headline at all.
+    r"(?:drone|bomb|security|hijack)\s+incidents?)\b",
     re.IGNORECASE,
 )
 
@@ -645,6 +675,68 @@ def _is_aviation_security_incident(title: str) -> bool:
         return False
     return bool(_AVIATION_HEADLINE_PATTERN.search(title)
                 and _AVIATION_INCIDENT_PATTERN.search(title))
+
+
+# An official body telling people a place is dangerous. This is the same product as
+# the travel-advisory feeds the pipeline already subscribes to, arriving through the
+# news path instead — and it was invisible there, because none of "embassy", "alert"
+# or "warning" is a security noun on its own.
+#
+# Measured 2026-09-07 over seven days of prescreen-archived headlines: the bare noun
+# phrase ("security alert", "terror threat", "travel warning") matches 19 and about
+# half are commentary — "Malta calls for stronger EU response to maritime security
+# threats", "Drone Threat Shapes Germany's Security Landscape". Requiring an OFFICIAL
+# ISSUER and an ISSUING VERB in the same headline narrows that to 5, and those five
+# are the class itself: "US Embassy sounds security alert in Kuwait", "Seven US
+# embassies issue security alert warnings in quick succession", "U.S. Embassy
+# Jerusalem Issues Security Alert Over Possible Iranian Threats".
+#
+# The issuer is what does the work. A think tank discussing terror threats and a
+# consulate issuing one are the same words in a different frame, and only the second
+# is an event.
+_OFFICIAL_ISSUER_PATTERN = re.compile(
+    r"\b(embassy|embassies|consulate|consular|state department|foreign ministry|"
+    r"foreign office|interior ministry|home office|fcdo|national security council)\b",
+    re.IGNORECASE,
+)
+_ALERT_ISSUING_PATTERN = re.compile(
+    r"\b(issues?|issued|issuing|sounds?|sounded|raises?|raised|warns?|warned|"
+    r"urges?|urged|advises?|advised|restricts?|restricted|suspends?|suspended)\b",
+    re.IGNORECASE,
+)
+_SECURITY_ALERT_NOUN_PATTERN = re.compile(
+    r"\b(security alert|security warning|travel warning|travel advisory|"
+    r"terror threat|terrorism threat|do not travel)\b",
+    re.IGNORECASE,
+)
+
+
+# The advisory nouns are strong enough that the institutional issuer can be a bare
+# country name — "Israel Issues Level 4 Travel Warning for Somaliland, Citing Terror
+# Threat" has no word from the issuer list and is unambiguously an advisory being
+# issued. Nobody but a government issues a travel warning, so the ISSUING VERB alone
+# anchors it. Measured over the same week: the bare advisory noun matches 21 archived
+# headlines, the verb-anchored frame 7.
+_TRAVEL_ADVISORY_NOUN_PATTERN = re.compile(
+    r"\b(travel warning|travel advisory|do not travel|level [34] travel)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_official_security_alert(title: str) -> bool:
+    """An official body telling people a place is dangerous.
+
+    Two frames: issuer + verb + alert noun, or verb + travel-advisory noun, where
+    the advisory noun carries the officialness the issuer would otherwise supply.
+    """
+    if not title:
+        return False
+    if (_OFFICIAL_ISSUER_PATTERN.search(title)
+            and _ALERT_ISSUING_PATTERN.search(title)
+            and _SECURITY_ALERT_NOUN_PATTERN.search(title)):
+        return True
+    return bool(_ALERT_ISSUING_PATTERN.search(title)
+                and _TRAVEL_ADVISORY_NOUN_PATTERN.search(title))
 
 
 def _is_screening_breach(title: str) -> bool:
