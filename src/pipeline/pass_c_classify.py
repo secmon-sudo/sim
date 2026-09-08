@@ -786,10 +786,31 @@ def validate_and_parse(content: str) -> dict:
 def update_domain_penalty(db_conn, domain: str, is_noise: int):
     """Record one CLAIM this domain made, and whether the claim held up.
 
-    penalty_score is read as credibility — fetch_penalized_domains() bars a domain from
-    label_cluster()'s independence count and the official-source check, and
-    check_domain_penalty() drops its items at ingest. So the denominator has to be the
-    claims a domain made, not everything it published.
+    NOTHING READS THIS SCORE ANY MORE (2026-09-08). Both gates it fed are gone — the
+    ingest drop above 0.8 and the SITREP exclusion at 0.5 — and the counters are kept
+    because they are cheap and because the table below is the evidence for why.
+
+    Measured across 3,592 domains, 819 with the five claims the score needs to mean
+    anything: exactly one has ever cleared either threshold (nitter.net, 0.875, last
+    seen 6 July, removed from this codebase on 1 August). The worst score FALLS as a
+    domain makes more claims — 0.143 at 25+ claims, 0.091 at 50+ — so there is no
+    population of repeat offenders to find. And the ranking is inverted:
+
+        mshale.com          88 claims,  8 false  ->  0.091
+        washingtonpost.com  13 claims,  4 false  ->  0.308
+
+    mshale.com is the content farm that published fabricated Gulf attacks and signed
+    20 of 20 alerts on 17 August. The rewrite below fixed the denominator and left the
+    sign: this measures how often the CLASSIFIER disagreed with a headline, and
+    internally consistent fabrication classifies fine while a newspaper reporting
+    contested, fast-moving claims does not. A threshold cannot fix that.
+
+    The original contract, kept because the counters still follow it:
+
+    penalty_score is read as credibility — the SITREP barred a penalised domain from
+    label_cluster()'s independence count and the official-source check, and ingest
+    dropped its items. So the denominator has to be the claims a domain made, not
+    everything it published.
 
     It used to be everything it published, and the two are completely different
     measurements. Bloomberg publishes finance, CNBC publishes markets: most of what they

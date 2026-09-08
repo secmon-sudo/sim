@@ -468,73 +468,6 @@ def _flush_corroborations(db_conn, pending: list[tuple]) -> int:
         return 0
 
 
-def load_domain_penalties(db_conn) -> dict[str, float] | None:
-    """Snapshot the penalty table once, so the ingest loop needs no DB round trips.
-
-    domain_penalties is only written by update_domain_penalty() in Pass C, which runs
-    after Pass A has finished, so the table is static for the length of a run and one
-    snapshot answers every lookup the loop makes. Measured at 210 s/run (25% of Pass A)
-    as a per-item query, against ~700 eligible rows — the round trips were the cost,
-    not the data. Returns None on failure so callers fall back to querying per item;
-    an empty dict would silently mean "nothing is penalized".
-    """
-    try:
-        with db_conn.transaction():
-            rows = db_conn.execute(
-                # penalty_score is nullable with a 0.0 default; coalesced here so one
-                # NULL row cannot put a None into the map and blow up the `> 0.8`
-                # comparison at the call site.
-                "SELECT domain, COALESCE(penalty_score, 0.0) FROM domain_penalties"
-                " WHERE total_events >= 5"
-            ).fetchall()
-        return {row[0]: float(row[1]) for row in rows}
-    except Exception:
-        logger.warning("Domain penalty preload failed; falling back to per-item lookups")
-        return None
-
-
-def check_domain_penalty(db_conn, domain: str,
-                         penalties: dict[str, float] | None = None) -> float:
-    """Get penalty score for a domain. Returns 0.0 if not found, if total_events < 5, or if whitelisted.
-
-    `penalties` is a load_domain_penalties() snapshot; it already excludes rows under
-    the 5-event floor, so a miss is 0.0 for the same reason the query path returns 0.0.
-    """
-    TRUSTED_DOMAINS = {
-        "reuters.com", "bbc.co.uk", "travel.state.gov", "defense.gov",
-        "timesofisrael.com", "aljazeera.com", "jpost.com", "haaretz.com",
-        "ynetnews.com", "breakingdefense.com", "militarytimes.com",
-        "warontherocks.com", "longwarjournal.org", "centcom.mil",
-        "cnn.com", "foxnews.com", "wsj.com", "nytimes.com", "dropsitenews.com",
-        "presstv.ir", "france24.com", "theguardian.com", "ukrinform.net",
-        "kyivindependent.com", "crisisgroup.org", "bellingcat.com",
-        "thecipherbrief.com", "foreignpolicy.com", "defenseone.com",
-        "twz.com", "defensenews.com", "al-monitor.com", "themoscowtimes.com",
-        "meduza.io", "warsawinstitute.org", "un.org",
-        "jamestown.org", "thesoufancenter.org", "ctc.westpoint.edu",
-        "counterextremism.com",
-    }
-    if domain in TRUSTED_DOMAINS:
-        return 0.0
-
-    if penalties is not None:
-        return penalties.get(domain, 0.0)
-
-    try:
-        with db_conn.transaction():
-            row = db_conn.execute(
-                "SELECT penalty_score, total_events FROM domain_penalties WHERE domain = %s",
-                (domain,),
-            ).fetchone()
-            if row:
-                penalty, total = row[0], row[1]
-                if total >= 5:
-                    return penalty
-            return 0.0
-    except Exception:
-        return 0.0
-
-
 # ---------------------------------------------------------------------------
 # Main Pass A runner
 # ---------------------------------------------------------------------------
@@ -630,7 +563,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         "content_farm_filtered": 0,
         "duplicates_skipped": 0,
         "content_duplicates_skipped": 0,
-        "domain_penalized": 0,
         "domain_capped": 0,
         "social_publisher_resolved": 0,
         "social_publisher_unresolved": 0,
@@ -778,12 +710,6 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
         # Covers the part of the configured window the 2000-row cap cuts off.
         exact_titles = _fetch_exact_title_index(db_conn)
-
-    # One read for the whole run instead of one per candidate (see
-    # load_domain_penalties). Timed under the same key as the loop lookups it
-    # replaces, so the phase stays comparable across runs.
-    with _timed(timings, "domain_penalty_db"):
-        domain_penalties = load_domain_penalties(db_conn)
 
     inserted = 0
     domain_inserts: dict[str, int] = {}
@@ -1016,11 +942,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             logger.info("Content farm rejected: %s | %.80s", domain, item.get("title") or "")
             continue
 
-        with _timed(timings, "domain_penalty_db"):
-            penalty = check_domain_penalty(db_conn, domain, domain_penalties)
-        if penalty > 0.8:
-            stats["domain_penalized"] += 1
-            continue
+        # No domain-penalty gate here any more. It dropped an item whose domain
+        # scored above 0.8, and measured 2026-09-08 that threshold has selected
+        # exactly one domain ever — nitter.net, at 0.875, last seen 6 July and
+        # deleted from this codebase on 1 August. See update_domain_penalty for why
+        # no threshold can be chosen: the metric is inverted, and the only thing
+        # this gate can still do is drop a new outlet whose first five security
+        # claims the classifier happened to disagree with.
 
         # Per-domain insert cap — hard ceiling on how much of the run budget a
         # single outlet can claim, on top of the round-robin ordering.

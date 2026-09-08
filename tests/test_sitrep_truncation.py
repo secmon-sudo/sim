@@ -113,7 +113,6 @@ def _run_country(monkeypatch, finish_reason: str) -> dict:
     monkeypatch.setattr(ds, "_save_sitrep", fake_save)
     monkeypatch.setattr(ds, "get_country_name", lambda db, iso: "Ukrayna")
     monkeypatch.setattr(ds, "fetch_sitrep_events", lambda *a, **k: [{"id": "1"}])
-    monkeypatch.setattr(ds, "fetch_penalized_domains", lambda db: [])
     monkeypatch.setattr(ds, "build_sitrep_clusters", lambda ev, pen: [dict(_CLUSTER)])
     monkeypatch.setattr(ds, "drop_safety_clusters", lambda c: c)
     monkeypatch.setattr(ds, "split_strategic", lambda c: (c, []))

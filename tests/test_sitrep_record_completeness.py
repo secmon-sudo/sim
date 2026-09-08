@@ -131,7 +131,6 @@ def _run_country(monkeypatch, events) -> tuple:
     monkeypatch.setattr(ds, "run_sitrep_llm", fake_llm)
     monkeypatch.setattr(ds, "get_country_name", lambda db, iso: "Ukrayna")
     monkeypatch.setattr(ds, "fetch_sitrep_events", lambda *a, **k: events)
-    monkeypatch.setattr(ds, "fetch_penalized_domains", lambda db: [])
     monkeypatch.setattr(ds, "fetch_spillover_events", lambda *a, **k: [])
     monkeypatch.setattr(ds, "fetch_aviation_spillover_events", lambda *a, **k: [])
     monkeypatch.setattr(ds, "fetch_active_czib_by_country", lambda db: {})

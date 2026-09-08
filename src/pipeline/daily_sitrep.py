@@ -30,7 +30,6 @@ from src.services.sitrep_generator import (
     cap_for_prompt,
     drop_safety_clusters,
     fetch_aviation_spillover_events,
-    fetch_penalized_domains,
     fetch_sitrep_events,
     fetch_spillover_events,
     is_truncated,
@@ -83,8 +82,15 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     logger.info("SITREP %s (%s): window %s — %s", country_iso, country_name, window_start, window_end)
 
     events = fetch_sitrep_events(db_conn, country_iso, window_start, window_end)
-    penalized = fetch_penalized_domains(db_conn)
-    clusters = build_sitrep_clusters(events, penalized)
+    # Empty, deliberately. This used to be every domain with penalty_score >= 0.5,
+    # which barred it from the independence count and the official-source check.
+    # Measured 2026-09-08 that list held one domain — nitter.net, gone from the
+    # codebase since 1 August — and the score behind it ranks mshale.com, the
+    # content farm that signed 20 of 20 fabricated alerts on 17 August, at 0.091
+    # against the Washington Post's 0.308. The parameter stays because excluding a
+    # domain is a legitimate operation; what is removed is deriving the list from a
+    # number that points the wrong way. See update_domain_penalty.
+    clusters = build_sitrep_clusters(events, [])
     # The narrative covers SECURITY events; technical/safety occurrences (a
     # diverted flight, a bird strike) are excluded by the prompt's own rule and
     # the model still wrote them up as report bullets on 1 Aug. Enforce it here
@@ -105,7 +111,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
                                               window_start, window_end)
     # Spillover rides in the same prompt, so it is capped too.
     spillover = cap_for_prompt(
-        build_sitrep_clusters(spillover_events, penalized)) if spillover_events else []
+        build_sitrep_clusters(spillover_events, [])) if spillover_events else []
 
     # Regional aviation disruptions relevant to this country but attributed to
     # the region/neighbours (null or other country_iso). Rendered as its own
@@ -113,7 +119,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     # per-country attribution or to the LLM narrative dropping it.
     aviation_events = fetch_aviation_spillover_events(db_conn, country_iso, country_name,
                                                       window_start, window_end)
-    aviation_spill = build_sitrep_clusters(aviation_events, penalized) if aviation_events else []
+    aviation_spill = build_sitrep_clusters(aviation_events, []) if aviation_events else []
 
     # Deterministic airspace exposure: which FIR each kinetic/aviation event sits
     # in, which neighbouring airspaces carry an active EASA CZIB restriction, and
@@ -149,7 +155,7 @@ def run_country_sitrep(db_conn, router: LLMRouter, country_iso: str,
     # appendix, the stat cards and the digest's confirmed-severe count read, and
     # those beyond the prompt cap would otherwise keep their pre-resolution labels.
     for cluster in clusters:
-        relabel_cluster(cluster, penalized)
+        relabel_cluster(cluster, [])
 
     if not clusters:
         logger.info("SITREP %s: no events in window — saving empty report", country_iso)

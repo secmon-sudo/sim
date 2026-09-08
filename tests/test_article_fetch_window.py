@@ -177,7 +177,6 @@ def _run(monkeypatch, window, items):
     monkeypatch.setattr(pa, "fetch_article", _fake_fetch_article)
     monkeypatch.setattr(pa, "translate_to_english_if_needed", lambda t: t)
     monkeypatch.setattr(pa, "_fetch_recent_events_for_dedup", lambda c: ([], []))
-    monkeypatch.setattr(pa, "load_domain_penalties", lambda c: {})
     # One synthetic query feed carries every item; everything else returns nothing.
     monkeypatch.setattr(pa, "build_search_queries",
                         lambda c: [{"query": "test", "dynamic": False}])

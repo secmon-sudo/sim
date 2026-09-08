@@ -6,7 +6,6 @@ from src.services.telegram_notifier import send_telegram_alert
 from src.pipeline.pass_a_ingest import (
     translate_to_english_if_needed,
     build_search_queries,
-    check_domain_penalty
 )
 
 # 1. Test translation helpers
@@ -50,29 +49,6 @@ def test_cjk_greek_thai_now_translated(mock_translate):
                  "공항에서 폭발 사고 발생"):               # Korean
         assert translate_to_english_if_needed(text) == "translated"
     assert mock_translate.call_count == 4
-
-
-# 2. Test check_domain_penalty whitelist and minimum events
-def test_check_domain_penalty_whitelist():
-    # Whitelisted domain should return 0.0 penalty
-    db = MagicMock()
-    assert check_domain_penalty(db, "reuters.com") == 0.0
-    # No SQL queries should have been run for whitelisted domain
-    db.execute.assert_not_called()
-
-def test_check_domain_penalty_under_5_events():
-    db = MagicMock()
-    # Mock return: penalty_score=0.9, total_events=4 (less than 5 threshold)
-    db.execute().fetchone.return_value = (0.9, 4)
-    
-    assert check_domain_penalty(db, "unreliable-blog.com") == 0.0
-
-def test_check_domain_penalty_over_5_events():
-    db = MagicMock()
-    # Mock return: penalty_score=0.9, total_events=5 (reaches threshold)
-    db.execute().fetchone.return_value = (0.9, 5)
-    
-    assert check_domain_penalty(db, "unreliable-blog.com") == 0.9
 
 
 # 3. Test build_search_queries with active storylines (sliding activity window)
