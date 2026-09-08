@@ -723,6 +723,83 @@ _TRAVEL_ADVISORY_NOUN_PATTERN = re.compile(
 )
 
 
+# A state actor, a kinetic verb, and somebody on the receiving end.
+#
+# pass_c's HOSTILE_ACT_PATTERN holds an armed-subject frame (forces, troops, jets)
+# and an asset-object frame written, in its own words, for "the headlines whose
+# subject is a bare country name no subject list can hold". The asset frame solves
+# that from the object side, which works only when the object is one of the listed
+# assets — and most of the time it is not.
+#
+# Measured 2026-09-08 over seven days: 174 of 2074 prescreen-archived headlines put
+# a state actor in front of a kinetic verb, and 15 of 16 sampled still scored ZERO
+# after the 2026-09-07 vocabulary work. The sample is not marginal material:
+#
+#   "Iran attacks US bases in Kuwait, UAE"
+#   "US strikes Iran again, blasts heard in Bandar Abbas, Chabahar"
+#   "Russia attacks Kiev airport ahead of US special envoy's trip"
+#   "Russia targets security chief's office in daylight Kyiv strike"
+#
+# An Iran-US missile exchange and strikes on Kyiv, archived without an LLM reading
+# them.
+#
+# A country name is holdable; the reason the vocabulary avoided it is that "China
+# targets 5% growth" and "India hits record high" share the shape. A negative
+# lookahead on the object was tried first and is too fragile — "targets 5% growth"
+# puts a number between the verb and the noun, and "shares hit new low" puts an
+# adjective there. The conjunction is the honest rule, as it was for the screening
+# breach: TWO named parties, because a strike has someone on the receiving end and
+# an earnings forecast does not.
+_STATE_ACTOR_PATTERN = re.compile(
+    r"\b(russia|russian|ukraine|ukrainian|iran|iranian|israel|israeli|"
+    r"syria|syrian|lebanon|lebanese|yemen|yemeni|houthis?|hamas|hezbollah|"
+    r"turkey|turkish|pakistan|pakistani|india|indian|china|chinese|"
+    r"north korea|south korea|saudi|emirati|qatar|kuwait|bahrain|jordan|egypt|"
+    r"sudan|somalia|nigeria|mali|niger|libya|myanmar|taliban|isis|isil|gaza|"
+    r"nato|moscow|kyiv|kiev|tehran|jerusalem|damascus|beirut|baghdad|sanaa|"
+    r"odesa|odessa|kharkiv|kherson|washington|beijing|pyongyang|"
+    r"u\.?s\.?|uk|america|american)\b",
+    re.IGNORECASE,
+)
+# The SUBJECT side is nouns only — no nationality adjectives. "Russian attacks" and
+# "Israeli strikes" are noun phrases, not a subject acting, and admitting them turned
+# "Ukraine's churches sustain aid amid Russian attacks" and "Pope Leo urges peace
+# between Russia, Ukraine as attacks escalate" into hostile acts. A state in subject
+# position writes itself as a noun: "Russia attacks", "Iran strikes". The adjectives
+# stay in _STATE_ACTOR_PATTERN, where they count as a named party rather than an actor.
+_STATE_KINETIC_PATTERN = re.compile(
+    r"\b(?:russia|ukraine|iran|israel|syria|"
+    r"lebanon|yemen|houthis?|hamas|hezbollah|turkey|"
+    r"pakistan|india|china|north korea|south korea|saudi arabia|"
+    r"qatar|kuwait|bahrain|jordan|egypt|sudan|somalia|nigeria|mali|niger|"
+    r"libya|myanmar|taliban|isis|isil|nato|moscow|kyiv|kiev|tehran|jerusalem|"
+    r"damascus|beirut|baghdad|sanaa|washington|beijing|pyongyang|u\.?s\.?|uk|"
+    r"america)\b"
+    r"(?:\s+[\w'’-]+){0,2}\s+"
+    r"\b(strikes?|struck|hits?|attacks?|attacked|bombs?|bombed|shells?|shelled|"
+    r"targets?|targeted|pounds?|pounded|storms?|stormed|raids?|raided)\b",
+    re.IGNORECASE,
+)
+# The objects that make the same shape an economic story. Checked anywhere in the
+# headline rather than beside the verb, for the reason the lookahead failed.
+_ECONOMIC_OBJECT_PATTERN = re.compile(
+    r"\b(growth|inflation|revenue|profits?|earnings|shares?|stocks?|markets?|"
+    r"prices?|exports?|imports?|tariffs?|deals?|agreements?|pacts?|accords?|"
+    r"record high|record low|milestone|gdp|forecast)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_state_actor_strike(title: str) -> bool:
+    """State actor + kinetic verb + a second named party, minus the economic senses."""
+    if not title or not _STATE_KINETIC_PATTERN.search(title):
+        return False
+    if _ECONOMIC_OBJECT_PATTERN.search(title):
+        return False
+    named = {m.group(0).lower() for m in _STATE_ACTOR_PATTERN.finditer(title)}
+    return len(named) >= 2
+
+
 def _is_official_security_alert(title: str) -> bool:
     """An official body telling people a place is dangerous.
 

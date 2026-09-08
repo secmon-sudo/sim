@@ -67,13 +67,23 @@ class TestTheSixAuditMisses:
         assert not _survives("Drone incident in Leipzig: the trail leads to Russia")
         assert not _is_aviation_security_incident("Drone incident: how should the EU respond?")
 
-    def test_a_bare_noun_of_strikes_causing_chaos_is_still_archived(self):
-        """"Iran-Kuwait strikes trigger fresh flight chaos in Gulf" needs "strike"
-        to count as a security nexus, and it cannot: the same word is a labour
-        dispute, which is how "Air France strike causes flight chaos" would arrive.
-        Left open deliberately — the anchor that would make it safe has not been
-        found, and guessing one is how this vocabulary got its false positives."""
-        assert not _survives("Iran-Kuwait strikes trigger fresh flight chaos in Gulf")
+    def test_the_strikes_causing_chaos_miss_was_closed_from_the_other_side(self):
+        """Left open on 2026-09-07 and closed on 2026-09-08, by a different route.
+
+        The reading then was that "Iran-Kuwait strikes trigger fresh flight chaos in
+        Gulf" needed "strike" to count as an aviation security nexus, which it cannot:
+        the same word is a labour dispute, and "Air France strike causes flight chaos"
+        would arrive on the same path. That is still true. What reached it instead is
+        _is_state_actor_strike — two named states either side of a kinetic verb — a
+        frame written for a different miss entirely. Worth pinning: the anchor that
+        was unsafe to guess from the aviation side was already implied by the
+        geopolitics.
+        """
+        assert _survives("Iran-Kuwait strikes trigger fresh flight chaos in Gulf")
+
+    def test_a_labour_dispute_causing_the_same_chaos_stays_out(self):
+        """Which is what made the aviation-side anchor unsafe, and still does."""
+        assert not _survives("Air France strike causes flight chaos at Charles de Gaulle")
 
     def test_an_untranslated_headline_is_beyond_this_vocabulary(self):
         """The Albanian miss. Pass A translates a headline whose letters are ≥30%

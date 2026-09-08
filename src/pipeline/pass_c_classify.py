@@ -29,6 +29,7 @@ from src.pipeline.ingest_filters import (
     _is_flight_disruption,
     _is_official_security_alert,
     _is_screening_breach,
+    _is_state_actor_strike,
     is_noise,
 )
 from src.pipeline.pass_b_dedup import acquire_lock, get_events_for_classification, release_lock
@@ -320,13 +321,21 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
     # class is a warning rather than an incident, so it should compete on the
     # normal score rather than be guaranteed a classification call.
     has_official_alert = _is_official_security_alert(title)
+    # A named state striking a named place. Counted as high signal rather than as
+    # ordinary vocabulary: the conjunction already requires two parties and a
+    # kinetic verb, which is a stronger claim than any single keyword makes, and
+    # these headlines carry no other vocabulary at all — 15 of 16 sampled scored
+    # exactly 0. See _is_state_actor_strike.
+    has_state_strike = _is_state_actor_strike(title)
     has_security = (has_high_signal or has_flight_disruption or has_hostile_act
                     or has_screening_breach or has_aviation_incident
                     or has_bare_incident or has_airport_intrusion
-                    or has_official_alert
+                    or has_official_alert or has_state_strike
                     or bool(_SECURITY_KEYWORD_PATTERN.search(blob)))
 
     score = 0
+    if has_state_strike:
+        score += 20  # clears the floor on its own; see _is_state_actor_strike
     if has_high_signal:
         score += 45
     elif has_security:
@@ -358,6 +367,7 @@ def deterministic_relevance(title: str, text: str, trusted_domain: bool = False)
         "has_bare_incident": has_bare_incident,
         "has_airport_intrusion": has_airport_intrusion,
         "has_official_alert": has_official_alert,
+        "has_state_strike": has_state_strike,
         "has_casualty": has_casualty,
         "noisy": noisy,
     }
