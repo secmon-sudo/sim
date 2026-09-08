@@ -28,8 +28,6 @@ attempt at a domain-quality signal should not have to start from nothing.
 
 import inspect
 
-import pytest
-
 from src.core.sitrep_verify import label_cluster
 from src.pipeline import pass_a_ingest
 from src.services import sitrep_generator
