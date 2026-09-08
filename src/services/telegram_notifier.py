@@ -81,6 +81,53 @@ TIER_LABELS = {
 
 _DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
 
+# ---------------------------------------------------------------- feedback buttons
+#
+# Every calibration decision in this pipeline has been made against a proxy — what the
+# classifier said, how many sources corroborated, what a replay counted as a false
+# positive. None of them says whether the card was worth sending. These two buttons are
+# the only channel that does; see db/migrations/024_alert_feedback.sql.
+#
+# callback_data is capped at 64 BYTES by Telegram and a card that exceeds it is rejected
+# outright, so the payload is a fixed 4-field shape and nothing free-form ever enters it:
+#
+#     fb:<verdict>:<tier>:<event uuid>     e.g. fb:u:C:9f4c...  = 43 bytes
+#
+# The tier travels in the button rather than being looked up at drain time on purpose:
+# events.alert_tier is not a record that a card was sent (ced1565) and Pass E rewrites
+# it, so the only place the tier the ANALYST SAW survives is the card itself.
+FEEDBACK_PREFIX = "fb"
+VERDICT_CODES = {"u": "useful", "n": "noise"}
+TIER_CODES = {"CRITICAL": "C", "ALERT": "A", "WATCH": "W"}
+TIER_CODES_INV = {v: k for k, v in TIER_CODES.items()}
+
+FEEDBACK_LABELS = {
+    "useful": "✅ İşe yaradı",
+    "noise": "🗑️ Gürültü",
+}
+
+
+def build_feedback_keyboard(event_id: str, tier: str) -> dict | None:
+    """The two-button reply_markup for one alert card, or None if it cannot be keyed.
+
+    Returns None rather than a partial keyboard when there is no event id: a button
+    whose callback_data cannot name an event produces a press that the drain must
+    discard, which reads to the analyst as a dead button and costs the trust the whole
+    mechanism runs on.
+    """
+    eid = str(event_id or "").strip()
+    if not eid:
+        return None
+    tier_code = TIER_CODES.get(str(tier or "").upper(), "X")
+    return {
+        "inline_keyboard": [[
+            {"text": FEEDBACK_LABELS["useful"],
+             "callback_data": f"{FEEDBACK_PREFIX}:u:{tier_code}:{eid}"},
+            {"text": FEEDBACK_LABELS["noise"],
+             "callback_data": f"{FEEDBACK_PREFIX}:n:{tier_code}:{eid}"},
+        ]]
+    }
+
 
 def _humanize(slug: str) -> str:
     """snake_case event type → 'Title Case' words for display."""
@@ -190,16 +237,18 @@ def send_telegram_alert(event: dict) -> bool:
 
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False
+    }
+    keyboard = build_feedback_keyboard(event.get("id"), tier)
+    if keyboard:
+        payload["reply_markup"] = keyboard
+
     try:
-        _post_telegram(
-            api_url,
-            payload={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": False
-            }
-        )
+        _post_telegram(api_url, payload=payload)
         logger.info("Sent Telegram alert for event %s", event.get("id", ""))
         return True
     except httpx.HTTPError as e:

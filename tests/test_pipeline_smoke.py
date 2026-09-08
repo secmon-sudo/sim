@@ -141,6 +141,11 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
         return _fixture_items()
 
     fake_telegram = MagicMock(return_value=True)
+    # drain_feedback below: a test run must never drain the real bot. Presses would be
+    # written to this throwaway smoke database and their cards edited to say
+    # "recorded", while production — the only place that reads them — never sees them.
+    # CI carries no TELEGRAM_BOT_TOKEN today, which makes the drain a no-op by
+    # accident; the patch makes it a no-op by decision.
     with patch.object(pass_a_ingest, "fetch_rss_feed", side_effect=fake_fetch_rss), \
          patch.object(pass_a_ingest, "fetch_travel_advisories", return_value=[]), \
          patch.object(pass_a_ingest, "translate_to_english_if_needed", side_effect=lambda t: t), \
@@ -149,6 +154,8 @@ def test_full_pipeline_run_against_real_postgres(smoke_db):
          patch.object(orchestrator, "sync_czib_to_db",
                       return_value={"fetched": 0, "inserted": 0, "updated": 0}), \
          patch.object(orchestrator, "run_run_snapshot", return_value={"skipped": "smoke"}), \
+         patch.object(orchestrator, "drain_feedback",
+                      return_value={"fetched": 0, "recorded": 0}), \
          patch("src.pipeline.pass_d_score.send_telegram_alert", fake_telegram), \
          patch("src.services.telegram_report_notifier.send_telegram_document", MagicMock()), \
          patch("src.services.ops_notifier.send_ops_alert", MagicMock(return_value=True)):

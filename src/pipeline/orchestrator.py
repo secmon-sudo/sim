@@ -27,6 +27,7 @@ from src.pipeline.pass_c_classify import run_pass_c
 from src.pipeline.pass_d_score import run_pass_d
 from src.pipeline.pass_e_reconcile import run_pass_e
 from src.pipeline.pass_f_archive import run_pass_f, run_run_snapshot
+from src.services.feedback_drain import drain_feedback
 from src.services.czib_client import sync_czib_to_db
 from src.services.supabase_client import close_pool, get_connection, put_connection
 
@@ -171,6 +172,7 @@ def run_pipeline():
         "pass_c": None,
         "pass_d": None,
         "pass_e": None,
+        "feedback": None,
         "run_snapshot": None,
         "pass_f": None,
         "success": False,
@@ -200,6 +202,15 @@ def run_pipeline():
 
         logger.info("LLM Router: %d accounts, %d RPD total quota",
                      len(router.accounts), router.total_daily_quota)
+
+        # Analyst feedback on the cards we already sent. First, before any of the
+        # passes: it is the one step whose input is generated OUTSIDE this run, it costs
+        # a single HTTP call, and putting it here means a run that later dies in Pass C
+        # has still banked the presses. Isolated — a Telegram outage must not cost a run.
+        try:
+            results["feedback"] = drain_feedback(db_conn)
+        except Exception:
+            logger.exception("Feedback drain failed, continuing")
 
         # CZIB Sync: Refresh EASA conflict zones before ingestion
         logger.info("--- CZIB Sync: EASA Conflict Zones ---")
@@ -355,6 +366,15 @@ def _collect_degradations(results: dict) -> list[str]:
     problems: list[str] = []
     for stage, stats in results.items():
         if not isinstance(stats, dict):
+            continue
+        if stage == "feedback":
+            # A getUpdates timeout is a missed collection, not a broken run: the presses
+            # stay in Telegram's 24h window and the next drain takes them. Only the
+            # permanent class — revoked token, or a webhook that has taken the update
+            # stream away from polling — means presses are being lost, and only that
+            # earns a page. Everything else is visible in the counters.
+            if stats.get("fatal"):
+                problems.append(f"feedback: {stats.get('error')} — presses are being lost")
             continue
         if stats.get("error"):
             problems.append(f"{stage}: {stats['error']}")

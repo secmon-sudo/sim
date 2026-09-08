@@ -1,0 +1,46 @@
+name: Feedback Drain
+
+# The alert cards carry two buttons and nothing is listening for them between pipeline
+# runs. The pipeline drains at the start of each run, but runs are ~3h apart, and a
+# button that sits unacknowledged for three hours is a button nobody presses twice.
+#
+# */10 rather than */5: GitHub's scheduler drifts and drops ticks under load (the same
+# unreliability that moved the pipeline's own cron to a backstop role), so a tighter
+# interval buys latency it cannot actually deliver. A missed tick costs nothing —
+# Telegram holds updates for 24h and the cursor makes the next drain pick them up.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sim-feedback-drain
+  cancel-in-progress: false
+
+env:
+  DATABASE_URL:       ${{ secrets.DATABASE_URL }}
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # No migration step. This job only ever reads a cursor and writes feedback rows;
+      # the pipeline owns schema, and a 10-minute job racing DDL against it is a way to
+      # break the pipeline, not a way to keep this one current.
+      - name: Drain feedback
+        run: python -m scripts.drain_feedback
