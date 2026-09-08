@@ -188,6 +188,30 @@ TIER_RULES = _tier_rules()
 # the check is written as membership in this set and never as `!= "new_incident"`.
 REPORT_KIND_NOT_NEWS = frozenset({"followup", "roundup", "commentary"})
 
+# ...and the one of the three that does NOT get CRITICAL's exemption.
+#
+# The exemption is written for a specific case: "a roundup is sometimes the only
+# carrier of a genuinely major development, and missing that costs more than the
+# noise it lets through." Measured 2026-09-08 over seven days, 74 of 427
+# CRITICAL-eligible events carried a not-news report_kind — 52 followup, 19
+# commentary, 3 roundup — and reading a sample of them splits about evenly between
+# the case the exemption was written for and diplomatic reaction:
+#
+#   kept    "Germany says Russia was behind last month's attempted drone attack"
+#   kept    "8 people killed in Kyiv as a result of Russian attack"
+#   vetoed  "EU And NATO Vow More Pressure After Germany Blames Russia"
+#   vetoed  "Sergei Lavrov accuses Germany of saying the Leipzig incident is…"
+#   vetoed  "Russia to shut German cultural centers in retaliation"
+#
+# commentary is the class where that split is worst and where the exemption's own
+# argument does not apply: a commentary piece is by definition not the carrier of a
+# development, it is a reaction to one that has already been reported. followup and
+# roundup keep the exemption — a followup is where a toll update or a state
+# attribution arrives, and the roundup case is the one the rule was written for.
+#
+# Narrow on purpose. 19 events over seven days, about 4 cards after suppression.
+CRITICAL_VETOED_REPORT_KINDS = frozenset({"commentary"})
+
 # Publisher/section suffix: "Headline - Reuters", "Headline | Shafaq News | Latest…".
 # Stripped before the desk-label test so a publisher's tagline cannot trip it.
 _PUBLISHER_SUFFIX_RE = re.compile(r"\s+[-|–—]\s+[^-|–—]*$")
@@ -626,14 +650,24 @@ def evaluate_alert_tier_verbose(event: dict) -> tuple[str | None, str | None]:
     # produced 296 of 561 ALERT-tier events with no confidence requirement at all, and
     # the junk among them was overwhelmingly this shape — arrests, charges, reopenings,
     # released footage, condemnations, "Day 1,625" war diaries.
+    # The headline-shape half keeps CRITICAL fully exempt, and runs FIRST so a veto
+    # is attributed to the cheapest gate that could have produced it. It reads a desk
+    # label rather than the article, and a desk label on a genuinely major
+    # development is exactly the case the exemption exists for.
     if tier is not None and tier != "CRITICAL":
         kind = aftermath_kind(event.get("source_title"))
         if kind:
             logger.info("Alert suppressed as %s report (would have been %s): %.80s",
                         kind, tier, event.get("source_title") or "")
             return None, "aftermath_title"
+
+    # The report_kind half now runs at every tier; what CRITICAL narrows is WHICH
+    # kinds veto there. See CRITICAL_VETOED_REPORT_KINDS.
+    if tier is not None:
         report_kind = event.get("report_kind")
-        if report_kind in REPORT_KIND_NOT_NEWS:
+        vetoing = (REPORT_KIND_NOT_NEWS if tier != "CRITICAL"
+                   else CRITICAL_VETOED_REPORT_KINDS)
+        if report_kind in vetoing:
             logger.info("Alert suppressed as %s article (would have been %s): %.80s",
                         report_kind, tier, event.get("source_title") or "")
             return None, f"report_kind_{report_kind}"
