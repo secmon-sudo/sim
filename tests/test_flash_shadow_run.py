@@ -7,10 +7,20 @@ examined is not recoverable later.
 
 Turning the cadence up on its own is not the fix. Measured over 14 days, the two
 triggers that read only the last 24 hours would fire for ~9 (convergence) and ~2
-(high volume) countries a DAY — against ~11 alert cards a day from Pass D, that
-roughly doubles this product's paging with cards describing an ordinary day in a
-war. And no threshold can be chosen yet, because what an ordinary day looks like
-per country was never recorded.
+(high volume) countries a DAY.
+
+The first version of this docstring set that against "~11 alert cards a day from
+Pass D" and concluded it would roughly double the paging. That number was wrong —
+it was a single run's alerts_generated read as a daily total. Counted properly from
+69 runs of pass_d telemetry over seven days: 96 CRITICAL, 409 ALERT and 327 WATCH
+cards, about 119 a day. Daily flash would add roughly 9%, not 100%.
+
+The cadence argument does not rest on that number and still holds without it: the
+convergence trigger fires for ~9 countries every day because a war has several
+incidents near one place most days, so a live daily cadence would page the same
+handful of countries continuously. And no threshold can separate the exceptional
+day from the ordinary one yet, because what an ordinary day looks like per country
+was never recorded.
 
 So: daily cadence for the RECORD, weekly cadence for the PAGE, until the record can
 answer the question.

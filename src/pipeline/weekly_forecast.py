@@ -192,9 +192,13 @@ def run_flash_detection(
         evaluated once every 168 hours never looks at six days in seven, and those
         six days are not recoverable afterwards;
       * measured over 14 days, the two triggers that read only the last 24h would
-        fire for ~9 (convergence) and ~2 (high volume) countries A DAY. Turning the
-        cadence up without a threshold would roughly double this product's paging
-        volume with cards describing an ordinary day in a war;
+        fire for ~9 (convergence) and ~2 (high volume) countries A DAY — cards
+        describing an ordinary day in a war, since a war has several incidents near
+        one place most days. (An earlier note here put that against "~11 alert cards
+        a day" and called it a doubling; that was one run's count read as a daily
+        total. Seven days of pass_d telemetry over 69 runs: 96 CRITICAL, 409 ALERT,
+        327 WATCH — about 119 a day, so this would add roughly 9%. The objection is
+        the repetition, not the volume.);
       * and the reason no threshold can be set today is that nobody knows what an
         ordinary day looks like per country, because the distribution was never
         kept.
