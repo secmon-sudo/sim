@@ -248,7 +248,20 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool, str | No
                     logger.info("Pass E tier vetoed for event %s after upgrade: %s",
                                 event_id[:8], veto)
 
-                # Update with upgraded anchor
+                # NOTE: events.alert_tier is what this event QUALIFIES for, not a
+                # record that a card was sent. Two things write a tier here without a
+                # dispatch — the travel-advisory path, which returns before the
+                # article-shape gates by design, and (until 2026-09-07) this pass
+                # promoting past a report_kind veto. Measured 2026-09-08: 150 of
+                # 13,856 reconciled rows carry a tier with a not-news report_kind,
+                # 148 of them from before that fix and 2 advisories.
+                #
+                # They are inert, and it is worth writing down why so the next reader
+                # does not go looking: purge_expired_archived only touches
+                # status='archived', and recent_paged_alerts takes its tier from the
+                # alert_suppression CLAIM rather than from this column. A claim exists
+                # only where a card actually went. Anything that needs "did this page"
+                # must read alert_suppression, never this.
                 with db_conn.transaction():
                     db_conn.execute(
                         """UPDATE events
