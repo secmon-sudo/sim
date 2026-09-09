@@ -131,14 +131,33 @@ def main() -> int:
     print("classifying with recovered body …")
     after = _classify(router, rows, with_body=True)
 
+    # A replay that classified nothing must not print a verdict. The first run of this
+    # script took a 429 on its opening call, cascaded every remaining batch into
+    # LLMAllThrottled, and then printed a clean table of dashes under the heading
+    # "of 26 reports whose body was recoverable: recovered onto a SECURITY type: 0".
+    # That reads exactly like a measured negative and is nothing of the kind — the same
+    # "it ran and was empty" failure this repo keeps a counters module for. Both sides
+    # must have answered for a comparison to exist, and a thin sample is reported as
+    # thin rather than averaged into confidence.
+    graded = [i for i in range(len(rows))
+              if len(rows[i].get("recovered_text") or "") > 400
+              and before.get(i) and after.get(i)]
+    if not graded:
+        print("\nNO VERDICT: neither side produced classifications — see the batch "
+              "errors above. This is a failed run, not a null result.")
+        return 2
+    if len(graded) < len(withb) // 2:
+        print(f"\nWARNING: only {len(graded)} of {len(withb)} reports were classified "
+              "on BOTH sides. Treat the tally below as a sample, not a rate.")
+
     print(f"\n{'domain':<22} {'headline-only':<34} {'with body':<34} moved")
     print("-" * 104)
     gained_type = gained_time = lost = gained_safety = 0
     SENTINELS = ("unclassified", "other_aviation_related", "—")
     for i, row in enumerate(rows):
-        if len(row.get("recovered_text") or "") <= 400:
+        if i not in graded:
             continue
-        b, a = before.get(i) or {}, after.get(i) or {}
+        b, a = before[i], after[i]
         bt, at = b.get("event_type") or "—", a.get("event_type") or "—"
         btc, atc = b.get("time_certainty") or "—", a.get("time_certainty") or "—"
         moved = []
@@ -163,9 +182,9 @@ def main() -> int:
         print(f"{row['domain'][:22]:<22} {bt[:20]:<20} {btc[:12]:<13} "
               f"{at[:20]:<20} {atc[:12]:<13} {','.join(moved) or '-'}")
 
-    n = len(withb)
     print("-" * 104)
-    print(f"\nof {n} reports whose body was recoverable:")
+    print(f"\nof {len(graded)} reports classified on BOTH sides "
+          f"({len(withb)} had a recoverable body, {len(rows)} sampled):")
     print(f"  recovered onto a SECURITY type                : {gained_type}")
     print(f"  recovered onto a safety type (does NOT page)  : {gained_safety}")
     print(f"  time_certainty left 'unknown'                 : {gained_time}")
