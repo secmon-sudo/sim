@@ -114,7 +114,23 @@ class TestExtractionParsing:
                                       "standing": "probably"}]})
         out = ib._parse_extraction(body, 1)
         assert out[0] == {"actor": ib.UNATTRIBUTED, "target": ib.UNATTRIBUTED,
+                          "target_country": ib.UNKNOWN_COUNTRY,
                           "standing": ib.STANDING_UNKNOWN, ib.WAR_RELATED: True}
+
+    def test_a_target_country_is_read_as_an_iso_code_or_not_at_all(self):
+        """It decides a section, so it is one of the values we asked for or absent."""
+        body = json.dumps({"items": [
+            {"n": 1, "actor": "iran", "target_country": "ye"},
+            {"n": 2, "actor": "iran", "target_country": "Saudi Arabia"},
+            {"n": 3, "actor": "iran", "target_country": "unknown"}]})
+        out = ib._parse_extraction(body, 3)
+        assert out[0]["target_country"] == "YE"
+        assert out[1]["target_country"] == ib.UNKNOWN_COUNTRY
+        assert out[2]["target_country"] == ib.UNKNOWN_COUNTRY
+
+    def test_the_prompt_asks_for_the_target_country(self):
+        prompt = ib._extraction_prompt([{"title": "x"}])
+        assert "target_country" in prompt
 
     def test_a_short_reply_leaves_the_rest_unattributed(self):
         body = json.dumps({"items": [{"n": 1, "actor": "iran",
@@ -647,3 +663,161 @@ def test_the_slot_that_returned_nothing_is_gone():
     from src.core.llm_router import BULLETIN_MEASURED_MODELS
 
     assert "gemini-3.5-flash-lite" not in BULLETIN_MEASURED_MODELS
+
+
+class TestIranSideActorAtHome:
+    """Section 2 needs the action to CROSS a border (9 Sep 2026).
+
+    The Houthis are Iran-side by the actor table and are also one belligerent in
+    Yemen's own civil war, so "2 children killed in Houthi shelling of displaced
+    people in Yemen's Marib" was filed as an Iranian strike on a neighbour — 4-5
+    rows a day across the 6-9 Sep bulletins, Hezbollah inside Lebanon included.
+
+    The rule keys on the TARGET country because the filing country cannot separate
+    the cases: the 9 Sep window filed both the Marib shelling and "Houthi strikes
+    injure 73 in Saudi Arabia" under YE.
+    """
+
+    def test_the_headline_that_exposed_it(self):
+        ev = {"country_iso": "YE", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": "YE"}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_the_same_actor_reaching_across_the_border_is_still_section_two(self):
+        """Filed under YE like the row above; only the target tells them apart."""
+        ev = {"country_iso": "YE", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": "SA"}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+    def test_hezbollah_inside_lebanon_is_regional(self):
+        ev = {"country_iso": "LB", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": "LB"}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_hezbollah_firing_into_israel_is_not(self):
+        ev = {"country_iso": "LB", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": "IL"}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+    def test_iraq_is_not_a_home_country(self):
+        """Iran genuinely strikes Iraq — Erbil, the Surdash camp, the Kurdish
+        opposition in the north. That is exactly what section 2 is for."""
+        ev = {"country_iso": "IQ", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": "IQ"}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+    def test_the_home_rule_never_moves_a_strike_ON_iran(self):
+        ev = {"country_iso": "IR", "actor": ib.US_SIDE, "target": ib.IRAN_SIDE,
+              "target_country": "YE"}
+        assert ib.assign_section(ev) == ib.SECTION_ON_IRAN
+
+    def test_a_missing_target_country_leaves_the_old_behaviour_alone(self):
+        ev = {"country_iso": "SA", "actor": ib.IRAN_SIDE, "target": ib.OTHER_SIDE,
+              "target_country": ib.UNKNOWN_COUNTRY}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+
+class TestStorylineCollapse:
+    """One row per story, not per outlet (9 Sep 2026).
+
+    202 theatre events in that window carried 53 storylines, and the two biggest —
+    the same Houthi attack on southern Saudi Arabia — were 105 of them. The
+    bulletin was the one report in SIM reading raw event rows: the country SITREP
+    has always collapsed (138 Saudi events into 22 clusters).
+    """
+
+    def _ev(self, sid, title, domain, **kw):
+        ev = {"storyline_id": sid, "title": title, "domain": domain,
+              "url": f"https://{domain}/x", "severity": kw.pop("severity", 90),
+              "corroborating_sources": kw.pop("corroborating_sources", [])}
+        ev.update(kw)
+        return ev
+
+    def test_one_story_becomes_one_row(self):
+        events = [self._ev("s1", "Houthis attack Saudi cities", "a.com"),
+                  self._ev("s1", "Houthi strikes hit Saudi oil sites", "b.com"),
+                  self._ev("s1", "Saudi Arabia vows response", "c.com")]
+        out = ib.collapse_by_storyline(events)
+        assert len(out) == 1
+        assert out[0]["outlet_count"] == 3
+
+    def test_the_outlets_it_stands_for_are_kept(self):
+        events = [self._ev("s1", "Houthis attack Saudi cities", "a.com"),
+                  self._ev("s1", "Houthi strikes hit Saudi oil sites", "b.com")]
+        out = ib.collapse_by_storyline(events)
+        assert [s["name"] for s in out[0]["sibling_sources"]] == ["b.com"]
+
+    def test_the_most_corroborated_filing_represents_the_story(self):
+        """Severity saturates at 100, so it cannot pick. Corroboration can."""
+        events = [self._ev("s1", "Houthi strikes hit Saudi oil sites", "a.com",
+                           severity=100),
+                  self._ev("s1", "Saudi energy sites hit", "b.com", severity=100,
+                           corroborating_sources=[{"domain": "reuters.com"}])]
+        out = ib.collapse_by_storyline(events)
+        assert out[0]["domain"] == "b.com"
+
+    def test_the_toll_breaks_a_tie_but_does_not_lead(self):
+        """A storyline is a THREAD, not an incident: its biggest toll can belong
+        to another strand of it. On 9 Sep the 79-filing Houthi/Saudi story led
+        with "Yemen clashes kill 300" — a real toll, from the other front."""
+        events = [self._ev("s1", "Saudi vows retaliation, Yemen clashes kill 300",
+                           "wion.com"),
+                  self._ev("s1", "Houthi strikes in Saudi Arabia wound 73",
+                           "straitstimes.com",
+                           corroborating_sources=[{"domain": "reuters.com"}])]
+        assert ib.collapse_by_storyline(events)[0]["domain"] == "straitstimes.com"
+
+        tied = [self._ev("s1", "Saudi energy sites hit", "a.com"),
+                self._ev("s1", "Houthi attacks kill 12 in Saudi Arabia", "b.com")]
+        assert ib.collapse_by_storyline(tied)[0]["domain"] == "b.com"
+
+    def test_separate_stories_stay_separate(self):
+        events = [self._ev("s1", "Houthis attack Saudi cities", "a.com"),
+                  self._ev("s2", "Iran fires missiles at Jordan base", "b.com")]
+        assert len(ib.collapse_by_storyline(events)) == 2
+
+    def test_an_unlinked_event_is_its_own_story(self):
+        """A NULL storyline means the linker never placed it, not that it
+        belongs with every other unplaced event."""
+        events = [self._ev(None, "Tanker struck near Kharg", "a.com"),
+                  self._ev(None, "Blast heard off Jask", "b.com")]
+        assert len(ib.collapse_by_storyline(events)) == 2
+
+    def test_order_follows_the_fetch(self):
+        events = [self._ev("s1", "First story", "a.com"),
+                  self._ev("s2", "Second story", "b.com"),
+                  self._ev("s1", "First story, refiled", "c.com")]
+        out = ib.collapse_by_storyline(events)
+        assert [e["title"] for e in out] == ["First story", "Second story"]
+
+    def test_the_input_rows_are_not_mutated(self):
+        """The representative is a copy: extract_direction writes in place, and
+        the collapsed row must not reach back into the fetched list."""
+        events = [self._ev("s1", "Houthis attack Saudi cities", "a.com")]
+        ib.collapse_by_storyline(events)[0]["actor"] = ib.IRAN_SIDE
+        assert "actor" not in events[0]
+
+    def test_the_bulletin_collapses_before_it_extracts(self, monkeypatch):
+        """Direction is a property of the story, not of the outlet that filed
+        it — and collapsing first is what takes the LLM call count down with it."""
+        seen = {}
+        monkeypatch.setattr(ib, "fetch_theatre_events", lambda *a: [
+            self._ev("s1", "Houthis attack Saudi cities", "a.com"),
+            self._ev("s1", "Houthi strikes hit Saudi oil sites", "b.com"),
+            self._ev("s2", "Iran fires missiles at Jordan base", "c.com")])
+
+        def _extract(router, events, db_conn=None):
+            seen["n"] = len(events)
+            for ev in events:
+                ev.update(actor=ib.IRAN_SIDE, standing=ib.STANDING_CONFIRMED)
+            return events
+
+        monkeypatch.setattr(ib, "extract_direction", _extract)
+        monkeypatch.setattr(ib, "call_llm",
+                            lambda **k: {"content": "YÖNETİCİ ÖZETİ\nOldu."})
+        from datetime import datetime, timezone
+        out = ib.build_bulletin(None, None,
+                                datetime(2026, 9, 8, tzinfo=timezone.utc),
+                                datetime(2026, 9, 9, tzinfo=timezone.utc))
+        assert seen["n"] == 2
+        assert len(out["events"]) == 2

@@ -92,9 +92,34 @@ STANDING_UNKNOWN = "unknown"
 # Nazareth" are both civilian_casualties in Israel, and only one of them is the war.
 WAR_RELATED = "war_related"
 
+# Where an Iran-side actor is at HOME rather than reaching across a border.
+#
+# Section 2 is "İran'dan komşu ülkelere" — an attack that CROSSES into another
+# country. The Houthis are Iran-side by the actor table and they are also one
+# belligerent in Yemen's own civil war, so "Houthi shelling of displaced people in
+# Yemen's Marib" was arriving in section 2 as an Iranian strike on a neighbour.
+# Measured across the 6-9 Sep bulletins: 4-5 rows a day, every day, plus Hezbollah
+# inside Lebanon.
+#
+# Keyed on the TARGET country and never on the filing country, because the filing
+# country does not separate the two cases: the same window filed BOTH the Marib
+# shelling AND "Houthi strikes injure 73 in Saudi Arabia" under YE. The first is
+# the Yemeni war, the second is section-2 material, and only the target tells them
+# apart.
+#
+# IQ was measured and deliberately left out. Iran does strike Iraq — the Kurdish
+# opposition in the north, the Surdash camp, US positions near Erbil — so an
+# Iran-side actor with target_country=IQ is exactly what section 2 is for.
+IRAN_SIDE_HOME_ISO = frozenset({"YE", "LB"})
+
+UNKNOWN_COUNTRY = "unknown"
+
 SECTION_ON_IRAN = "on_iran"
 SECTION_FROM_IRAN = "from_iran"
 SECTION_REGIONAL = "regional"
+
+# Only a bare two-letter code counts as an answer to target_country.
+_ISO2_RE = re.compile(r"[A-Z]{2}")
 
 _EXTRACTION_SYSTEM_PROMPT = (
     "You read security news headlines and report WHO ACTED, not what you believe "
@@ -159,6 +184,91 @@ def fetch_theatre_events(db_conn, window_start: datetime,
     ]
 
 
+# One row per STORY, not per outlet. Measured on the 9 Sep window: 202 theatre
+# events carried 53 storylines, and the two biggest — the same Houthi attack on
+# southern Saudi Arabia, split across two storylines by the linker — accounted for
+# 105 of them. Un-collapsed, that single story was 52% of the bulletin: 52% of the
+# appendix the operator reads as the day's record, and 52% of the narrator's
+# payload, where an article count is the only weight a headline has.
+#
+# The country SITREP has always collapsed (SA: 138 events into 22 clusters). The
+# bulletin was the one report reading raw event rows, which is also why its
+# "from Iran" count went 29 -> 138 overnight and read as a five-fold escalation
+# when the escalation was real but the multiplier was syndication.
+#
+# Collapsing BEFORE the extraction is deliberate: direction is a property of the
+# story, not of the outlet that filed it, and it cuts the LLM call count by the
+# same 74% — fewer batches is directly fewer chances to hit the burst ceiling
+# that produced the 5 Sep actorless bulletin.
+def _representative_key(event: Dict[str, Any]) -> tuple:
+    """Sort key that puts the best-INFORMED filing of a story first.
+
+    Corroboration leads, then the casualty figure, then severity, then recency.
+    Severity is never first anywhere in SIM for the same reason it is not first
+    here — Pass D saturates at 100, so every member of a mass-casualty story ties
+    on it and the ordering silently collapses onto whatever comes next.
+
+    The SITREP puts the casualty figure first and this deliberately does not,
+    because the two are grouping different things. A SITREP cluster IS one
+    incident, so its fullest toll describes the incident. A storyline is a
+    THREAD, and its fullest toll can belong to another strand of it: on 9 Sep the
+    79-filing Houthi/Saudi story was represented by "Saudi Arabia vows retaliation
+    as Houthi attacks set oil facilities ablaze, Yemen clashes kill 300" — a real
+    toll, from the Yemeni front, standing in for an attack on Saudi Arabia.
+    Ranking on corroboration instead picks "Houthi strikes in Saudi Arabia wound
+    73: Riyadh-led coalition". Measured over that window it changes 3 of 53
+    stories, and all three are the three biggest.
+    """
+    try:  # pragma: no cover - exercised via the real module in production
+        from src.services.sitrep_generator import _casualty_magnitude
+        deaths, casualties = _casualty_magnitude({"source_title": event.get("title") or ""})
+    except Exception:
+        deaths = casualties = 0
+    occurred = event.get("occurred_at")
+    return (
+        -len(event.get("corroborating_sources") or []),
+        -deaths,
+        -casualties,
+        -(event.get("severity") or 0),
+        occurred is None,
+        -(occurred.timestamp() if isinstance(occurred, datetime) else 0),
+    )
+
+
+def collapse_by_storyline(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One representative per storyline, carrying the outlets it stood in for.
+
+    Nothing is thrown away that the report was showing: the other members become
+    `sibling_sources`, so the appendix row still links every outlet that carried
+    the story and still says how many there were. What goes away is the same
+    headline printed twenty times.
+
+    An event with no storyline_id is its own story. That is not a hypothetical
+    branch kept for tidiness — it is the honest reading, since a NULL there means
+    the linker never placed it, not that it belongs with anything else.
+    """
+    groups: Dict[Any, List[Dict[str, Any]]] = {}
+    order: List[Any] = []
+    for index, event in enumerate(events):
+        key = event.get("storyline_id") or ("__unlinked__", index)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(event)
+
+    collapsed = []
+    for key in order:
+        members = sorted(groups[key], key=_representative_key)
+        rep = dict(members[0])
+        rep["outlet_count"] = len(members)
+        rep["sibling_sources"] = [
+            {"name": m.get("domain"), "url": m.get("url"), "title": m.get("title")}
+            for m in members[1:]
+        ]
+        collapsed.append(rep)
+    return collapsed
+
+
 def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
     lines = [
         "For each numbered headline, name the actor that CARRIED OUT the action and "
@@ -176,6 +286,15 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         f'"{IRAN_SIDE}" when Iran or Iranian territory was hit, "{US_SIDE}" when US '
         f'forces or their bases were hit, "{OTHER_SIDE}" for anyone else, '
         f'"{UNATTRIBUTED}" when the text names no target.',
+        "",
+        f'target_country: the ISO 3166 alpha-2 code of the country the action '
+        f'LANDED IN — "SA" for a strike on Saudi Arabia, "IR" for a strike on '
+        f'Iranian soil, "YE" for shelling inside Yemen — or "{UNKNOWN_COUNTRY}" '
+        f'when the headline does not say where it landed. This is where it '
+        f'landed, not where the story was filed and not the attacker\'s country: '
+        f'"Houthi shelling of displaced people in Yemen\'s Marib" is '
+        f'target_country=YE, "Houthi strikes injure 73 in Saudi Arabia" is '
+        f'target_country=SA, and both have actor=iran.',
         "",
         'war_related: true when the headline is about ARMED CONFLICT or a '
         'military/security operation — a strike, shelling, an interception, air '
@@ -228,8 +347,8 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         'bases in Bahrain, Iraq and Jordan" is actor=iran, target=us_coalition.',
         "",
         'Reply with JSON only: '
-        '{"items":[{"n":1,"actor":"...","target":"...","standing":"...",'
-        '"war_related":true}]}',
+        '{"items":[{"n":1,"actor":"...","target":"...","target_country":"..",'
+        '"standing":"...","war_related":true}]}',
         "",
     ]
     for i, ev in enumerate(events, 1):
@@ -266,6 +385,7 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
     # malformed batch silently delete a day's strikes.
     out: List[Dict[str, Any]] = [
         {"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
+         "target_country": UNKNOWN_COUNTRY,
          "standing": STANDING_UNKNOWN, WAR_RELATED: True}
         for _ in range(expected)
     ]
@@ -283,12 +403,19 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
         actor = str(item.get("actor", "")).strip().lower()
         target = str(item.get("target", "")).strip().lower()
         standing = str(item.get("standing", "")).strip().lower()
+        # An ISO code or nothing. Anything else — a country name, a region, a
+        # sentence — is read as absent rather than half-trusted, on the same rule
+        # the labels above follow: a value that decides a section is either one of
+        # the values we asked for or it is missing.
+        iso = str(item.get("target_country", "")).strip().upper()
+        target_country = iso if _ISO2_RE.fullmatch(iso) else UNKNOWN_COUNTRY
         # An unrecognised value is treated as absent rather than trusted. The
         # bulletin's sections are built from these, so a hallucinated label would
         # move a real strike into the wrong half of the war.
         out[idx] = {
             "actor": actor if actor in valid_actors else UNATTRIBUTED,
             "target": target if target in valid_actors else UNATTRIBUTED,
+            "target_country": target_country,
             "standing": standing if standing in valid_standing else STANDING_UNKNOWN,
             # Only an explicit false drops an event; a missing or unreadable value
             # keeps it. Same asymmetry as above, for the same reason.
@@ -355,6 +482,7 @@ def extract_direction(router: LLMRouter, events: List[Dict[str, Any]],
             logger.warning("Direction extraction failed for a batch of %d; those "
                            "events stay unattributed", len(chunk), exc_info=True)
             parsed = [{"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
+                       "target_country": UNKNOWN_COUNTRY,
                        "standing": STANDING_UNKNOWN, WAR_RELATED: True}
                       for _ in chunk]
         for ev, fields in zip(chunk, parsed):
@@ -382,9 +510,19 @@ def assign_section(event: Dict[str, Any]) -> str:
       * an event whose actor could not be established never enters a directional
         section, because putting it there would assert the very thing that could
         not be read.
+
+    A third joined them on 9 Sep 2026: section 2 needs the action to CROSS a
+    border. An Iran-side actor striking inside the country it operates from is
+    that country's own war — see IRAN_SIDE_HOME_ISO.
     """
     actor = event.get("actor", UNATTRIBUTED)
     if actor in (UNATTRIBUTED, OTHER_SIDE):
+        return SECTION_REGIONAL
+
+    if actor == IRAN_SIDE and event.get("target_country") in IRAN_SIDE_HOME_ISO:
+        # The Iran-side actor is at home: the Houthis inside Yemen, Hezbollah
+        # inside Lebanon. A local war is a regional development, not a strike
+        # from Iran on a neighbour. See IRAN_SIDE_HOME_ISO.
         return SECTION_REGIONAL
 
     target = event.get("target", UNATTRIBUTED)
@@ -578,6 +716,12 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
         logger.info("Iran bulletin: no theatre events in window")
         return {"events": [], "sections": group_into_sections([]), "narrative": "",
                 "status": "empty"}
+
+    filed = len(events)
+    events = collapse_by_storyline(events)
+    if len(events) < filed:
+        logger.info("Iran bulletin: %d filings collapsed into %d stories",
+                    filed, len(events))
 
     extract_direction(router, events, db_conn=db_conn)
 

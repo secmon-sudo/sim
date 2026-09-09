@@ -170,6 +170,53 @@ class TestRenderAdapter:
         assert len(clusters) == 3
 
 
+class TestCollapsedRowKeepsTheRecord:
+    """A collapsed row stands for every outlet that filed the story (9 Sep 2026).
+
+    The appendix is the operator's full daily log. Collapsing 202 filings into 53
+    stories is only an improvement if the outlets survive the collapse — otherwise
+    it trades twenty repeated rows for one row that hides nineteen sources.
+    """
+
+    def _row(self, siblings, outlet_count=None, corroborating=None):
+        result = _result(1, 0, 0)
+        event = result["sections"][ib.SECTION_ON_IRAN][0]
+        event["sibling_sources"] = siblings
+        event["outlet_count"] = outlet_count or (len(siblings) + 1)
+        event["corroborating_sources"] = corroborating or []
+        return run._clusters_for_render(result)[0]
+
+    def test_the_siblings_are_linked_alongside_the_representative(self):
+        row = self._row([{"name": "reuters.com", "url": "https://reuters.com/a"}])
+        assert [s["name"] for s in row["sources"]] == ["outlet0.com", "reuters.com"]
+
+    def test_the_meta_line_says_how_many_outlets_carried_it(self):
+        row = self._row([{"name": "reuters.com", "url": "https://reuters.com/a"}],
+                        outlet_count=79)
+        assert "79 yayıncı" in row["date"]
+
+    def test_a_single_outlet_story_says_nothing_extra(self):
+        assert "yayıncı" not in self._row([])["date"]
+
+    def test_the_chips_are_capped(self):
+        """One story ran in 79 outlets: 79 chips is a wall, not a record."""
+        siblings = [{"name": f"o{i}.com", "url": f"https://o{i}.com/x"}
+                    for i in range(20)]
+        assert len(self._row(siblings)["sources"]) == 6
+
+    def test_independent_outlets_are_corroboration(self):
+        from src.core.sitrep_verify import LABEL_MULTI
+        row = self._row([{"name": "reuters.com", "url": "https://reuters.com/a"}])
+        assert row["verification"] == LABEL_MULTI
+
+    def test_a_carrier_does_not_corroborate(self):
+        """A syndication feed republishing one wire is one source, however many
+        domains it wears — the rule the SITREP has always applied."""
+        from src.core.sitrep_verify import LABEL_SINGLE
+        row = self._row([{"name": "news.yahoo.com", "url": "https://news.yahoo.com/a"}])
+        assert row["verification"] == LABEL_SINGLE
+
+
 class TestWiring:
     def test_the_workflow_invokes_the_orchestrator_flag(self):
         wf = (REPO / ".github/workflows/iran-bulletin.yml").read_text()

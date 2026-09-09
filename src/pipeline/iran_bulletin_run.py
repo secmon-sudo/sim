@@ -62,7 +62,8 @@ def _save(db_conn, window_start, window_end, status: str,
     summary = {
         key: [
             {"title": ev.get("title"), "country_iso": ev.get("country_iso"),
-             "actor": ev.get("actor"), "standing": ev.get("standing"),
+             "actor": ev.get("actor"), "target_country": ev.get("target_country"),
+             "standing": ev.get("standing"), "outlet_count": ev.get("outlet_count"),
              "severity": ev.get("severity"), "domain": ev.get("domain")}
             for ev in sections.get(key, [])
         ]
@@ -103,15 +104,37 @@ def _clusters_for_render(result: Dict[str, Any]) -> list:
     snippet and a source chip labelled "kaynak" — separator rules with nothing
     between them. The mapping is spelled out per field for that reason.
     """
-    from src.core.sitrep_verify import LABEL_MULTI, LABEL_SINGLE
+    from src.core.sitrep_verify import (
+        LABEL_MULTI, LABEL_SINGLE, is_independent_publisher, registrable_domain,
+    )
 
     clusters = []
     for section in (SECTION_ON_IRAN, SECTION_FROM_IRAN, SECTION_REGIONAL):
         for ev in (result.get("sections") or {}).get(section, []):
-            corroborated = len(ev.get("corroborating_sources") or []) > 0
             iso = ev.get("country_iso") or ""
             standing = STANDING_LABELS.get(ev.get("standing"), "")
             occurred = ev.get("occurred_at")
+            # Every outlet that filed this story, the representative first. Since
+            # the events are collapsed by storyline the siblings ARE the record of
+            # how widely it was carried, and dropping them would trade twenty
+            # repeated rows for one row that hides nineteen sources.
+            siblings = ev.get("sibling_sources") or []
+            outlets = [{"name": ev.get("domain"), "url": ev.get("url")}] + [
+                {"name": s.get("name"), "url": s.get("url")} for s in siblings
+            ]
+            # Corroboration now has two ways to be true, and the second one only
+            # became visible with the collapse: distinct independent publishers
+            # carrying the same story is what "Çoklu kaynak" has always meant in
+            # the SITREP. Carriers are excluded here for the reason they are
+            # excluded there — a syndication feed republishing one wire is one
+            # source, however many domains it wears.
+            independent = {
+                registrable_domain(s.get("name") or "")
+                for s in outlets
+                if s.get("name") and is_independent_publisher(s.get("name") or "")
+            }
+            corroborated = (len(ev.get("corroborating_sources") or []) > 0
+                            or len(independent) > 1)
             clusters.append({
                 # The bold line: where it landed, and which way it was going.
                 "location": f"{THEATRE_NAMES.get(iso, iso)} · {_SECTION_TAGS[section]}",
@@ -122,13 +145,18 @@ def _clusters_for_render(result: Dict[str, Any]) -> list:
                 # because the badge already carries corroboration and the two are
                 # different claims: one is how many outlets, the other is whether
                 # anybody stands behind it.
-                "date": standing,
+                # Standing plus, when the story was carried by more than one
+                # outlet, how many — the number the collapsed row stands for.
+                "date": (f"{standing} · {ev['outlet_count']} yayıncı"
+                         if (ev.get("outlet_count") or 1) > 1 else standing),
                 "event_type": ev.get("event_type") or "",
                 "severity": ev.get("severity") or 0,
                 "verification": LABEL_MULTI if corroborated else LABEL_SINGLE,
                 # `name` is what the chip prints; without it every source read
                 # "kaynak" and the publisher was invisible.
-                "sources": [{"name": ev.get("domain"), "url": ev.get("url")}],
+                # Capped: one story ran in 79 outlets on 9 Sep, and 79 chips is
+                # not a record, it is a wall. The count above keeps the scale.
+                "sources": outlets[:6],
                 "occurred_at": occurred,
                 # Splits the full log into the same three blocks as the
                 # narrative; without it the bulletin's organising idea

@@ -431,7 +431,11 @@ def _grade_prose(text: str, result: dict) -> tuple[bool, str]:
 # one is a different way the extraction can go wrong. A prompt that scores well on
 # clean "X strikes Y" copy tells us nothing; these are the shapes that decide it.
 BULLETIN_SAMPLE = [
-    # (headline, actor, target, standing, war_related)
+    # (headline, actor, target, standing, war_related[, target_country])
+    #
+    # The sixth element is optional and only present on rows added to measure it:
+    # the field decides one rule (IRAN_SIDE_HOME_ISO) and grading every row on it
+    # would turn every "the text does not say where it landed" answer into a miss.
     #
     # Both actors named, Iran is the SUBJECT — the first-mentioned-wins failure.
     # standing=claimed, not confirmed: the headline attributes the whole account to
@@ -552,6 +556,27 @@ BULLETIN_SAMPLE = [
      "other", "iran", "confirmed", True),
     ("Three Iranian Pilots Reportedly Killed in US Strike",
      "us_coalition", "iran", "claimed", True),
+
+    # ── The Iran-side actor at home, added 2026-09-09 ──
+    #
+    # Section 2 is "strikes FROM Iran on its neighbours" and these three rows are
+    # the case that broke it: the Houthis are Iran-side by the actor table and also
+    # one belligerent in Yemen's own civil war, so intra-Yemen shelling was being
+    # published as an Iranian strike on a neighbour — 4-5 rows a day, every day,
+    # across the 6-9 Sep bulletins.
+    #
+    # The pair is the point. Both were filed under YE by Pass C, the actor is the
+    # same in both, and only target_country separates the Yemeni war from the
+    # section-2 strike. A model that answers YE to both, or SA to both, has not
+    # supplied the field the rule needs.
+    ("2 children killed, 15 injured in Houthi shelling of displaced people in "
+     "Yemen's Marib", "iran", "other", "confirmed", True, "YE"),
+    ("Yemeni Government Vows To Retake Sanaa as Houthi Strikes Injure at Least 73 "
+     "in Saudi Arabia", "iran", "other", "confirmed", True, "SA"),
+    # The counterweight that keeps Iraq out of the home list: Iran genuinely does
+    # strike Iraq, and the same rule must not swallow it.
+    ("Iran continues attacks on Kurdish opposition group in northern Iraq",
+     "iran", "other", "confirmed", True, "IQ"),
 ]
 
 
@@ -577,9 +602,11 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
     war, while a wrong standing only mislabels its provenance.
     """
     actor_hits = target_hits = standing_hits = war_hits = 0
+    country_hits = country_rows = 0
     misses = []
     for i, row in enumerate(BULLETIN_SAMPLE):
-        headline, want_actor, want_target, want_standing, want_war = row
+        headline, want_actor, want_target, want_standing, want_war = row[:5]
+        want_country = row[5] if len(row) > 5 else None
         got = items[i] if i < len(items) else {}
         got_actor = str(got.get("actor", "")).lower()
         got_target = str(got.get("target", "")).lower()
@@ -610,11 +637,24 @@ def _grade_bulletin(items: list) -> tuple[bool, str]:
             war_hits += 1
         else:
             misses.append(f"#{i + 1} war_related {got_war}!={want_war}")
+        # Graded only where it was measured. An Iran-side actor filed against a
+        # home country goes to the regional section, so a wrong code here moves a
+        # strike out of the war — or moves the Yemeni civil war into it.
+        if want_country:
+            country_rows += 1
+            got_country = str(got.get("target_country", "")).upper()
+            if got_country == want_country:
+                country_hits += 1
+            else:
+                misses.append(
+                    f"#{i + 1} target_country {got_country or '-'}!={want_country}")
     n = len(BULLETIN_SAMPLE)
     ok = (actor_hits == n and target_hits == n
-          and standing_hits >= n - 1 and war_hits == n)
+          and standing_hits >= n - 1 and war_hits == n
+          and country_hits == country_rows)
     note = (f"actor {actor_hits}/{n}, target {target_hits}/{n}, "
-            f"standing {standing_hits}/{n}, war {war_hits}/{n}")
+            f"standing {standing_hits}/{n}, war {war_hits}/{n}, "
+            f"target_country {country_hits}/{country_rows}")
     if misses:
         note += " — " + "; ".join(misses[:4])
     return ok, note
