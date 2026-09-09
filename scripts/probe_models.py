@@ -27,7 +27,7 @@ import urllib.request
 from src.core import llm_client
 from src.services import iran_bulletin
 from src.core.llm_client import call_llm
-from src.core.llm_router import LLMAccount, LLMRouter
+from src.core.llm_router import KEYLESS_PROVIDERS, LLMAccount, LLMRouter
 from src.core.token_bucket import TokenBucket
 from src.services.sitrep_generator import NARRATIVE_MAX_TOKENS
 from src.services.sitrep_generator import _SYSTEM_PROMPT as SITREP_SYSTEM_PROMPT
@@ -209,7 +209,11 @@ _DEFAULT_KEY_ENV = {
 # Providers that need no credential at all. Without this the key guard in probe()
 # skips them as unconfigured, which is the one verdict a keyless provider can
 # never deserve.
-_KEYLESS_PROVIDERS = frozenset({"kilo"})
+#
+# Imported rather than restated: this file had its own copy, and a second place to
+# remember which providers are keyless is exactly how the regression probe came to
+# skip the Kilo rung in the first place.
+_KEYLESS_PROVIDERS = KEYLESS_PROVIDERS
 
 
 # Slots removed because something OUTSIDE this repo stopped working, as opposed to

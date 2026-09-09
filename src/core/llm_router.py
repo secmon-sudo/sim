@@ -847,7 +847,15 @@ def quality_slot_models() -> tuple:
     worse than none: it reports green about slots nothing runs while the slots
     that do run go unwatched.
     """
-    return tuple((s.provider, s.model) for s in _quality_slots() if s.api_key)
+    # Same activity rule as build_quality_router, and that is the point: a plain
+    # truthiness check silently dropped the keyless Kilo rung, so the one slot in
+    # this cascade that costs nothing to reach was the one slot nothing watched.
+    # It ran in production and appeared in no probe. Two functions deciding "is
+    # this slot live?" differently is how a rung goes unmonitored while looking
+    # monitored — the router already carries this fix twice (build_quality_router,
+    # the bulletin fallbacks); this was the third caller and it had been missed.
+    return tuple((s.provider, s.model) for s in _quality_slots()
+                 if s.api_key or s.provider in KEYLESS_PROVIDERS)
 
 
 def _quality_slots() -> list:

@@ -352,17 +352,20 @@ class TestQualityCascadeOrder:
         # different host, a different account, and it passed the probe.
         assert "@cf/mistralai/mistral-small-3.1-24b-instruct" in models
 
-    def test_the_cascade_is_exactly_the_measured_five(self, monkeypatch):
-        """Five since 2026-09-09, when the rung under the floor stopped being free.
-        The drill showed the free cascade writing an English heading into a Turkish
-        report and truncating Iran; a paid second floor makes a floor failure cost
-        money instead of quality, and it is reached so rarely that in a normal month
-        it costs neither."""
+    def test_the_cascade_is_exactly_the_measured_six(self, monkeypatch):
+        """Six since 2026-09-09, and both new entries arrived that day for different
+        reasons. gpt-5.6-luna is a second PAID floor: the drill showed the free
+        cascade writing an English heading into a Turkish report and truncating
+        Iran, so a floor failure now costs money instead of quality, and it is
+        reached so rarely that in a normal month it costs neither. Kilo was already
+        running — it is listed here now because this list decides what the weekly
+        probe watches, and a keyless rung was being filtered out of it."""
         assert [m for _p, m in self._slots(monkeypatch)] == [
             "google/gemini-3.1-flash-lite",
             "openai/gpt-5.6-luna",
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b:free",
             "gpt-oss",
         ]
 
@@ -571,3 +574,33 @@ def test_the_drill_switch_removes_both_paid_rungs(monkeypatch):
 
     kept = R.drop_paid_slots(R._quality_slots())
     assert not any(R.is_paid_slot(s) for s in kept)
+
+
+class TestKeylessSlotsAreWatched:
+    """A rung that needs no credential is still a rung, and the weekly regression
+    probe reads quality_slot_models() to decide what to test. When that function
+    filtered on truthiness alone, the keyless Kilo slot ran in production and
+    appeared in no probe — live, and unwatched, which is worse than absent because
+    the dashboard looked complete."""
+
+    def _models(self, monkeypatch):
+        from src.core import llm_router as lr
+
+        for name in ("MISTRAL_API_KEY", "LLM7_KEY", "POLLINATIONS_API_KEY",
+                     "OPENROUTER_API_KEY_A"):
+            monkeypatch.setenv(name, "k")
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+        return lr.quality_slot_models()
+
+    def test_the_keyless_rung_is_reported_to_the_probe(self, monkeypatch):
+        assert any(p == "kilo" for p, _m in self._models(monkeypatch))
+
+    def test_what_the_probe_sees_is_what_the_router_runs(self, monkeypatch):
+        """The real invariant. Either list may change; they may not disagree."""
+        from src.core import llm_router as lr
+
+        self._models(monkeypatch)  # set the same environment
+        running = [(a.provider, a.model) for a in lr.build_quality_router().accounts]
+        for slot in self._models(monkeypatch):
+            assert slot in running, f"{slot} is probed but never routed to"
