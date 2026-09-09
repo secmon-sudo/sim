@@ -308,6 +308,9 @@ def test_dispatch_alert_reports_sent_with_its_own_tier(
     mock_peak.return_value = None
 
     db_conn = MagicMock()
+    # Layer 0 asks the DB whether this event already paged; a bare MagicMock row reads
+    # as a live claim. Covered properly in tests/test_alert_rescore_duplicate.py.
+    db_conn.execute.return_value.fetchone.return_value = None
     event = {
         "severity_score": 100,
         "alert_tier": "CRITICAL",

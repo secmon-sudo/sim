@@ -15,6 +15,8 @@ from pathlib import Path
 
 from src.core.alerts import (
     TIER_RULES,
+    active_suppression_tier,
+    build_event_suppression_key,
     build_geo_suppression_key,
     build_suppression_key,
     evaluate_alert_tier_verbose,
@@ -699,10 +701,11 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
     last-resort duplicate check for cards that cleared both suppression keys. Omitted (or
     failing) means the card is sent, which is the safe direction here.
 
-    Returns one of: 'skipped' (below threshold), 'suppressed' (a suppression key already
-    fired), 'suppressed_duplicate' (the keys were free but the adjudicator recognised the
-    incident), 'sent', or 'failed'. The two suppressed states are reported separately so
-    telemetry can show what each layer is actually catching.
+    Returns one of: 'skipped' (below threshold), 'suppressed_rescore' (this same event
+    already paged), 'suppressed' (a suppression key already fired), 'suppressed_duplicate'
+    (the keys were free but the adjudicator recognised the incident), 'sent', or 'failed'.
+    The three suppressed states are reported separately so telemetry can show what each
+    layer is actually catching.
     """
     if event.get("severity_score", 0) < ALERT_SEVERITY_MIN:
         return "skipped"
@@ -728,11 +731,25 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
     if not event.get("alert_tier"):
         return "skipped"
 
+    # Layer 0: has THIS event already paged? Checked absolutely, before the tier
+    # ladder, because the other two keys embed the resolved location and that field
+    # changes underneath them — Pass D pages at |UNKNOWN, Pass E resolves the anchor
+    # and the rescored card's keys no longer collide with the claim the first one
+    # left. Five of thirty-eight cards in the 14h to 2026-09-09 were this, ~90
+    # seconds apart. See build_event_suppression_key.
+    event_key = build_event_suppression_key(event_id)
+    if active_suppression_tier(db_conn, event_key) is not None:
+        logger.info("Alert suppressed for %s: this event already paged", event_id[:8])
+        return "suppressed_rescore"
+
     supp_key = build_suppression_key(event)
     # Storyline-independent safety net: mutes same-place duplicates even when the
     # storyline_id fragments across paraphrased sources (None if no location).
     geo_supp_key = build_geo_suppression_key(event)
     supp_keys = [k for k in (supp_key, geo_supp_key) if k]
+    # The event key is CLAIMED and RELEASED with the others but never tier-checked
+    # with them: layer 0 above is its only read, and it is absolute.
+    claim_keys = supp_keys + [event_key]
 
     storyline_id = event.get("storyline_id")
     tier = event["alert_tier"]
@@ -768,7 +785,7 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
     # Durably claim the alert slot(s) first (record_suppression commits internally).
     # On an escalation this overwrites the claim with the new, higher tier, so the
     # storyline is muted again until it escalates further.
-    for k in supp_keys:
+    for k in claim_keys:
         record_suppression(db_conn, k, tier, event_id,
                            ttl_hours=ALERT_SUPPRESSION_TTL_HOURS)
 
@@ -791,7 +808,7 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
     logger.warning("Telegram alert send failed for %s; releasing suppression", event_id[:8])
     try:
         db_conn.execute(
-            "DELETE FROM alert_suppression WHERE suppression_key = ANY(%s)", (supp_keys,)
+            "DELETE FROM alert_suppression WHERE suppression_key = ANY(%s)", (claim_keys,)
         )
         db_conn.commit()
     except Exception:
@@ -1184,6 +1201,12 @@ def run_pass_d(db_conn) -> dict:
         # Cards the dispatch-time adjudicator caught that both suppression keys missed —
         # the measurement that says whether this layer is earning its LLM calls.
         "duplicate_pages_suppressed": 0,
+        # Rescores of an event that had already paged. Nonzero is the normal state, not
+        # a fault: Pass D pages, Pass E resolves the anchor and rescores the same
+        # article, and this is the layer that stops the second card. A number that
+        # falls to zero and stays there means the layer stopped being reached, which is
+        # worth noticing — it was five cards a night before it existed.
+        "rescore_pages_suppressed": 0,
         # Tiers the article-shape gates vetoed, by gate. Without this a veto is
         # indistinguishable from an event that never qualified, so neither gate could be
         # tuned on anything but log-reading.
@@ -1316,6 +1339,8 @@ def run_pass_d(db_conn) -> dict:
                     stats["alerts_generated"][tier] = stats["alerts_generated"].get(tier, 0) + 1
                 elif result.get("dispatch_result") == "suppressed_duplicate":
                     stats["duplicate_pages_suppressed"] += 1
+                elif result.get("dispatch_result") == "suppressed_rescore":
+                    stats["rescore_pages_suppressed"] += 1
                 veto = result.get("alert_veto")
                 if veto:
                     stats["alert_vetoes"][veto] = stats["alert_vetoes"].get(veto, 0) + 1

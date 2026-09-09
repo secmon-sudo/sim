@@ -4,6 +4,8 @@ Covers build_geo_suppression_key (pure) and dispatch_alert's dual-key behaviour 
 mutes duplicate alerts even when the storyline_id fragments across paraphrased sources.
 """
 
+import pytest
+
 from unittest.mock import MagicMock
 
 import src.pipeline.pass_d_score as pd
@@ -109,6 +111,16 @@ def _base_event(**over):
 
 
 class TestDispatchDualKey:
+    @pytest.fixture(autouse=True)
+    def _no_prior_page_by_this_event(self, monkeypatch):
+        """dispatch_alert's layer 0 asks the DB whether THIS event already paged.
+
+        These tests hand it a bare MagicMock, whose truthy row reads as a live claim
+        and would mute every card here. The layer itself is covered in
+        tests/test_alert_rescore_duplicate.py against a fake that models the table.
+        """
+        monkeypatch.setattr(pd, "active_suppression_tier", lambda db, key: None)
+
     def test_geo_net_suppresses_when_storyline_differs(self, monkeypatch):
         """A sibling event whose storyline fragmented (different storyline_id, so a
         different primary key) is still muted because the geo fingerprint already fired."""

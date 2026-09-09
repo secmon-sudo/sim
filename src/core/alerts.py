@@ -730,6 +730,34 @@ def build_suppression_key(event: dict) -> str:
     ])
 
 
+def build_event_suppression_key(event_id: str) -> str:
+    """The claim that one EVENT has already paged. Invariant by construction.
+
+    The other two keys both embed the resolved location, and that is a field which
+    CHANGES between two dispatch attempts for the same article. Measured over the 14
+    hours to 2026-09-09 03:13, five of thirty-eight cards were the same event paging
+    twice, every one of them with this shape:
+
+        00:11:09  ALERT     44813a56…|UNKNOWN          (no geo key: loc is UNKNOWN)
+        00:12:35  CRITICAL  44813a56…|KHE  +  geofp|UA|KHE
+
+    Pass D pages while the anchor is still unresolved, Pass E resolves it and rescores,
+    and neither new key collides with the claim the first card left behind — so the
+    card goes out again, ~90 seconds later, about the same report. Worse, the first
+    card is protected by ONE key rather than two, because build_geo_suppression_key
+    returns None for an UNKNOWN location: the run where duplicates are most likely is
+    exactly the run where the safety net is missing.
+
+    This key carries nothing that scoring can revise, so it survives that transition.
+    It is checked ABSOLUTELY rather than through the tier ladder: a rescore of the same
+    article is not the incident getting worse, it is our estimate getting better, and
+    the escalation allowance exists for the former. A storyline that genuinely
+    escalates does so through a DIFFERENT event, which has its own key and pages
+    normally.
+    """
+    return f"evt|{event_id}"
+
+
 def build_geo_suppression_key(event: dict) -> str | None:
     """Storyline-independent suppression fingerprint (safety net).
 

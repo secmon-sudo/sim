@@ -106,6 +106,16 @@ def open_keys(monkeypatch):
 
 
 class TestDispatchWithDuplicateAdjudicator:
+    @pytest.fixture(autouse=True)
+    def _no_prior_page_by_this_event(self, monkeypatch):
+        """dispatch_alert's layer 0 asks the DB whether THIS event already paged.
+
+        These tests hand it a bare MagicMock, whose truthy row reads as a live claim
+        and would mute every card here. The layer itself is covered in
+        tests/test_alert_rescore_duplicate.py against a fake that models the table.
+        """
+        monkeypatch.setattr(pd, "active_suppression_tier", lambda db, key: None)
+
     def test_duplicate_at_same_tier_is_muted(self, open_keys, monkeypatch):
         recorded = []
         monkeypatch.setattr(pd, "record_suppression",

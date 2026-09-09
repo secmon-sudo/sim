@@ -58,7 +58,11 @@ class TestDispatchAlert:
         ev = {"severity_score": 90, "alert_tier": "CRITICAL"}
         assert d.dispatch_alert(_MockDB(), ev, "evt-3") == "sent"
         # The suppression must be recorded BEFORE the send goes out.
-        assert calls == ["record", "send"]
+        # Every claim is committed before the send — the point of the outbox
+        # ordering. The claim COUNT is not the subject here and grew when the
+        # event-level key was added (tests/test_alert_rescore_duplicate.py).
+        assert calls[-1] == "send"
+        assert set(calls[:-1]) == {"record"}
 
     def test_failed_send_releases_suppression(self, monkeypatch):
         calls = []
@@ -66,7 +70,11 @@ class TestDispatchAlert:
         db = _MockDB()
         ev = {"severity_score": 90, "alert_tier": "CRITICAL"}
         assert d.dispatch_alert(db, ev, "evt-4") == "failed"
-        assert calls == ["record", "send"]
+        # Every claim is committed before the send — the point of the outbox
+        # ordering. The claim COUNT is not the subject here and grew when the
+        # event-level key was added (tests/test_alert_rescore_duplicate.py).
+        assert calls[-1] == "send"
+        assert set(calls[:-1]) == {"record"}
         assert db.deletes == 1  # claim released for retry
 
     def test_missing_tier_is_not_paged(self, monkeypatch):
