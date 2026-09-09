@@ -78,6 +78,7 @@ SAFETY_SEVERITY_CAP = _SCORING.get("safety_severity_cap", 40)
 # the closure was planned. Without the cap, adding airspace_closure at a base that
 # makes real closures page would page every air show in the corpus.
 PLANNED_CLOSURE_SEVERITY_CAP = _SCORING.get("planned_closure_severity_cap", 40)
+RUNWAY_ACCIDENT_SEVERITY_CAP = _SCORING.get("runway_accident_severity_cap", 40)
 
 # Generic "umbrella" event types the LLM reaches for on any geopolitics/policy-flavoured
 # story. Used by the incident gate: an umbrella label with no located anchor and no
@@ -268,6 +269,56 @@ def apply_planned_closure_downrank(event_type: str, severity: int,
     if sub_type == "planned":
         return min(severity, PLANNED_CLOSURE_SEVERITY_CAP)
     return severity
+
+
+# A runway event is a SECURITY event only when somebody was there who had no business
+# being there. The classifier has one runway type and uses it for both, because there is
+# no excursion/overrun code in the catalog for an accident to land on.
+#
+# Deliberately a lexicon over the HEADLINE and nothing else. That is what was measured:
+# across all 37 runway_incursion events since 2026-06-26 it matched exactly two — the
+# Denver jet that struck a person on the runway, and the UK trespasser who shut one —
+# and none of the other 35. Widening it to body text would trade a result for a guess.
+_RUNWAY_INTRUSION = re.compile(r"""
+    \b(?: trespass\w*
+        | intrud\w* | intrusion
+        | stowaways?
+        | unauthoris?z?ed
+        | sabotaged?
+        | (?: perimeter | fence ) \s+ breach\w*
+        | (?: breached | scaled | jumped | cut ) \s+ (?:the\s+)? (?: fence | perimeter )
+        | (?: person | man | woman | people | individual | protesters? | activists? )
+          \s+ on \s+ (?:the\s+)? (?: runway | taxiway | apron | tarmac )
+        | ran \s+ onto \s+ (?:the\s+)? (?: runway | tarmac )
+        | stormed \s+ (?:the\s+)? (?: runway | apron | terminal )
+    )\b """, re.I | re.X)
+
+
+def apply_runway_accident_downrank(event_type: str, severity: int, event: dict) -> int:
+    """Cap a runway ACCIDENT below the alert floor; leave a runway INTRUSION alone.
+
+    SIM is a security monitor. A jet that overruns a runway is an aviation-safety
+    matter, and the operator's rule is explicit: it becomes interesting when somebody
+    forced it. The classifier cannot make that distinction on its own — 'runway_incursion'
+    is the only runway code in the catalog, so overruns, excursions, ATC near-misses and
+    genuine intrusions all land on it, and the type is not in SAFETY_EVENT_TYPES, so no
+    cap ever applied.
+
+    Measured over the 37 events carrying it since 2026-06-26: 18 paged, at a mean
+    severity of 83.8. Thirteen of those cards were accidents — a single Miami cargo
+    overrun produced SEVEN of them — four were ATC/operational near-misses, and one was
+    a security event. Meanwhile the clearest security case in the whole set, a
+    trespasser who shut a UK runway and drew a mayday call, never paged at all.
+
+    So the default flips: capped unless the headline says a person was there who should
+    not have been. Same shape as apply_planned_closure_downrank, opposite default,
+    because here the benign reading is the common one.
+    """
+    if event_type != "runway_incursion":
+        return severity
+    if _RUNWAY_INTRUSION.search(str(event.get("source_title") or "")):
+        return severity
+    return min(severity, RUNWAY_ACCIDENT_SEVERITY_CAP)
 
 
 def compute_severity(event_type: str, anchor_data: dict | None, db_conn, llm_parsed: dict | None = None) -> int:
@@ -980,6 +1031,7 @@ def score_single_event(db_conn, event_id: str, recent_events: list[dict],
         severity = min(severity + compute_aviation_bonus(event, anchor), MAX_SEVERITY)
         severity = apply_planned_closure_downrank(
             event["event_type"], severity, llm_parsed)
+        severity = apply_runway_accident_downrank(event["event_type"], severity, event)
         # De-prioritize accidental safety events (kept for coverage, tagged is_safety).
         severity, is_safety = apply_safety_downrank(event["event_type"], severity, llm_parsed)
 

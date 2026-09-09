@@ -26,7 +26,14 @@ _NO_CALL_SITES = {"src/core/heartbeat.py"}
 # log into. Exempt from the spend rollup because they are not a stage — kept as a
 # SEPARATE set from _NO_CALL_SITES so the rule for real stages stays absolute and
 # an exemption has to be argued for explicitly, one entry at a time.
-_NOT_PIPELINE_SPEND = {"scripts/probe_models.py"}
+# Manual measurement harnesses. They spend model calls, but only when a human dispatches
+# them, and never inside a pipeline run — so they are outside the spend rollup the
+# pipeline's telemetry is meant to close over. Adding a STAGE here would defeat the test;
+# adding a hand-run probe is what the exemption is for.
+_NOT_PIPELINE_SPEND = {
+    "scripts/probe_models.py",
+    "scripts/replay_bodyless.py",
+}
 
 
 def _modules_calling(name: str) -> set[str]:

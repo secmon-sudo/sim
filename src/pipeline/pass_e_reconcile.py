@@ -23,6 +23,7 @@ from src.pipeline.pass_d_score import (
     MAX_SEVERITY,
     _safe_float,
     apply_planned_closure_downrank,
+    apply_runway_accident_downrank,
     apply_safety_downrank,
     compute_aviation_bonus,
     compute_confidence,
@@ -208,6 +209,9 @@ def reconcile_single_event(db_conn, event_id: str) -> tuple[bool, bool, str | No
                                    MAX_SEVERITY)
                 new_severity = apply_planned_closure_downrank(event_type, new_severity,
                                                              llm_parsed)
+                # Pass E recomputes and OVERWRITES Pass D's severity, so every cap Pass D
+                # applies has to be applied here too or the reconcile silently lifts it.
+                new_severity = apply_runway_accident_downrank(event_type, new_severity, event)
                 new_severity, is_safety = apply_safety_downrank(event_type, new_severity, llm_parsed)
 
                 # ...and the same for confidence: source diversity and publisher
