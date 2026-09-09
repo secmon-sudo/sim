@@ -37,10 +37,11 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from src.core.llm_client import call_llm
-from src.core.llm_router import LLMAccount, LLMRouter
+from src.core.llm_router import LLMAccount, LLMRouter, build_llm_router
 from src.core.token_bucket import TokenBucket
 from src.pipeline.pass_d_score import SAFETY_EVENT_TYPES
 from src.pipeline.pass_c_classify import (
@@ -57,12 +58,25 @@ FIXTURE = Path("db/replay/bodyless_sample.json")
 # is shared with the reply, and a with-body batch is several times heavier than the
 # headline-only one it is being compared against.
 BATCH = 4
+PACE_SECONDS = 4
 
 _KEY_ENV = {"groq": "GROQ_API_KEY_A", "openrouter": "OPENROUTER_API_KEY_A",
             "cerebras": "CEREBRAS_API_KEY", "mistral": "MISTRAL_API_KEY"}
 
 
 def _router(provider: str, model: str) -> LLMRouter:
+    """The production cascade by default; a single pinned slot only on request.
+
+    The first two runs of this script used a one-account router and died on their
+    opening call — a Groq 429, then an OpenRouter "unusable HTTP 200" — because one
+    failure puts the only account on cooldown and every later batch raises
+    LLMAllThrottled. Production does not have that problem: it has a cascade, and
+    falling down it is the normal state, not an error. Borrowing the real router makes
+    the replay both sturdier AND more faithful, since the comparison it draws is
+    between two prompts, never between two models.
+    """
+    if not provider:
+        return build_llm_router()
     return LLMRouter([
         LLMAccount(
             provider=provider, account_id="A", model=model,
@@ -86,6 +100,10 @@ def _classify(router, rows: list[dict], with_body: bool) -> dict[int, dict]:
     """Pass C's own prompt and parser, so a difference here is a difference there."""
     out: dict[int, dict] = {}
     for i in range(0, len(rows), BATCH):
+        if i:
+            # The free slots are shared with the live pipeline, which runs every few
+            # hours and is the higher-priority consumer. Pace rather than race it.
+            time.sleep(PACE_SECONDS)
         chunk = rows[i:i + BATCH]
         events = [_as_event(r, with_body) for r in chunk]
         try:
@@ -112,8 +130,9 @@ def _classify(router, rows: list[dict], with_body: bool) -> dict[int, dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--provider", default="groq")
-    ap.add_argument("--model", default="qwen/qwen3.8-27b")
+    ap.add_argument("--provider", default="",
+                    help="pin one slot instead of the production cascade")
+    ap.add_argument("--model", default="")
     ap.add_argument("--file", default=str(FIXTURE))
     args = ap.parse_args()
 
@@ -124,7 +143,9 @@ def main() -> int:
           f"reported but excluded from the verdict.\n")
 
     router = _router(args.provider, args.model)
-    print(f"model: {args.provider}:{args.model}\n")
+    label = (f"{args.provider}:{args.model}" if args.provider
+             else f"production cascade ({len(router.accounts)} accounts)")
+    print(f"model: {label}\n")
 
     print("classifying headline-only …")
     before = _classify(router, rows, with_body=False)
