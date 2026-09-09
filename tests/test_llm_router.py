@@ -14,6 +14,7 @@ from src.core.llm_router import (
     build_bulk_router,
     build_llm_router,
     build_quality_router,
+    is_paid_slot,
     reset_bucket_registry,
 )
 from src.core.token_bucket import TokenBucket
@@ -484,3 +485,47 @@ class TestQualityCascadeOrder:
         monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
         monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
         assert not any(p == "cloudflare" for p, _m in lr.quality_slot_models())
+
+
+class TestPaidFloorDrill:
+    """SIM_PAID_FLOOR=off is a failover drill (9 Sep 2026).
+
+    Since 4-6 Sep the paid floor has answered every report call — 449 in a row,
+    no failures — so the free rungs beneath it have not written a report in
+    production for weeks. They are the plan for the day the balance runs out, and
+    an untested plan is a hope. The weekly regression probe tests each slot
+    ALONE; nothing tested the cascade falling through to them.
+    """
+
+    def test_a_paid_slot_is_recognised_by_its_model_id(self):
+        """`:free` is OpenRouter's own marking, so no second list to maintain."""
+        assert is_paid_slot(make_account("openrouter", model="google/gemini-3.1-flash-lite"))
+        assert not is_paid_slot(make_account("openrouter", model="nvidia/nemotron:free"))
+        assert not is_paid_slot(make_account("groq", model="qwen/qwen3.8-27b"))
+
+    def test_the_switch_removes_the_floor_from_every_router(self, monkeypatch):
+        monkeypatch.setenv("SIM_PAID_FLOOR", "off")
+        accounts = [make_account("openrouter", model="google/gemini-3.1-flash-lite"),
+                    make_account("groq", model="qwen/qwen3.8-27b")]
+        assert [a.provider for a in LLMRouter(accounts).accounts] == ["groq"]
+
+    def test_it_is_on_unless_explicitly_turned_off(self, monkeypatch):
+        for value in ("", "on", "1", "true", "yes"):
+            monkeypatch.setenv("SIM_PAID_FLOOR", value)
+            accounts = [make_account("openrouter",
+                                     model="google/gemini-3.1-flash-lite")]
+            assert len(LLMRouter(accounts).accounts) == 1, value
+
+    def test_the_drill_leaves_a_usable_cascade_behind(self, monkeypatch):
+        """The whole point: with the floor gone the quality router must still
+        have somewhere to send a SITREP."""
+        reset_bucket_registry()
+        monkeypatch.setenv("SIM_PAID_FLOOR", "off")
+        monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+        monkeypatch.setenv("GROQ_API_KEY_A", "keyA")
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+        router = build_quality_router()
+        assert router.accounts, "the drill must not empty the cascade"
+        assert not any(is_paid_slot(a) for a in router.accounts)
+        reset_bucket_registry()

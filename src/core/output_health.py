@@ -385,16 +385,18 @@ def check_openrouter_credit(conn, window_hours: float,
     paid slot was added on 2026-09-04 to end. A floor that can vanish without
     saying so is not a floor.
 
-    Two balances exist and they are not the same number. `/key` reports the
+    Three balances exist and they are not the same number. `/key` reports the
     per-key SPENDING CAP (limit, limit_remaining), which is null unless somebody
-    set one; `/credits` reports the ACCOUNT balance actually funded. This project
-    funded $10 into the account and set no per-key cap, so the first version of
-    this check — limit minus usage, `[]` when limit was null — could never fire
-    on the only account it was written for. It read as a working alarm for five
-    days and was inert the whole time.
+    set one; `/credits` reports the ACCOUNT balance actually funded, and needs a
+    management key; and OPENROUTER_CREDIT_TOPUP is what the operator actually
+    loaded. This project funded $10 into the account, set no per-key cap and uses
+    an ordinary inference key, so the first version of this check — limit minus
+    usage, `[]` when limit was null — could never fire on the only account it was
+    written for. It read as a working alarm for five days and was inert the whole
+    time; it was also never given the key, so it did not reach the network either.
 
-    So: cap first when there is one, account balance second, and when NEITHER
-    can be read, say so. An unreadable balance is not the same as a healthy one,
+    So: cap first when there is one, account balance second, the loaded figure
+    third, and when NONE of them can be read, say so. An unreadable balance is not the same as a healthy one,
     and the whole argument of this module is that a check which cannot check must
     not answer "fine". It clears itself the moment a spending limit is set on the
     key or a management key is supplied.
@@ -437,13 +439,24 @@ def check_openrouter_credit(conn, window_hours: float,
         spent = _as_float(credits.get("total_usage"))
         if total is not None and spent is not None:
             remaining, source = total - spent, f"hesap bakiyesi ${total:.2f}"
+        else:
+            # Last resort: what was loaded, minus what this key has spent. The
+            # usage figure is per-KEY while the top-up is per-ACCOUNT, so this is
+            # only honest while one key does the paying — which is the case here,
+            # key B holding nothing but `:free` slots. A second paying key would
+            # make this read high, and that is the direction to watch.
+            topup = _as_float(os.environ.get("OPENROUTER_CREDIT_TOPUP", ""))
+            if topup is not None and usage is not None:
+                remaining, source = topup - usage, f"yüklenen ${topup:.2f}"
 
     if remaining is None:
         return [Finding(
             "openrouter_credit_unreadable",
             "OpenRouter bakiyesi OKUNAMIYOR — ücretli zemin haber vermeden "
-            "düşebilir; anahtara harcama tavanı koy ya da management key ver",
-            f"/key limit={info.get('limit')!r}, /credits yanıtsız"
+            "düşebilir; OPENROUTER_CREDIT_TOPUP'a yüklenen tutarı yaz "
+            "(ya da anahtara tavan koy / management key ver)",
+            f"/key limit={info.get('limit')!r}, /credits yanıtsız, "
+            f"OPENROUTER_CREDIT_TOPUP boş"
             + (f", bu anahtarın toplam kullanımı ${usage:.2f}"
                if usage is not None else ""),
         )]

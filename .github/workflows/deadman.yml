@@ -28,6 +28,16 @@ env:
   # live cron-job.org backstop. 0 disables the check — set that, rather than deleting
   # code, if the external cron is ever retired on purpose.
   DEADMAN_DISPATCH_MAX_AGE_HOURS: '6'
+  # check_openrouter_credit runs inside this job and reads the balance from the
+  # provider. Without the key it returned [] at the first line — the alarm for the
+  # paid floor was never reaching the network at all (found 2026-09-09).
+  OPENROUTER_API_KEY_A:    ${{ secrets.OPENROUTER_API_KEY_A }}
+  # What has been loaded into the OpenRouter account, in dollars. OpenRouter has
+  # no per-key cap here and /credits needs a management key, so this is the only
+  # figure that can turn usage into "how much is left". BUMP IT ON EVERY TOP-UP —
+  # and it is deliberately not a secret, because a number nobody can see is a
+  # number nobody updates.
+  OPENROUTER_CREDIT_TOPUP: '10'
   # Only for the API rate limit; the repo is public and the check works without it.
   GITHUB_TOKEN:            ${{ secrets.GITHUB_TOKEN }}
 

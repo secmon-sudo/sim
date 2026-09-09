@@ -42,6 +42,10 @@ on:
         description: "Telegram'a gönder — test için KAPAT (raporlar yine üretilir ve kaydedilir)"
         type: boolean
         default: true
+      paid_floor:
+        description: "Ücretli zemin (OpenRouter) AÇIK — kapatmak failover TATBİKATIDIR: rapor bedava kaskadla yazılır"
+        type: boolean
+        default: true
       countries:
         description: 'ISO2 ülke kodları (boşlukla ayrılmış, örn: IR IQ). Boş bırakılırsa otomatik seçim.'
         required: false
@@ -74,6 +78,9 @@ env:
   TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_ALERTS_CHAT_ID: ${{ secrets.TELEGRAM_ALERTS_CHAT_ID }}
   # See iran-bulletin.yml: a test re-run publishes to real readers.
+  # See llm_router.drop_paid_slots: off removes every paid slot, so the run
+  # takes exactly the path a spent-out balance would take.
+  SIM_PAID_FLOOR: ${{ inputs.paid_floor == false && 'off' || 'on' }}
   SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}

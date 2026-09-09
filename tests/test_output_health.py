@@ -295,10 +295,29 @@ class TestOpenRouterCredit:
                     credits={"data": {"total_credits": 10.0, "total_usage": 0.42}})
         assert oh.check_openrouter_credit(None, 30.0) == []
 
+    def test_the_loaded_figure_is_the_last_resort(self, monkeypatch):
+        """No cap and no management key is this project's actual situation:
+        OpenRouter has no per-key ceiling here, the operator just loads money.
+        $10 loaded, $9.85 spent by this key = $0.15 left."""
+        monkeypatch.setenv("OPENROUTER_CREDIT_TOPUP", "10")
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 9.85}},
+                    credits={"error": {"message": "management key required"}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and out[0].key == "openrouter_credit_low"
+        assert "yüklenen $10.00" in out[0].detail
+
+    def test_the_account_balance_beats_the_loaded_figure(self, monkeypatch):
+        """/credits is what the provider says; the env var is what we were told."""
+        monkeypatch.setenv("OPENROUTER_CREDIT_TOPUP", "10")
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 9.85}},
+                    credits={"data": {"total_credits": 20.0, "total_usage": 9.85}})
+        assert oh.check_openrouter_credit(None, 30.0) == []
+
     def test_an_unreadable_balance_is_itself_a_finding(self, monkeypatch):
-        """No cap and no management key: nothing can say how much is left. That
-        is not the same as healthy, and answering "fine" is the silence this
-        whole module exists to end."""
+        """No cap, no management key and nobody wrote down what was loaded:
+        nothing can say how much is left. That is not the same as healthy, and
+        answering "fine" is the silence this whole module exists to end."""
+        monkeypatch.delenv("OPENROUTER_CREDIT_TOPUP", raising=False)
         self._patch(monkeypatch, {"data": {"limit": None, "usage": 3.0}},
                     credits={"error": {"message": "management key required"}})
         out = oh.check_openrouter_credit(None, 30.0)
@@ -340,6 +359,7 @@ class TestOpenRouterCredit:
     def test_junk_values_do_not_crash_the_check(self, monkeypatch):
         """And they are not read as healthy either: a balance that cannot be
         parsed is a balance nobody knows."""
+        monkeypatch.delenv("OPENROUTER_CREDIT_TOPUP", raising=False)
         self._patch(monkeypatch, {"data": {"limit": "ten", "usage": 1.0}})
         out = oh.check_openrouter_credit(None, 30.0)
         assert [f.key for f in out] == ["openrouter_credit_unreadable"]

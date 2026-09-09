@@ -101,6 +101,46 @@ class LLMAccount:
         return f"{self.provider}/{self.account_id}/{self.model}"
 
 
+# The failover drill switch.
+#
+# Since 4-6 Sep 2026 the paid floor has answered every report call — 449 in a row,
+# no failures — which means the free rungs beneath it have not written a report in
+# production for weeks. They are the plan for the day the credit runs out, and an
+# untested plan is a hope. The weekly regression probe tests each slot ALONE; it
+# does not test the cascade actually falling through to them.
+#
+# SIM_PAID_FLOOR=off removes every paid slot from every router, so a run exercises
+# exactly the path a dead balance would take. Paired with SIM_REPORT_DISPATCH=0 it
+# is a full dress rehearsal that sends nothing to anybody.
+#
+# Applied in the constructor rather than in each build_* function: a builder added
+# later would otherwise silently opt out of the drill, and the one thing a drill
+# must not do is quietly skip a slot.
+#
+# "Paid" is read off the model id, not off a list. On OpenRouter a `:free` suffix
+# is the platform's own marking, and everything without one bills. A list would be
+# a second place to remember.
+def is_paid_slot(account: "LLMAccount") -> bool:
+    return account.provider == "openrouter" and not account.model.endswith(":free")
+
+
+def paid_slots_disabled() -> bool:
+    return os.environ.get("SIM_PAID_FLOOR", "").strip().lower() in (
+        "off", "0", "false", "no")
+
+
+def drop_paid_slots(accounts: list[LLMAccount]) -> list[LLMAccount]:
+    """Every slot, or only the free ones when the drill switch is set."""
+    if not paid_slots_disabled():
+        return accounts
+    kept = [a for a in accounts if not is_paid_slot(a)]
+    dropped = len(accounts) - len(kept)
+    if dropped:
+        logger.warning("SIM_PAID_FLOOR=off — %d paid slot(s) removed; this run is "
+                       "a failover drill on the free cascade", dropped)
+    return kept
+
+
 class LLMRouter:
     """
     Priority-ordered failover across multiple provider accounts.
@@ -116,7 +156,7 @@ class LLMRouter:
     """
 
     def __init__(self, accounts: list[LLMAccount]):
-        self._accounts = accounts
+        self._accounts = drop_paid_slots(accounts)
         self._lock = threading.Lock()
 
     @property

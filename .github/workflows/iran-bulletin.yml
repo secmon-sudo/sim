@@ -22,6 +22,10 @@ on:
         description: "Telegram'a gönder — test için KAPAT (bülteni yine üretilir, kaydedilir, R2'ye çıkar)"
         type: boolean
         default: true
+      paid_floor:
+        description: "Ücretli zemin (OpenRouter) AÇIK — kapatmak failover TATBİKATIDIR: rapor bedava kaskadla yazılır"
+        type: boolean
+        default: true
 
 concurrency:
   group: iran-bulletin
@@ -55,6 +59,9 @@ env:
   # A test re-run of a report workflow publishes to the people who read it.
   # On 2026-09-06 the bulletin was re-dispatched three times while a bug was
   # being fixed and the first two were the broken ones.
+  # See llm_router.drop_paid_slots: off removes every paid slot, so the run
+  # takes exactly the path a spent-out balance would take.
+  SIM_PAID_FLOOR: ${{ inputs.paid_floor == false && 'off' || 'on' }}
   SIM_REPORT_DISPATCH: ${{ inputs.dispatch == false && '0' || '1' }}
   TELEGRAM_ARCHIVE_CHAT_ID: ${{ secrets.TELEGRAM_ARCHIVE_CHAT_ID }}
   R2_ACCOUNT_ID:        ${{ secrets.R2_ACCOUNT_ID }}
