@@ -127,3 +127,13 @@ def test_free_slots_do_not_carry_provider_preferences():
     """The flex tier is a fact about one paid Google slot, not about OpenRouter."""
     assert "provider" not in get_profile(
         "openrouter", "nvidia/nemotron-3-super-120b-a12b:free").payload_extras
+
+
+def test_the_second_floor_turns_reasoning_off_with_the_knob_that_was_probed():
+    """gpt-5.6-luna reasons by default at medium effort, and hidden thinking comes
+    out of the same 6,000 tokens the narrative is allowed. "none" is the knob its
+    card offers and the knob the 2026-09-09 probe passed with — the enabled flag
+    was never measured on it, so it is not what ships."""
+    extras = get_profile("openrouter", "openai/gpt-5.6-luna").payload_extras
+    assert extras["reasoning_effort"] == "none"
+    assert "reasoning" not in extras

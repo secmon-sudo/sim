@@ -119,6 +119,20 @@ KILO_REASONING_DISABLED_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
 })
 
+# OpenRouter slots where reasoning is turned off by EFFORT rather than by the
+# enabled flag. Deliberately a second set rather than a member of the one above,
+# because the difference is measured and not cosmetic: this file's own rule is
+# probe first, declare after, and the knob that was probed is the knob that ships.
+#
+# gpt-5.6-luna, real Turkish SITREP prompt, 2026-09-09, extras
+# {"reasoning_effort": "none"}: PASS, 372 words in 10.0s, publisher names written
+# out ("Reuters", "AP News") rather than as bare domains, the unnamed carriers left
+# unnamed, and the brand localised ("Türk Hava Yolları"). Its card lists "none"
+# among supported_efforts, so this is the model's own off switch, not a guess.
+OPENROUTER_REASONING_EFFORT_NONE_MODELS = frozenset({
+    "openai/gpt-5.6-luna",
+})
+
 # OpenRouter service-tier routing. Google serves the SAME model, at the same pinned
 # version, on a discounted "flex" tier: gemini-3.1-flash-lite is $0.125/$0.75 per M
 # there against $0.25/$1.50 on the standard endpoint (read off
@@ -228,6 +242,10 @@ def get_profile(provider: str, model: str) -> ModelProfile:
     if provider == "kilo" and model in KILO_REASONING_DISABLED_MODELS:
         # Measured to land, unlike every other proxy here — see the set's note.
         extras = {"reasoning": {"enabled": False}}
+    elif provider == "openrouter" and model in OPENROUTER_REASONING_EFFORT_NONE_MODELS:
+        # See the set: this model answers to the effort knob, and that is the one
+        # that was measured on the real prompt.
+        extras = {"reasoning_effort": "none"}
     elif provider == "openrouter" and model in OPENROUTER_REASONING_DISABLED_MODELS:
         # Checked BEFORE the family rules: OpenRouter's normalized knob is the one
         # that actually lands, whatever the underlying family accepts natively.

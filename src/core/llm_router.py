@@ -934,6 +934,54 @@ def _quality_slots() -> list:
             rpm=30, rpd=40,
             bucket=TokenBucket(rate_per_minute=30, daily_limit=40, burst=12),
         ),
+        # ── The second floor, added 2026-09-09 ───────────────────────────────
+        #
+        # The floor above has never failed, which is exactly the problem: the rungs
+        # under it had not written a production report since 4 September, and when
+        # the drill (SIM_PAID_FLOOR=off, run 34342363694) finally made them, the
+        # answer was a report you could publish in an emergency and would not want
+        # to publish twice — an English section heading in a Turkish report ("STRAIT
+        # OF HORMUZ"), "Hormoz"/"Houthi"/"dron" left untranslated, and Iran, the most
+        # critical country of the five, cut off at the 6,000-token ceiling. The
+        # safety net held; the product visibly dropped.
+        #
+        # So the rung directly under the floor is no longer free. The economics of
+        # that are not what they look like: this slot is reached only when the floor
+        # is down, and the floor has been up every day since 4 September, so its
+        # expected cost in a normal month is about zero. What the money buys is the
+        # SHAPE of a bad day — the same report, not a degraded one.
+        #
+        # Chosen on the real Turkish SITREP prompt against glm-5.3-flash, which is
+        # cheaper ($0.37/month at this volume against $0.61) and scores higher on
+        # every published index. Both PASSED. Four measured differences decided it,
+        # and none of them was price (2026-09-09):
+        #
+        #   latency        10.0s        against 17.6s — and this rung is reached
+        #                  precisely when the run has already spent the floor's
+        #                  wall-clock budget once.
+        #   brand names    "Türk Hava Yolları"  against  "Turkish Airlines" — the
+        #                  exact defect class the drill was flagged for.
+        #   reasoning      "none" is in its supported efforts; glm's reasoning is
+        #                  MANDATORY and can only be damped to "low", which leaves
+        #                  the laguna failure live (hidden thinking took 42% of
+        #                  max_tokens there and the reader got half a report).
+        #   fidelity       glm volunteered a forecast the payload does not support
+        #                  ("in the next 24-48 hours..."). A situation report states
+        #                  what happened; inventing the assessment is the oldest
+        #                  narration fault in this pipeline.
+        #
+        # Rate limits mirror the floor rather than being smaller, because on the day
+        # this rung runs it carries the floor's whole workload — including the Iran
+        # bulletin's ten-batch burst, which is why burst is 12 there and here.
+        # 40 prose calls a day is a spend ceiling of roughly $2.60 a month, and that
+        # is a month in which the floor was down all day, every day.
+        LLMAccount(
+            provider="openrouter", account_id="A",
+            model="openai/gpt-5.6-luna",
+            api_key=os.environ.get("OPENROUTER_API_KEY_A", ""),
+            rpm=30, rpd=40,
+            bucket=TokenBucket(rate_per_minute=30, daily_limit=40, burst=12),
+        ),
         # ── LLM7 minimax-m2.7, removed 2026-09-04 ────────────────────────
         #
         # It was the rung that started all of this. On 4 Sep it narrated all five
@@ -1080,6 +1128,11 @@ def _quality_slots() -> list:
     # rpd below is a self-imposed bound to stop a retry storm spending the day's
     # Neurons in a minute, NOT a published request limit. The two share a bucket
     # for the same reason they share the allowance.
+    # Counted rather than hard-coded: the Cloudflare rungs go under EVERY paid
+    # rung, and an index literal would have quietly buried a second paid slot
+    # beneath the free ones the day one was added — which is the day this became
+    # a count.
+    paid_rungs = sum(1 for s in quality_slots if is_paid_slot(s))
     cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
     if cf_account and cf_token:
@@ -1090,7 +1143,7 @@ def _quality_slots() -> list:
             # After the paid floor, not before it: the Cloudflare slots are free
             # and excellent, but "free and excellent" is what every rung in this
             # cascade has been on the day it was added.
-            quality_slots.insert(1 + offset, LLMAccount(
+            quality_slots.insert(paid_rungs + offset, LLMAccount(
                 provider="cloudflare", account_id="A",
                 model=cf_model,
                 api_key=cf_token,

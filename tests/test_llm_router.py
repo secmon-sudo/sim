@@ -336,8 +336,9 @@ class TestQualityCascadeOrder:
         calls after it; a dead slot at the front is a round-trip paid before any
         work starts, which is why Cerebras was removed two days earlier."""
         slots = self._slots(monkeypatch)
-        assert slots[1] == ("cloudflare", "@cf/openai/gpt-oss-120b")
-        assert slots[2][0] == "cloudflare"
+        first_free = next(i for i, (p, _m) in enumerate(slots) if p != "openrouter")
+        assert slots[first_free] == ("cloudflare", "@cf/openai/gpt-oss-120b")
+        assert slots[first_free + 1][0] == "cloudflare"
 
     def test_mistral_is_gone(self, monkeypatch):
         """Removed 2026-09-04. The 429s carried x-ratelimit-limit-req-minute=0 —
@@ -351,9 +352,15 @@ class TestQualityCascadeOrder:
         # different host, a different account, and it passed the probe.
         assert "@cf/mistralai/mistral-small-3.1-24b-instruct" in models
 
-    def test_the_cascade_is_exactly_the_measured_four(self, monkeypatch):
+    def test_the_cascade_is_exactly_the_measured_five(self, monkeypatch):
+        """Five since 2026-09-09, when the rung under the floor stopped being free.
+        The drill showed the free cascade writing an English heading into a Turkish
+        report and truncating Iran; a paid second floor makes a floor failure cost
+        money instead of quality, and it is reached so rarely that in a normal month
+        it costs neither."""
         assert [m for _p, m in self._slots(monkeypatch)] == [
             "google/gemini-3.1-flash-lite",
+            "openai/gpt-5.6-luna",
             "@cf/openai/gpt-oss-120b",
             "@cf/mistralai/mistral-small-3.1-24b-instruct",
             "gpt-oss",
@@ -529,3 +536,38 @@ class TestPaidFloorDrill:
         assert router.accounts, "the drill must not empty the cascade"
         assert not any(is_paid_slot(a) for a in router.accounts)
         reset_bucket_registry()
+
+
+def test_the_free_rungs_sit_under_every_paid_one(monkeypatch):
+    """The drill's finding, held in place: a floor failure must land on paid prose,
+    not on the free cascade that wrote an English heading into a Turkish report.
+
+    Guards the ORDER, which is the whole point of the second floor — a Cloudflare
+    slot inserted at a literal index would bury it the day it was added.
+    """
+    import src.core.llm_router as R
+
+    monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+    monkeypatch.delenv("SIM_PAID_FLOOR", raising=False)
+
+    slots = R._quality_slots()
+    providers = [s.provider for s in slots]
+    first_free = providers.index("cloudflare")
+    paid = [i for i, s in enumerate(slots) if R.is_paid_slot(s)]
+
+    assert len(paid) == 2, "the cascade should have a floor and a second floor"
+    assert max(paid) < first_free, "a paid rung ended up below the free cascade"
+
+
+def test_the_drill_switch_removes_both_paid_rungs(monkeypatch):
+    """SIM_PAID_FLOOR=off must still exercise the FREE path, not merely the cheaper
+    of two paid ones — otherwise the drill stops being a drill."""
+    import src.core.llm_router as R
+
+    monkeypatch.setenv("OPENROUTER_API_KEY_A", "k")
+    monkeypatch.setenv("SIM_PAID_FLOOR", "off")
+
+    kept = R.drop_paid_slots(R._quality_slots())
+    assert not any(R.is_paid_slot(s) for s in kept)
