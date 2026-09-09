@@ -119,6 +119,33 @@ KILO_REASONING_DISABLED_MODELS = frozenset({
     "nvidia/nemotron-3-super-120b-a12b:free",
 })
 
+# OpenRouter service-tier routing. Google serves the SAME model, at the same pinned
+# version, on a discounted "flex" tier: gemini-3.1-flash-lite is $0.125/$0.75 per M
+# there against $0.25/$1.50 on the standard endpoint (read off
+# /api/v1/models/google/gemini-3.1-flash-lite/endpoints, 2026-09-09). So this is a
+# price change with no quality question attached — same weights, different queue —
+# and it halves the only paid slot in the project. At this router's measured volume
+# (3.36M prompt + 0.46M completion a month, seven days of llm_call telemetry) that
+# is $1.52/month to $0.76.
+#
+# The endpoint is NAMED rather than reached by price sorting. Both the `:floor`
+# model variant and provider.sort="price" rank the whole pool, and this model's two
+# flex endpoints are priced identically while one of them is sick: measured the same
+# day, google-vertex/global/flex was at status -5, 63% uptime over 24h and a 15.5s
+# p50, against google-ai-studio/flex at 99.95% uptime and a 493ms p50 — faster than
+# the 665ms standard endpoint it replaces. A price sort cannot tell those two apart.
+# An explicit order can, which is the whole reason this is a list and not a variant
+# suffix.
+#
+# allow_fallbacks stays true, so the worst case is exactly today: no flex capacity
+# means the request lands on the standard pool and is billed the standard rate. That
+# also means the saving is a best-effort one and the way to read it is the spend
+# curve, not this constant. Tier endpoints are NOT matched by base provider slugs,
+# so naming "google-ai-studio/flex" in full is the only way to opt into the tier.
+OPENROUTER_FLEX_FIRST_MODELS = frozenset({
+    "google/gemini-3.1-flash-lite",
+})
+
 # LLM7 (aggregator, added 2026-09-02) publishes a per-model `json_mode` boolean in
 # https://api.llm7.io/v1/models, so this is a DENYLIST rather than the allowlist used
 # for OpenRouter: there the safe default was "no", here the catalogue answers the
@@ -218,6 +245,17 @@ def get_profile(provider: str, model: str) -> ModelProfile:
         extras = {"reasoning_effort": "low"}
     else:
         extras = {}
+
+    if provider == "openrouter" and model in OPENROUTER_FLEX_FIRST_MODELS:
+        # Merged after the chain above rather than folded into it, because the two
+        # answer different questions: that chain says how the MODEL behaves (does it
+        # think by default, which knob stops it), this says which of the provider's
+        # ENDPOINTS serves it. A slot needs both answers, so neither may overwrite
+        # the other.
+        extras = {**extras, "provider": {
+            "order": ["google-ai-studio/flex", "google-ai-studio"],
+            "allow_fallbacks": True,
+        }}
 
     if provider == "groq":
         max_request = GROQ_MAX_REQUEST_TOKENS

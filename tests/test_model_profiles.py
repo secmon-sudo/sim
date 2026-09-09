@@ -97,4 +97,33 @@ def test_the_paid_floor_does_not_pay_for_hidden_thinking():
     from src.core.model_profiles import get_profile
 
     p = get_profile("openrouter", "google/gemini-3.1-flash-lite")
-    assert p.payload_extras == {"reasoning": {"enabled": False}}
+    # Checked by key rather than by whole-dict equality: this slot also carries
+    # endpoint routing (see the flex test below), and an equality assertion here
+    # would make every future routing change look like a reasoning regression.
+    assert p.payload_extras["reasoning"] == {"enabled": False}
+
+
+def test_the_paid_floor_asks_for_the_half_price_queue_first():
+    """Same model, same version, half the rate — so the slot names the flex endpoint.
+
+    Guards the shape of the request, not the price: OpenRouter does not match tier
+    endpoints from a base provider slug, so "google-ai-studio" alone would silently
+    keep buying the standard rate while looking like a fix.
+    """
+    profile = get_profile("openrouter", "google/gemini-3.1-flash-lite")
+    prefs = profile.payload_extras["provider"]
+
+    assert prefs["order"][0] == "google-ai-studio/flex"
+    # Falling back is the point: no flex capacity must mean today's behaviour at
+    # today's price, never a failed report.
+    assert prefs["allow_fallbacks"] is True
+    # The endpoint choice must not have eaten the reasoning knob — hidden thinking
+    # takes 22% of the completion budget on this model, and the narrative is
+    # already capped at 6,000 tokens.
+    assert profile.payload_extras["reasoning"] == {"enabled": False}
+
+
+def test_free_slots_do_not_carry_provider_preferences():
+    """The flex tier is a fact about one paid Google slot, not about OpenRouter."""
+    assert "provider" not in get_profile(
+        "openrouter", "nvidia/nemotron-3-super-120b-a12b:free").payload_extras
