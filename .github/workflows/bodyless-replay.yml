@@ -1,0 +1,44 @@
+name: Body-less Replay
+
+# Would the article body have changed what Pass C decided?
+#
+# A third of everything SIM classifies arrives with no body (2,620 of 8,025 fetches in
+# the week to 2026-09-09), and that cohort is archived more, tiered less, and carries
+# time_certainty='unknown' 90.6% of the time against 69.2% for the rest. Whether the
+# BODY is the cause or those articles were simply the low-value ones is the question
+# this answers, by re-running the real Pass C prompt over the same reports twice.
+#
+# Manual only. It is a measurement, not a stage: it writes nothing, and its bodies are
+# committed in db/replay/ so a re-run months from now is comparable.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "LLM provider"
+        default: "groq"
+      model:
+        description: "Model id"
+        default: "qwen/qwen3.8-27b"
+
+env:
+  GROQ_API_KEY_A:       ${{ secrets.GROQ_API_KEY_A }}
+  OPENROUTER_API_KEY_A: ${{ secrets.OPENROUTER_API_KEY_A }}
+  CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
+  MISTRAL_API_KEY:      ${{ secrets.MISTRAL_API_KEY }}
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Replay
+        run: |
+          python -m scripts.replay_bodyless \
+            --provider "${{ inputs.provider }}" \
+            --model "${{ inputs.model }}"
