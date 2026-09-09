@@ -346,12 +346,32 @@ def check_degradation_counters(conn, window_hours: float) -> List[Finding]:
                     "Degradation counters fired above their thresholds", listed)]
 
 
-# Roughly what the paid floor spends in a day: 8 calls at $0.0055 each
-# (gemini-3.1-flash-lite, priced against seven days of measured telemetry). Used
-# only to turn a remaining balance into "about this many days left", which is the
-# form a person can act on — "$0.84 remaining" is not.
-FLOOR_USD_PER_DAY = 0.044
+# Fallback burn rate, used only when OpenRouter itself will not say. The real
+# rate comes from the provider's own usage_weekly/usage_daily fields, because a
+# constant here is a number nobody re-checks: this one was written as $0.044 on
+# 2026-09-04 from that week's telemetry, and by 9 Sep the floor was spending
+# $0.070-0.086 a day — the bulletin had joined the paid slot in between. A stale
+# rate does not merely mis-report, it under-reports: too small a divisor turns a
+# balance into MORE days than there are, which is the wrong direction for the one
+# number this check exists to produce.
+FLOOR_USD_PER_DAY = 0.075
 CREDIT_WARN_DAYS = 14.0
+
+
+def _openrouter_data(path: str, key: str) -> Dict[str, Any]:
+    """`data` from one OpenRouter account endpoint, or {} — never raises here."""
+    import httpx
+
+    resp = httpx.get(f"https://openrouter.ai/api/v1/{path}",
+                     headers={"Authorization": f"Bearer {key}"}, timeout=15)
+    return (resp.json() or {}).get("data") or {}
+
+
+def _as_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def check_openrouter_credit(conn, window_hours: float,
@@ -365,6 +385,25 @@ def check_openrouter_credit(conn, window_hours: float,
     paid slot was added on 2026-09-04 to end. A floor that can vanish without
     saying so is not a floor.
 
+    Two balances exist and they are not the same number. `/key` reports the
+    per-key SPENDING CAP (limit, limit_remaining), which is null unless somebody
+    set one; `/credits` reports the ACCOUNT balance actually funded. This project
+    funded $10 into the account and set no per-key cap, so the first version of
+    this check — limit minus usage, `[]` when limit was null — could never fire
+    on the only account it was written for. It read as a working alarm for five
+    days and was inert the whole time.
+
+    So: cap first when there is one, account balance second, and when NEITHER
+    can be read, say so. An unreadable balance is not the same as a healthy one,
+    and the whole argument of this module is that a check which cannot check must
+    not answer "fine". It clears itself the moment a spending limit is set on the
+    key or a management key is supplied.
+
+    The burn rate comes from the provider's own usage_weekly/usage_daily rather
+    than from a constant here, so the "days left" figure stays true as the
+    project's LLM volume changes. See FLOOR_USD_PER_DAY for what that cost when
+    it was a constant.
+
     Takes no database argument beyond the signature every check shares; the
     balance lives at the provider. Never raises on a network problem — an
     unreachable billing endpoint is not evidence of anything, and run_checks
@@ -376,33 +415,57 @@ def check_openrouter_credit(conn, window_hours: float,
     if not key:
         return []
     try:
-        import httpx
-
-        resp = httpx.get("https://openrouter.ai/api/v1/key",
-                         headers={"Authorization": f"Bearer {key}"}, timeout=15)
-        data = (resp.json() or {}).get("data") or {}
+        info = _openrouter_data("key", key)
     except Exception as exc:
         logger.warning("OpenRouter credit check could not reach the API: %s", exc)
         return []
 
-    limit, usage = data.get("limit"), data.get("usage")
-    if limit is None or usage is None:
-        # An uncapped key reports limit=None. Nothing to warn about, and guessing
-        # a ceiling would produce a daily false alarm.
-        return []
-    try:
-        remaining = float(limit) - float(usage)
-    except (TypeError, ValueError):
-        return []
-    days = remaining / FLOOR_USD_PER_DAY if FLOOR_USD_PER_DAY else 0.0
+    limit, usage = _as_float(info.get("limit")), _as_float(info.get("usage"))
+    remaining = source = None
+    if limit is not None and usage is not None:
+        remaining, source = limit - usage, f"anahtar tavanı ${limit:.2f}"
+    else:
+        # No per-key cap, so the number that matters is the account balance.
+        # /credits needs a management key and answers with no `data` when the
+        # key is not one — which is a readable outcome, not an exception.
+        try:
+            credits = _openrouter_data("credits", key)
+        except Exception as exc:
+            logger.warning("OpenRouter credit check could not reach the API: %s", exc)
+            return []
+        total = _as_float(credits.get("total_credits"))
+        spent = _as_float(credits.get("total_usage"))
+        if total is not None and spent is not None:
+            remaining, source = total - spent, f"hesap bakiyesi ${total:.2f}"
+
+    if remaining is None:
+        return [Finding(
+            "openrouter_credit_unreadable",
+            "OpenRouter bakiyesi OKUNAMIYOR — ücretli zemin haber vermeden "
+            "düşebilir; anahtara harcama tavanı koy ya da management key ver",
+            f"/key limit={info.get('limit')!r}, /credits yanıtsız"
+            + (f", bu anahtarın toplam kullanımı ${usage:.2f}"
+               if usage is not None else ""),
+        )]
+
+    # What it actually spends, from the provider's own counters. usage_weekly is
+    # preferred because a single quiet day would otherwise read as a long runway.
+    weekly = _as_float(info.get("usage_weekly"))
+    daily = _as_float(info.get("usage_daily"))
+    burn = FLOOR_USD_PER_DAY
+    if weekly:
+        burn = weekly / 7.0
+    elif daily:
+        burn = daily
+
+    days = remaining / burn if burn else 0.0
     if days > warn_days:
         return []
     return [Finding(
         "openrouter_credit_low",
         f"OpenRouter kredisi ~{days:.0f} gün sonra bitiyor — bitince ücretli "
         "zemin sessizce düşer ve raporları ücretsiz slotlar yazmaya başlar",
-        f"kalan ${remaining:.2f} (limit ${float(limit):.2f}, "
-        f"kullanılan ${float(usage):.2f})",
+        f"kalan ${remaining:.2f} ({source}), günlük ${burn:.3f}",
     )]
 
 

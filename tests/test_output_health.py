@@ -249,33 +249,76 @@ class TestOpenRouterCredit:
     quietly take over the reports. That is the exact failure the paid slot was
     added to end, so a floor that can vanish without saying so is not a floor."""
 
-    def _patch(self, monkeypatch, payload, key="k"):
+    def _patch(self, monkeypatch, payload, credits=None, key="k"):
+        """Mock both account endpoints; `payload` is /key, `credits` is /credits."""
         import httpx
 
         monkeypatch.setenv("OPENROUTER_API_KEY_A", key)
+        bodies = {"key": payload, "credits": credits or {}}
 
         class _Resp:
-            def json(self):
-                return payload
+            def __init__(self, body):
+                self._body = body
 
-        monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+            def json(self):
+                return self._body
+
+        def _get(url, *a, **k):
+            return _Resp(bodies["credits" if url.endswith("/credits") else "key"])
+
+        monkeypatch.setattr(httpx, "get", _get)
 
     def test_a_low_balance_is_reported_in_days(self, monkeypatch):
-        # $0.20 left ÷ $0.044/day ≈ 5 days
+        # $0.20 left ÷ $0.075/day ≈ 3 days
         self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 9.8}})
         out = oh.check_openrouter_credit(None, 30.0)
         assert out and out[0].key == "openrouter_credit_low"
-        assert "5 gün" in out[0].message
+        assert "3 gün" in out[0].message
         assert "$0.20" in out[0].detail
 
     def test_a_healthy_balance_says_nothing(self, monkeypatch):
         self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 1.0}})
         assert oh.check_openrouter_credit(None, 30.0) == []
 
-    def test_an_uncapped_key_is_not_an_alarm(self, monkeypatch):
-        """limit=None means no ceiling; inventing one would fire every day."""
-        self._patch(monkeypatch, {"data": {"limit": None, "usage": 3.0}})
+    def test_an_uncapped_key_falls_back_to_the_account_balance(self, monkeypatch):
+        """The failure this check shipped with (4-9 Sep 2026): SIM funded $10 into
+        the ACCOUNT and set no per-key cap, so limit was null, the check returned
+        [] every day, and it read as a working alarm while being inert."""
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 9.8}},
+                    credits={"data": {"total_credits": 10.0, "total_usage": 9.8}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and out[0].key == "openrouter_credit_low"
+        assert "hesap bakiyesi" in out[0].detail
+
+    def test_a_healthy_account_balance_says_nothing(self, monkeypatch):
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 0.42}},
+                    credits={"data": {"total_credits": 10.0, "total_usage": 0.42}})
         assert oh.check_openrouter_credit(None, 30.0) == []
+
+    def test_an_unreadable_balance_is_itself_a_finding(self, monkeypatch):
+        """No cap and no management key: nothing can say how much is left. That
+        is not the same as healthy, and answering "fine" is the silence this
+        whole module exists to end."""
+        self._patch(monkeypatch, {"data": {"limit": None, "usage": 3.0}},
+                    credits={"error": {"message": "management key required"}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and out[0].key == "openrouter_credit_unreadable"
+
+    def test_the_burn_rate_comes_from_the_provider_not_a_constant(self, monkeypatch):
+        """A constant is a number nobody re-checks: $0.044 was written on 4 Sep
+        and was 1.8x off by 9 Sep. $1.05 left at $0.15/day is 7 days, not 14."""
+        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 8.95,
+                                           "usage_weekly": 1.05}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and "7 gün" in out[0].message
+
+    def test_a_quiet_day_does_not_invent_a_long_runway(self, monkeypatch):
+        """usage_weekly leads usage_daily for exactly this reason."""
+        self._patch(monkeypatch, {"data": {"limit": 10.0, "usage": 9.0,
+                                           "usage_weekly": 1.4,
+                                           "usage_daily": 0.001}})
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert out and "5 gün" in out[0].message
 
     def test_no_key_means_no_check(self, monkeypatch):
         monkeypatch.delenv("OPENROUTER_API_KEY_A", raising=False)
@@ -295,8 +338,11 @@ class TestOpenRouterCredit:
         assert oh.check_openrouter_credit(None, 30.0) == []
 
     def test_junk_values_do_not_crash_the_check(self, monkeypatch):
+        """And they are not read as healthy either: a balance that cannot be
+        parsed is a balance nobody knows."""
         self._patch(monkeypatch, {"data": {"limit": "ten", "usage": 1.0}})
-        assert oh.check_openrouter_credit(None, 30.0) == []
+        out = oh.check_openrouter_credit(None, 30.0)
+        assert [f.key for f in out] == ["openrouter_credit_unreadable"]
 
 
 class TestRunChecks:
