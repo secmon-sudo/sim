@@ -75,6 +75,111 @@ class TestGrouping:
         assert [e["severity"] for e in out[ib.SECTION_FROM_IRAN]] == [60, None]
 
 
+class TestPlaceHeadings:
+    """Four bullets about the Strait of Hormuz shipped under the heading "Ürdün".
+
+    14 of the 27 section-2 events on 10 Sep 2026 had target_country "unknown", and
+    a narrator given a severity-ordered list with no place for half of it put them
+    under whatever heading came before.
+    """
+
+    def test_section_two_reads_the_target_not_the_filing_country(self):
+        """Pass C files "Iran strikes ships outside Hormuz" under IR because Iran
+        is the dominant country in the text. Section 2 is about where it landed."""
+        ev = {"country_iso": "IR", "target_country": "JO"}
+        assert ib.bulletin_place(ev, ib.SECTION_FROM_IRAN) == "Ürdün"
+
+    def test_section_two_falls_back_to_the_filing_country(self):
+        ev = {"country_iso": "SA", "target_country": "unknown"}
+        assert ib.bulletin_place(ev, ib.SECTION_FROM_IRAN) == "Suudi Arabistan"
+
+    def test_a_placeless_section_two_event_gets_its_own_heading(self):
+        """Iran filed, target unknown: the Hormuz shipping case. Iran is not the
+        place a strike FROM Iran landed, so this is not "İran"."""
+        ev = {"country_iso": "IR", "target_country": "unknown"}
+        assert ib.bulletin_place(ev, ib.SECTION_FROM_IRAN) == ib.UNPLACED_LABEL
+
+    def test_section_one_is_always_iran(self):
+        ev = {"country_iso": "JO", "target_country": "unknown"}
+        assert ib.bulletin_place(ev, ib.SECTION_ON_IRAN) == "İran"
+
+    def test_places_group_together_and_the_placeless_sort_last(self):
+        events = [
+            {"country_iso": "IR", "target_country": "unknown",
+             "actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "severity": 100},
+            {"country_iso": "IR", "target_country": "JO",
+             "actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "severity": 40},
+            {"country_iso": "IR", "target_country": "SA",
+             "actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "severity": 90},
+            {"country_iso": "IR", "target_country": "JO",
+             "actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "severity": 80},
+        ]
+        out = ib.group_into_sections(events)[ib.SECTION_FROM_IRAN]
+        assert [e["place"] for e in out] == [
+            "Suudi Arabistan", "Ürdün", "Ürdün", ib.UNPLACED_LABEL]
+        assert [e["severity"] for e in out] == [90, 80, 40, 100]
+
+
+class TestSectionCoverage:
+    """Probed 2026-09-10: pushed to group its bullets by place, the narrator
+    dropped all three section headings and listed countries instead — and the
+    ALL-CAPS check passed anyway, because "YÖNETİCİ ÖZETİ" is ALL-CAPS too. The
+    directional claim is the report; it cannot go missing quietly."""
+
+    SECTIONS = {
+        ib.SECTION_ON_IRAN: [{"standing": ib.STANDING_CONFIRMED}],
+        ib.SECTION_FROM_IRAN: [{"standing": ib.STANDING_CLAIMED}],
+        ib.SECTION_REGIONAL: [],
+    }
+
+    def test_a_missing_section_heading_is_rejected(self):
+        text = ("YÖNETİCİ ÖZETİ\n\nÖzet.\n\nÜrdün\n- Bir olay — Durum: Doğrulandı")
+        assert not ib.narrative_covers_sections(text, self.SECTIONS)
+
+    def test_both_populated_sections_present_passes(self):
+        text = "\n".join([ib.SECTION_TITLES[ib.SECTION_ON_IRAN],
+                          ib.SECTION_TITLES[ib.SECTION_FROM_IRAN]])
+        assert ib.narrative_covers_sections(text, self.SECTIONS)
+
+    def test_an_empty_section_is_not_required(self):
+        """The regional bucket is empty here; demanding its heading would ask the
+        narrator to write a section with nothing in it."""
+        text = "\n".join([ib.SECTION_TITLES[ib.SECTION_ON_IRAN],
+                          ib.SECTION_TITLES[ib.SECTION_FROM_IRAN]])
+        assert ib.SECTION_TITLES[ib.SECTION_REGIONAL] not in text
+        assert ib.narrative_covers_sections(text, self.SECTIONS)
+
+
+class TestSourcedNumbers:
+    """"beş İran petrol tankeri vurulmuştur" and then "beş İran petrol tankeri
+    DAHA vurulmuştur" — two filings of one strike, narrated as two strikes. Probed
+    on the same payload the model summed them instead: "toplam 10 adet"."""
+
+    PROMPT = 'VERİ: [{"baslik": "US strikes five tankers, 18 of 20 missiles"}]'
+
+    def test_a_number_from_the_data_passes(self):
+        assert ib.narrative_numbers_are_sourced(
+            "- 5 tanker vuruldu", self.PROMPT)
+
+    def test_an_english_number_word_counts_as_source(self):
+        """The headlines are English and the report is Turkish: "five" in the data
+        is where a "5" in the prose legitimately comes from."""
+        assert ib.narrative_numbers_are_sourced("- 18 füze", self.PROMPT)
+
+    def test_a_summed_total_is_rejected(self):
+        assert not ib.narrative_numbers_are_sourced(
+            "- toplam 10 adet tanker vuruldu", self.PROMPT)
+
+    def test_one_is_exempt(self):
+        """Turkish "bir" is the indefinite article; a rule that fires on "bir
+        tanker" rejects every honest narrative."""
+        assert ib.narrative_numbers_are_sourced("- bir tanker vuruldu", "VERİ: []")
+
+    def test_a_thousand_separator_is_one_number(self):
+        assert ib.narrative_numbers_are_sourced(
+            "- 7.700 ihlal", 'VERİ: "violated the agreement 7,700 times"')
+
+
 class TestExtractionParsing:
     def test_reads_a_clean_reply(self):
         body = json.dumps({"items": [

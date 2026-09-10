@@ -542,16 +542,62 @@ def assign_section(event: Dict[str, Any]) -> str:
     return SECTION_REGIONAL
 
 
+# The heading a bullet sits under when no country can be named for it. Measured
+# 2026-09-10: 14 of the 27 section-2 events had target_country "unknown" — every
+# Hormuz shipping filing among them — and the narrator, given no place for them,
+# printed them under the heading of the country above. Four bullets about the
+# Strait of Hormuz shipped under "Ürdün".
+UNPLACED_LABEL = "Belirsiz hedef"
+
+
+def bulletin_place(event: Dict[str, Any], section: str) -> str:
+    """The Turkish place heading a bullet belongs under.
+
+    Which field answers "where" depends on the section, and country_iso is the
+    wrong answer twice over in section 2: Pass C files "Iran strikes ships outside
+    Hormuz" under IR because Iran is the dominant country in the text, and section
+    2 is precisely about events that LAND somewhere else. So the target leads and
+    the filing country is the fallback — the same order assign_section already
+    uses to decide the section itself.
+    """
+    target = str(event.get("target_country") or "").upper()
+    iso = str(event.get("country_iso") or "").upper()
+    if section == SECTION_ON_IRAN:
+        return THEATRE_NAMES["IR"]
+    if section == SECTION_FROM_IRAN:
+        for candidate in (target, iso):
+            if candidate in THEATRE_NAMES and candidate != "IR":
+                return THEATRE_NAMES[candidate]
+        return UNPLACED_LABEL
+    for candidate in (iso, target):
+        if candidate in THEATRE_NAMES:
+            return THEATRE_NAMES[candidate]
+    return UNPLACED_LABEL
+
+
 def group_into_sections(events: List[Dict[str, Any]]
                         ) -> Dict[str, List[Dict[str, Any]]]:
-    """The bulletin's three buckets, each ordered by severity then recency."""
+    """The bulletin's three buckets, each ordered by place then severity.
+
+    Ordered by PLACE first since 2026-09-10. The narrative groups its bullets under
+    place headings, so handing it a severity-ordered list asks it to do the
+    grouping itself out of an interleaved sequence — and it did it wrong, gluing
+    placeless Hormuz bullets under the previous country's heading. Sorting here
+    makes the grouping the model has to perform a matter of reading the list in
+    order. Severity still decides the order inside a place, and the placeless
+    bucket sorts last because it is the one heading a reader skips.
+    """
     sections: Dict[str, List[Dict[str, Any]]] = {
         SECTION_ON_IRAN: [], SECTION_FROM_IRAN: [], SECTION_REGIONAL: [],
     }
     for event in events:
-        sections[assign_section(event)].append(event)
+        section = assign_section(event)
+        event["place"] = bulletin_place(event, section)
+        sections[section].append(event)
     for bucket in sections.values():
-        bucket.sort(key=lambda e: (e.get("severity") or 0), reverse=True)
+        bucket.sort(key=lambda e: (e.get("place") == UNPLACED_LABEL,
+                                   e.get("place") or "",
+                                   -(e.get("severity") or 0)))
     return sections
 
 # ---------------------------------------------------------------------------
@@ -613,7 +659,7 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         payload[title] = [
             {
                 "baslik": ev.get("title", ""),
-                "ulke": ev.get("country_iso"),
+                "yer": ev.get("place") or UNPLACED_LABEL,
                 "fail": ACTOR_LABELS.get(ev.get("actor"), "belirsiz"),
                 "durum": STANDING_LABELS.get(ev.get("standing"), "Durum belirsiz"),
                 "siddet": ev.get("severity"),
@@ -627,9 +673,15 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "UTC penceresi için bölgesel askeri gelişmeler bültenini yaz.",
         "",
         "BİÇİM (renderer bu şekle göre çalışır, birebir uy):",
-        "- Her bölüm başlığını TAMAMI BÜYÜK HARF tek satır olarak yaz.",
+        "- Rapor İKİ DÜZEYLİDİR. Önce bölüm başlığı: verideki bölüm adını TAMAMI "
+        "BÜYÜK HARF, tek satır, birebir yaz. Altına o bölümün yer başlıklarını ve "
+        "maddelerini koy. Veride dolu olan HER bölüm raporda kendi başlığıyla yer "
+        "almalı; bölüm başlıklarını atlayıp doğrudan yer başlıklarına geçme.",
         "- İlk bölüm YÖNETİCİ ÖZETİ olsun: 2-3 paragraf, madde işareti yok.",
-        "- Bir olay kümesinin yerini kısa bir satır olarak yaz (nokta ile bitmesin).",
+        "- Maddeleri verideki 'yer' alanına göre grupla ve her grubun başına o "
+        "yeri kısa bir satır olarak yaz (nokta ile bitmesin). Yer başlığını "
+        "verideki değerden birebir al, kendin ülke atama; veri sırası zaten "
+        "yere göre gruplanmıştır.",
         "- Ayrıntıları '- ' ile başlayan maddeler halinde yaz.",
         "- HER maddenin sonuna ' — Durum: X' ekle. X, o olayın verideki 'durum' "
         "alanının BİREBİR kopyasıdır: Doğrulandı / Tek taraflı iddia / "
@@ -650,7 +702,12 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "failsiz anlat.",
         "- Veri alanlarını olduğu gibi cümleye kopyalama; hepsi Türkçe "
         "yazılacak.",
-        "- Verideki sayıları değiştirme, yuvarlama, toplama.",
+        "- Verideki sayıları değiştirme, yuvarlama, TOPLAMA. Sayıları rakamla "
+        "yaz (beş değil 5). Veride olmayan bir sayıyı yazma.",
+        "- Aynı olay birden çok başlıkta geçebilir; bunlar AYRI olaylar DEĞİL, "
+        "aynı olayın farklı yayıncılardaki halleridir. Onları tek maddede birleştir; "
+        "'bir daha', 'ikinci kez', 'toplam N' gibi ifadelerle ikinci bir olay "
+        "uydurma.",
         "",
         "VERİ:",
         json.dumps(payload, ensure_ascii=False, indent=1),
@@ -756,6 +813,80 @@ def narrative_standing_is_honest(text: str,
     return True
 
 
+# Digits, once thousand separators are out of the way ("1.054" is one number, not
+# two). English number words are mapped as well because the payload's headlines are
+# English: "US strikes five tankers" is where a Turkish "5" legitimately comes from.
+_NUMBER_TOKEN_RE = re.compile(r"\d+")
+_THOUSANDS_SEP_RE = re.compile(r"(?<=\d)[.,](?=\d{3}\b)")
+_WORD_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "dozen": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    "hundred": 100, "thousand": 1000,
+}
+
+
+def _numbers_in(text: str) -> set:
+    """Every number the text states, digits and English number words alike."""
+    flat = _THOUSANDS_SEP_RE.sub("", text or "")
+    found = {int(token) for token in _NUMBER_TOKEN_RE.findall(flat)}
+    lowered = flat.lower()
+    for word, value in _WORD_NUMBERS.items():
+        if re.search(rf"(?<![\w-]){word}(?![\w-])", lowered):
+            found.add(value)
+    return found
+
+
+def narrative_numbers_are_sourced(text: str, prompt: str) -> bool:
+    """No number in the prose that was not in the data the model was handed.
+
+    The prompt has said "do not change, round or SUM the numbers" since the report
+    existed, and on 10 Sep 2026 the narrative opened with "beş İran petrol tankeri
+    vurulmuştur" followed by "beş İran petrol tankeri DAHA vurulmuştur" — two
+    filings of one strike read as two strikes. Re-probed on the real payload the
+    same model summed them instead: "toplam 10 adet petrol tankeri". Ten tankers
+    were never struck and the figure appears nowhere in the data.
+
+    A casualty or asset count is the part of an intelligence bulletin a reader
+    acts on, so the arithmetic is checked rather than requested. Everything the
+    prompt carries counts as sourced — the payload, the window stamp, the format
+    examples — because that is exactly the set the model was allowed to read.
+
+    1 is exempt: Turkish "bir" is also the indefinite article, and a rule that
+    fires on "bir tanker" would reject every honest narrative ever written. Numbers
+    written as Turkish words go unchecked, which is why the prompt now asks for
+    digits — this fails OPEN on an unchecked spelling and never on an honest one.
+    """
+    allowed = _numbers_in(prompt)
+    stray = sorted(n for n in _numbers_in(text) if n > 1 and n not in allowed)
+    if stray:
+        logger.warning("Bulletin narrative states numbers absent from the data: %s",
+                       stray[:8])
+        return False
+    return True
+
+
+def narrative_covers_sections(text: str,
+                              sections: Dict[str, List[Dict[str, Any]]]) -> bool:
+    """Every section that has events appears under its own heading.
+
+    The report's whole claim is directional — what was done TO Iran, what was done
+    FROM it, what happened around it — and that claim lives entirely in the three
+    section headings. Probed 2026-09-10: told firmly enough to group its bullets by
+    place, the narrator dropped all three section headings and ran the places
+    together, turning a directional bulletin into a list of countries. The
+    ALL-CAPS check above still passed, because "YÖNETİCİ ÖZETİ" is ALL-CAPS too.
+    """
+    for key, title in SECTION_TITLES.items():
+        if sections.get(key) and title not in text:
+            logger.warning("Bulletin narrative is missing the section heading %r",
+                           title)
+            return False
+    return True
+
+
 def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
                    window_end: datetime, max_tokens: int = 6000,
                    narrative_router: Optional[LLMRouter] = None) -> Dict[str, Any]:
@@ -811,16 +942,19 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
         len(sections[SECTION_FROM_IRAN]), len(sections[SECTION_REGIONAL]),
     )
 
+    prompt = _narrative_prompt(sections, window_start, window_end)
     result = call_llm(
         router=narrative_router or router,
-        prompt=_narrative_prompt(sections, window_start, window_end),
+        prompt=prompt,
         system_prompt=_NARRATIVE_SYSTEM_PROMPT,
         max_tokens=max_tokens,
         # Prose, never JSON: a reasoning model asked for JSON here returns the
         # narrative wrapped in a string field and the renderer sees one long line.
         json_mode=False,
         accept=lambda text: (narrative_is_usable(text)
-                             and narrative_standing_is_honest(text, sections)),
+                             and narrative_covers_sections(text, sections)
+                             and narrative_standing_is_honest(text, sections)
+                             and narrative_numbers_are_sourced(text, prompt)),
     )
     if db_conn is not None:
         log_llm_telemetry(db_conn, result, router, success=True,
