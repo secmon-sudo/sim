@@ -588,6 +588,71 @@ class TestNarrativeContract:
             assert token in ib._INTERNAL_TOKENS, token
 
 
+class TestStandingContract:
+    """The 10 Sep bulletin narrated 24 claims and 2 denials as confirmed fact.
+
+    The standing was in the payload and the prompt already forbade the upgrade —
+    the narrator collapsed seven near-duplicate Jordan filings into one bullet and
+    kept the strongest label instead of the weakest. Advice the model can ignore
+    becomes format it cannot: every bullet carries its standing, and the report
+    cannot confirm more events than the extractor did.
+    """
+
+    SECTIONS = {
+        ib.SECTION_ON_IRAN: [{"standing": ib.STANDING_CONFIRMED}],
+        ib.SECTION_FROM_IRAN: [{"standing": ib.STANDING_CLAIMED},
+                               {"standing": ib.STANDING_DENIED}],
+        ib.SECTION_REGIONAL: [],
+    }
+    HEADER = "İRAN'DAN KOMŞU ÜLKELERE YÖNELİK SALDIRILAR\n"
+
+    def test_a_tagged_narrative_passes(self):
+        text = self.HEADER + "\n".join([
+            "- Tankerlere saldırı düzenlendi — Durum: Doğrulandı",
+            "- Üsse füze atıldığı öne sürüldü — Durum: Tek taraflı iddia",
+            "- Muhrip iddiası yalanlandı — Durum: İddia edildi, yalanlandı",
+        ])
+        assert ib.narrative_standing_is_honest(text, self.SECTIONS)
+
+    def test_an_untagged_bullet_is_rejected(self):
+        """This is the 10 Sep shape: prose that ends in "doğrulanmıştır" and names
+        no standing at all."""
+        text = self.HEADER + "- Aramco rafinerisinde yangın çıktığı doğrulanmıştır."
+        assert not ib.narrative_standing_is_honest(text, self.SECTIONS)
+
+    def test_more_confirmations_than_confirmed_events_is_rejected(self):
+        """The systemic case, and the only one arithmetic can catch: nineteen
+        confirmations out of sixteen confirmed events."""
+        text = self.HEADER + "\n".join([
+            "- Birinci olay — Durum: Doğrulandı",
+            "- İkinci olay — Durum: Doğrulandı",
+        ])
+        assert not ib.narrative_standing_is_honest(text, self.SECTIONS)
+
+    def test_an_invented_label_is_rejected(self):
+        """The tag has to be one of the four the extractor can produce; a fifth
+        one the model made up is not a standing."""
+        text = self.HEADER + "- Bir olay — Durum: Kısmen doğrulandı"
+        assert not ib.narrative_standing_is_honest(text, self.SECTIONS)
+
+    def test_a_narrative_with_no_bullets_is_rejected(self):
+        assert not ib.narrative_standing_is_honest(
+            self.HEADER + "Yalnızca düz paragraf.", self.SECTIONS)
+
+    def test_the_prompt_carries_the_rule_the_check_enforces(self):
+        """A checker the prompt never asked for fails every rung and ships nothing.
+        These two have to move together."""
+        from datetime import datetime, timezone
+
+        prompt = ib._narrative_prompt(
+            self.SECTIONS,
+            datetime(2026, 9, 9, 8, tzinfo=timezone.utc),
+            datetime(2026, 9, 10, 8, tzinfo=timezone.utc))
+        assert "Durum: X" in prompt
+        for label in ib.STANDING_LABELS.values():
+            assert label in prompt
+
+
 class TestShortReplyIsCounted:
     """A reply carrying fewer items than its batch is the failure that hid the
     5 Sep collapse: every missing item takes the unattributed default, the

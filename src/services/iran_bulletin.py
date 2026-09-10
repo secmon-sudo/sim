@@ -631,13 +631,19 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "- İlk bölüm YÖNETİCİ ÖZETİ olsun: 2-3 paragraf, madde işareti yok.",
         "- Bir olay kümesinin yerini kısa bir satır olarak yaz (nokta ile bitmesin).",
         "- Ayrıntıları '- ' ile başlayan maddeler halinde yaz.",
+        "- HER maddenin sonuna ' — Durum: X' ekle. X, o olayın verideki 'durum' "
+        "alanının BİREBİR kopyasıdır: Doğrulandı / Tek taraflı iddia / "
+        "İddia edildi, yalanlandı / Durum belirsiz. Bir maddede birden çok olayı "
+        "birleştirdiysen EN ZAYIF durumu yaz (yalanlandı < iddia < belirsiz < "
+        "doğrulandı). Durumu kendin yükseltme.",
         "",
         "KURALLAR:",
         "- Saat verme. Elimizde olayların saati YOK; 'akşam saatlerinde' gibi "
         "ifadeler de uydurmadır. Yalnız verilen pencereye atıf yap.",
         "- Her olayın failini ve durumunu yaz. 'Tek taraflı iddia' veya "
         "'İddia edildi, yalanlandı' olan bir olayı ASLA gerçekleşmiş gibi anlatma; "
-        "kimin iddia ettiğini söyle.",
+        "kimin iddia ettiğini söyle. 'doğrulanmıştır', 'teyit edilmiştir' gibi "
+        "ifadeleri YALNIZ durumu 'Doğrulandı' olan olaylar için kullan.",
         "- Fail alanı 'başlıkta adı geçen taraf' olan olaylarda faili başlıktan "
         "oku ve adıyla yaz.",
         "- Fail alanı 'belirsiz' olan olaylarda kimseye fail atfetme; olayı "
@@ -690,6 +696,64 @@ def narrative_is_usable(text: str) -> bool:
             return True
     logger.warning("Bulletin narrative carries no ALL-CAPS section line")
     return False
+
+
+# A bullet line, and the status tag the format rule requires at the end of one.
+_BULLET_PREFIX_RE = re.compile(r"^\s*[-•]\s+")
+_STATUS_TAG_RE = re.compile(r"—\s*Durum:\s*([^—]+?)\s*$")
+
+
+def narrative_standing_is_honest(text: str,
+                                 sections: Dict[str, List[Dict[str, Any]]]) -> bool:
+    """Every bullet declares a standing, and confirmation is not invented.
+
+    Measured on the 10 Sep 2026 bulletin: of 47 events the extractor marked 24
+    "claimed", 2 "denied" and 5 "unknown" — and the narrative ended all nineteen of
+    its bullets with "doğrulanmıştır". IRGC claims about US destroyers, an Aramco
+    fire and a strike on a Jordanian airbase all reached the reader as confirmed
+    fact, and the one event the US had publicly DENIED was narrated as confirmed
+    too. The standing was in the payload and the prompt already forbade this; the
+    narrator simply collapsed the 7 near-duplicate Jordan filings into one bullet
+    and dropped the weakest label on the floor.
+
+    So the label stops being advice and becomes format. Two checks, both cheap:
+
+    1. Every bullet ends in one of the four STANDING_LABELS. A model that will not
+       tag its bullets is a model whose prose cannot be audited at all.
+    2. The number of bullets claiming "Doğrulandı" cannot exceed the number of
+       events that actually carry that standing. This is the systemic case — 19
+       confirmations from 16 confirmed events is arithmetic, not judgement — and it
+       is what the 10 Sep bulletin would have failed on.
+
+    It does NOT catch a single upgraded bullet inside a compliant report (probed
+    2026-09-10 on the real payload: 16/16 bullets tagged, one claim upgraded). That
+    needs bullet-to-event attribution, which the narrative does not carry.
+    """
+    bullets = [line.strip() for line in text.splitlines()
+               if _BULLET_PREFIX_RE.match(line)]
+    if not bullets:
+        logger.warning("Bulletin narrative carries no bullet lines")
+        return False
+    allowed = set(STANDING_LABELS.values())
+    tags: List[str] = []
+    for bullet in bullets:
+        match = _STATUS_TAG_RE.search(bullet)
+        label = match.group(1).strip() if match else ""
+        if label not in allowed:
+            logger.warning("Bulletin bullet carries no usable standing tag: %.80s",
+                           bullet)
+            return False
+        tags.append(label)
+    confirmed_label = STANDING_LABELS[STANDING_CONFIRMED]
+    claimed_confirmed = sum(1 for tag in tags if tag == confirmed_label)
+    have_confirmed = sum(1 for events in sections.values() for event in events
+                         if event.get("standing") == STANDING_CONFIRMED)
+    if claimed_confirmed > have_confirmed:
+        logger.warning(
+            "Bulletin narrative confirms %d events; only %d are confirmed",
+            claimed_confirmed, have_confirmed)
+        return False
+    return True
 
 
 def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
@@ -755,7 +819,8 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
         # Prose, never JSON: a reasoning model asked for JSON here returns the
         # narrative wrapped in a string field and the renderer sees one long line.
         json_mode=False,
-        accept=narrative_is_usable,
+        accept=lambda text: (narrative_is_usable(text)
+                             and narrative_standing_is_honest(text, sections)),
     )
     if db_conn is not None:
         log_llm_telemetry(db_conn, result, router, success=True,
