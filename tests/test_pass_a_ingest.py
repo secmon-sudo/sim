@@ -411,6 +411,30 @@ class TestExactTitleIndex:
         ])
         assert pa._fetch_exact_title_index(conn) == {}
 
+    def test_the_index_looks_further_back_than_the_matcher_can(self):
+        """This index exists for the span the 2000-row corpus cap cuts off, and it
+        spent its first days reading max_article_age_days — the same 2 days those
+        rows already cover at ~1000 events/day, so it covered a two-hour sliver.
+        Measured 2026-09-10: 62 of 76 identical-title pairs that escaped dedup over
+        ten days were filed more than 48h apart, past both structures. The window is
+        its own number and it has to be the larger one."""
+        from src.pipeline import pass_a_ingest as pa
+
+        seen = {}
+
+        class _Recorder:
+            def execute(self, _sql, params):
+                seen["params"] = params
+
+                class _R:
+                    def fetchall(self_inner):
+                        return []
+                return _R()
+
+        pa._fetch_exact_title_index(_Recorder())
+        assert seen["params"] == (pa._EXACT_TITLE_INDEX_DAYS,)
+        assert pa._EXACT_TITLE_INDEX_DAYS > pa._MAX_ARTICLE_AGE_DAYS
+
     def test_a_failed_read_leaves_dedup_exactly_as_it_was(self):
         """Fails open, like the corpus fetch beside it: an empty index is the
         behaviour that existed before this function did."""

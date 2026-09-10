@@ -9,6 +9,7 @@
       "osint613.com": 4
     },
     "max_article_age_days": 2,
+    "exact_title_index_days": 4,
     "fetch_full_text": true,
     "max_event_age_days": 30,
     "max_event_future_days": 1,

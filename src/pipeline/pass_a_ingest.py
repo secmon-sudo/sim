@@ -172,6 +172,17 @@ def _fetch_recent_events_for_dedup(db_conn) -> tuple[list[tuple[str, str]], list
 # duplicate pair measured on 2026-09-06 was far longer than this.
 _EXACT_TITLE_MIN_LEN = 25
 
+# How far back the exact-title index reads. Deliberately NOT max_article_age_days:
+# this index exists to cover what the matcher's 2000-ROW cap cuts off, and rows are
+# not days. Measured 2026-09-10 — ingest runs ~1000 events/day, so 2000 rows span
+# ~48h, while config sets max_article_age_days to 2 (the note below assumed 4, which
+# was never the deployed value). Both structures therefore looked back the same two
+# days and the long tail this index was built for stayed invisible: of 76
+# identical-title pairs that escaped dedup over ten days, 62 were filed more than 48h
+# apart, the fullest bucket being 48-72h with 38. Four days puts 67 of the 76 inside
+# the lookup and costs ~4000 rows on one query the 20000-row ceiling already allowed.
+_EXACT_TITLE_INDEX_DAYS = int(_INGESTION.get("exact_title_index_days", 4))
+
 
 def _fetch_exact_title_index(db_conn) -> dict:
     """normalize_title(headline) -> (event_id, domain, title, anchor), earliest wins.
@@ -179,7 +190,7 @@ def _fetch_exact_title_index(db_conn) -> dict:
     The corpus above is `ORDER BY ingested_at DESC LIMIT 2000`, and that cap — not
     the configured window — is what actually bounds dedup. Measured 2026-09-06:
     ingest runs at ~971 events/day, so the newest 2000 rows span 1 day 22h against
-    a max_article_age_days of 4. The same story filed twice more than two days
+    a window of _EXACT_TITLE_INDEX_DAYS. The same story filed twice more than two days
     apart was structurally invisible, and 18 of 18 duplicate ALERT pairs in a
     fortnight were exactly that — rows_between ranged 2,029 to 3,589, every one of
     them past the cap and every one inside the configured window. Same shape as the
@@ -208,7 +219,7 @@ def _fetch_exact_title_index(db_conn) -> dict:
                WHERE ingested_at > NOW() - (%s * INTERVAL '1 day')
                ORDER BY ingested_at ASC
                LIMIT 20000""",
-            (_MAX_ARTICLE_AGE_DAYS,),
+            (_EXACT_TITLE_INDEX_DAYS,),
         ).fetchall()
     except Exception:
         # Fails OPEN, like the corpus fetch above: no index means dedup behaves
@@ -609,6 +620,15 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # titles cannot disagree, but an anchor can name a city the headline never
         # did — the Kharkiv/Kyiv failure of 2026-08-20, reached by another road.
         "exact_title_place_veto": 0,
+        # Is the index alive, and is it being asked? exact_title_duplicates alone
+        # cannot tell an empty index from a covered window — both read zero, and both
+        # did. Measured 2026-09-10: two identical-title pairs escaped INSIDE the
+        # corpus window, which no widening explains, so the pool size and the number
+        # of lookups are recorded apart from the hits. pool=0 means the fetch died
+        # (it fails open, silently by design); pool and lookups both >0 with zero
+        # hits means the two sides are building the key differently.
+        "exact_title_pool": 0,
+        "exact_title_lookups": 0,
         # Why the fetch window was drained. The first parallel run cut article_fetch
         # from 145s to 88s but recorded ZERO stalls against 21 in-run duplicate
         # matches, which means the window was usually empty when those arrived —
@@ -710,6 +730,7 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         recent_events, recent_meta = _fetch_recent_events_for_dedup(db_conn)
         # Covers the part of the configured window the 2000-row cap cuts off.
         exact_titles = _fetch_exact_title_index(db_conn)
+        stats["exact_title_pool"] = len(exact_titles)
 
     inserted = 0
     domain_inserts: dict[str, int] = {}
@@ -989,7 +1010,11 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
             # carries measured behaviour (in-run distance telemetry, the pending
             # settle) that has nothing to do with this.
             key = normalize_title(item.get("title", ""))
-            hit = exact_titles.get(key) if len(key) >= _EXACT_TITLE_MIN_LEN else None
+            if len(key) >= _EXACT_TITLE_MIN_LEN:
+                stats["exact_title_lookups"] += 1
+                hit = exact_titles.get(key)
+            else:
+                hit = None
             if hit is not None:
                 hit_id, hit_domain, hit_title, hit_anchor = hit
                 # Same veto the matcher applies: two headlines naming different
