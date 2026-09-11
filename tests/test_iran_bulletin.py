@@ -75,6 +75,34 @@ class TestGrouping:
         assert [e["severity"] for e in out[ib.SECTION_FROM_IRAN]] == [60, None]
 
 
+class TestNonKineticRouting:
+    """The nuclear file joined the report on 2026-09-11; the sections are titled
+    SALDIRILAR. A Security Council referral belongs in the bulletin — it is what
+    this war is fought over — but not under a heading that says someone was
+    struck."""
+
+    def test_a_sanctions_move_does_not_enter_section_one(self):
+        ev = {"actor": ib.US_SIDE, "target": ib.IRAN_SIDE, "country_iso": "IR",
+              ib.KINETIC: False}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_a_ceasefire_condition_does_not_enter_section_two(self):
+        ev = {"actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "country_iso": "IR",
+              ib.KINETIC: False}
+        assert ib.assign_section(ev) == ib.SECTION_REGIONAL
+
+    def test_a_strike_still_routes_by_direction(self):
+        ev = {"actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "country_iso": "JO",
+              ib.KINETIC: True}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+    def test_a_missing_flag_changes_nothing(self):
+        """Every default in this parser fails open; a model that never answers the
+        field must leave the report exactly as it was."""
+        ev = {"actor": ib.IRAN_SIDE, "target": ib.US_SIDE, "country_iso": "JO"}
+        assert ib.assign_section(ev) == ib.SECTION_FROM_IRAN
+
+
 class TestPlaceHeadings:
     """Four bullets about the Strait of Hormuz shipped under the heading "Ürdün".
 
@@ -220,7 +248,8 @@ class TestExtractionParsing:
         out = ib._parse_extraction(body, 1)
         assert out[0] == {"actor": ib.UNATTRIBUTED, "target": ib.UNATTRIBUTED,
                           "target_country": ib.UNKNOWN_COUNTRY,
-                          "standing": ib.STANDING_UNKNOWN, ib.WAR_RELATED: True}
+                          "standing": ib.STANDING_UNKNOWN, ib.WAR_RELATED: True,
+                          ib.KINETIC: True}
 
     def test_a_target_country_is_read_as_an_iso_code_or_not_at_all(self):
         """It decides a section, so it is one of the values we asked for or absent."""

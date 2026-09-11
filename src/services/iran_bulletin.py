@@ -92,6 +92,14 @@ STANDING_UNKNOWN = "unknown"
 # Nazareth" are both civilian_casualties in Israel, and only one of them is the war.
 WAR_RELATED = "war_related"
 
+# Whether anything physically happened. Section 1 and 2 are titled SALDIRILAR —
+# attacks — and the state-level file admitted to the report on 2026-09-11 (the
+# nuclear dossier, sanctions, ceasefire diplomacy) is war_related without being an
+# attack. Routed to the regional section on this flag, which is where "stratejik
+# hamleler" is already promised in the heading. Defaults TRUE on every failure
+# path, so a missing answer leaves an event exactly where it used to go.
+KINETIC = "kinetic"
+
 # Where an Iran-side actor is at HOME rather than reaching across a border.
 #
 # Section 2 is "İran'dan komşu ülkelere" — an attack that CROSSES into another
@@ -300,10 +308,22 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         'military/security operation — a strike, shelling, an interception, air '
         'defence, a raid, a blockade, a seizure or release across a front line, '
         'airspace or shipping disruption, an evacuation, a military threat, '
-        'diplomacy over the fighting, or casualties from any of it. false when '
-        'the event is not military at all and merely HAPPENED in one of these '
-        'countries: ordinary crime and policing, a road or aviation accident, a '
-        'labour or pay dispute, an unrelated domestic political story.',
+        'diplomacy over the fighting, or casualties from any of it. ALSO true for '
+        'the state-level file this war is fought over, when a BELLIGERENT is party '
+        'to it: Iran\'s nuclear programme before the IAEA or the UN Security '
+        'Council, sanctions or snapback between the belligerents, and any ceasefire '
+        'proposal, negotiation or mediation involving Iran or the US-led side. '
+        'false when the event is not military at all and merely HAPPENED in one of '
+        'these countries: ordinary crime and policing, a road or aviation accident, '
+        'a labour or pay dispute, an unrelated domestic political story — and false '
+        'for diplomacy between two parties that are NOT belligerents here, such as '
+        'a European state and Israel.',
+        "",
+        'kinetic: true when something physically happened or was physically '
+        'attempted — a strike, an interception, a seizure, a blockade, a raid, a '
+        'closure, an evacuation. false for a purely state-level or diplomatic move: '
+        'a referral, an inspection dispute, a sanctions designation, a negotiation, '
+        'a ceasefire proposal, a statement. A threat to act is NOT kinetic.',
         "",
         f'standing: "{STANDING_CONFIRMED}" when the headline reports the action as '
         f'having happened, "{STANDING_CLAIMED}" when one side claims/alleges/says it '
@@ -348,7 +368,7 @@ def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
         "",
         'Reply with JSON only: '
         '{"items":[{"n":1,"actor":"...","target":"...","target_country":"..",'
-        '"standing":"...","war_related":true}]}',
+        '"standing":"...","war_related":true,"kinetic":true}]}',
         "",
     ]
     for i, ev in enumerate(events, 1):
@@ -386,7 +406,7 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = [
         {"actor": UNATTRIBUTED, "target": UNATTRIBUTED,
          "target_country": UNKNOWN_COUNTRY,
-         "standing": STANDING_UNKNOWN, WAR_RELATED: True}
+         "standing": STANDING_UNKNOWN, WAR_RELATED: True, KINETIC: True}
         for _ in range(expected)
     ]
     valid_actors = {IRAN_SIDE, US_SIDE, OTHER_SIDE, UNATTRIBUTED}
@@ -420,6 +440,10 @@ def _parse_extraction(content: str, expected: int) -> List[Dict[str, Any]]:
             # Only an explicit false drops an event; a missing or unreadable value
             # keeps it. Same asymmetry as above, for the same reason.
             WAR_RELATED: item.get(WAR_RELATED) is not False,
+            # Same asymmetry once more: only an explicit false moves an event out
+            # of a directional section, so an unreadable answer leaves it where
+            # the actor/target pair puts it.
+            KINETIC: item.get(KINETIC) is not False,
         }
         recovered += 1
     # A reply that carries fewer items than the batch had is the failure that hid
@@ -517,6 +541,13 @@ def assign_section(event: Dict[str, Any]) -> str:
     """
     actor = event.get("actor", UNATTRIBUTED)
     if actor in (UNATTRIBUTED, OTHER_SIDE):
+        return SECTION_REGIONAL
+
+    if not event.get(KINETIC, True):
+        # Sections 1 and 2 are titled SALDIRILAR. A Security Council referral, a
+        # sanctions designation or a ceasefire condition belongs in the report —
+        # it is the file this war is fought over — but not under a heading that
+        # says someone was struck. See KINETIC.
         return SECTION_REGIONAL
 
     if actor == IRAN_SIDE and event.get("target_country") in IRAN_SIDE_HOME_ISO:
