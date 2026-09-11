@@ -162,7 +162,12 @@
       "https://iranwire.com/en/feed/",
       "https://www.middleeasteye.net/rss",
       "https://saudigazette.com.sa/rssFeed/74",
-      "https://rss.dw.com/atom/rss-en-all"
+      "https://rss.dw.com/atom/rss-en-all",
+      "https://www.radiotamazuj.org/en/feed",
+      "https://www.sudanspost.com/feed/",
+      "https://www.zitamar.com/rss/",
+      "https://clubofmozambique.com/feed/",
+      "https://addisfortune.news/feed"
     ],
     "news_queries": [
       "https://news.google.com/rss/search?q=Iran%20Israel%20war%20military%20when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",

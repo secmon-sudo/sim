@@ -1,0 +1,68 @@
+name: SIM Feed Probe
+
+# Test a candidate source from where production actually fetches.
+#
+# Dispatch-only, because this is a tool you reach for while evaluating a source
+# list, not something to run on a timer.
+#
+# It exists because on 2026-09-11 a research list of 36 feeds — every one marked
+# "verified, valid XML, current items" — was checked against this pipeline's own
+# fetcher and four answered 403, three refused the connection, three served items
+# months or years old, and of 218 items fetched exactly ten cleared the ingest
+# keyword gate. The runner's IP is the one that matters for a 403, and the
+# keyword gate is the only yield number worth having, so both are measured here
+# rather than on a laptop.
+#
+# Needs no secrets: it fetches public RSS and writes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "Candidate feed URLs, separated by spaces or commas"
+        required: false
+        default: ""
+      from_config:
+        description: "Also re-probe every feed already in publisher_feeds"
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: feed-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # Dozens of feeds at a 30s timeout each, sequentially. The ceiling stops one
+    # hanging host from holding a runner.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Probe feeds
+        run: |
+          python -m scripts.probe_feeds \
+            --urls "${{ github.event.inputs.urls }}" \
+            ${{ github.event.inputs.from_config == 'true' && '--from-config' || '' }} \
+            2>&1 | tee feed_probe.log
+
+      - name: Upload probe log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed-probe-${{ github.run_number }}
+          path: feed_probe.log
+          retention-days: 30
