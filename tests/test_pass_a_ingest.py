@@ -247,6 +247,52 @@ class TestInterleavePriority:
         assert first_round == {"a.com", "b.com"}
 
 
+class TestBudgetCutTelemetry:
+    """The per-run budget is the pipeline's largest filter — measured 2026-09-11
+    it left 285 to 1,159 candidates behind every run while inserting 100 — and
+    until this it recorded only the best priority among them. A count cannot say
+    whether a dropped candidate was a real event, and a capped item is never
+    inserted, so there is no row to go back to."""
+
+    ITEMS = [
+        {"_priority": 0, "domain": "a.com", "title": "Council meeting notes"},
+        {"_priority": 3, "domain": "b.com", "title": "Ambush kills nine soldiers"},
+        {"_priority": 1, "domain": "c.com", "title": "Fuel prices rise"},
+        {"_priority": 3, "domain": "d.com", "title": "Airport closed after blast"},
+    ]
+
+    def test_the_histogram_counts_every_band(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_telemetry
+        count, hist, _ = _budget_cut_telemetry(self.ITEMS)
+        assert count == 4
+        assert hist == {"0": 1, "1": 1, "3": 2}
+
+    def test_the_sample_leads_with_the_highest_priority(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_telemetry
+        _, _, sample = _budget_cut_telemetry(self.ITEMS)
+        assert [s["p"] for s in sample] == [3, 3, 1, 0]
+        assert "Ambush" in sample[0]["t"] or "Airport" in sample[0]["t"]
+
+    def test_the_sample_is_bounded(self):
+        """Ten titles a run is telemetry; a thousand is a second copy of the
+        corpus in system_telemetry."""
+        from src.pipeline.pass_a_ingest import _budget_cut_telemetry, _BUDGET_CUT_SAMPLE
+        many = [{"_priority": 2, "domain": "x.com", "title": f"item {i}"}
+                for i in range(500)]
+        _, _, sample = _budget_cut_telemetry(many)
+        assert len(sample) == _BUDGET_CUT_SAMPLE
+
+    def test_a_missing_field_does_not_crash_the_run(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_telemetry
+        count, hist, sample = _budget_cut_telemetry([{}])
+        assert count == 1 and hist == {"0": 1}
+        assert sample[0] == {"p": 0, "d": "", "t": ""}
+
+    def test_an_empty_remainder_is_empty(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_telemetry
+        assert _budget_cut_telemetry([]) == (0, {}, [])
+
+
 class TestNoiseRegressions:
     def test_shares_border_is_not_financial_noise(self):
         # "shares" was removed from noise_filters: it word-boundary-matched

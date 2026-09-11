@@ -506,6 +506,32 @@ def _round_robin(buckets: list[list[dict]], epoch_min: datetime) -> list[dict]:
         depth += 1
 
 
+# How many of the cut candidates to keep titles for. The histogram says how many
+# were dropped and at what score; it cannot say whether any of them was a real
+# event, and nothing else can either — a capped item is never inserted, so it
+# leaves no row to inspect afterwards. Measured 2026-09-11: the cap leaves 285 to
+# 1,159 candidates behind per run, 17 to 112 of them scoring 2 or 3. Judging
+# whether max_events_per_run is a sane ceiling or the pipeline's most expensive
+# silent filter means reading the best of what it threw away.
+_BUDGET_CUT_SAMPLE = 10
+
+
+def _budget_cut_telemetry(leftover: list[dict]) -> tuple[int, dict, list[dict]]:
+    """(count, priority histogram, the best few titles) for what the cap dropped."""
+    histogram: dict = {}
+    for item in leftover:
+        key = str(item.get("_priority", 0))
+        histogram[key] = histogram.get(key, 0) + 1
+    best = sorted(leftover, key=lambda it: -(it.get("_priority", 0)))
+    sample = [
+        {"p": item.get("_priority", 0),
+         "d": (item.get("domain") or "")[:40],
+         "t": (item.get("title") or "")[:110]}
+        for item in best[:_BUDGET_CUT_SAMPLE]
+    ]
+    return len(leftover), histogram, sample
+
+
 def _interleave_by_domain(items: list[dict]) -> list[dict]:
     """
     Order candidates for the per-run insert budget: importance across bands, source
@@ -628,8 +654,11 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # (it fails open, silently by design); pool and lookups both >0 with zero
         # hits means the two sides are building the key differently.
         # What the per-run budget left on the floor. Zero means the run finished
-        # its candidate list; anything else is the size of the remainder.
+        # its candidate list; anything else is the size of the remainder. The
+        # sample carries the ten best of it — a count cannot tell you whether a
+        # dropped candidate was a real event, and a capped item leaves no row.
         "priority_dropped_count": 0,
+        "priority_dropped_sample": [],
         "exact_title_pool": 0,
         "exact_title_lookups": 0,
         # Why the fetch window was drained. The first parallel run cut article_fetch
@@ -904,12 +933,13 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 # unanswerable question was the size of the remainder: five items
                 # or five hundred changes whether max_events_per_run is a
                 # reasonable ceiling or the pipeline's largest silent filter.
-                stats["priority_dropped_count"] = len(leftover)
-                histogram: dict = {}
-                for pending_item in leftover:
-                    key = str(pending_item.get("_priority", 0))
-                    histogram[key] = histogram.get(key, 0) + 1
+                count, histogram, sample = _budget_cut_telemetry(leftover)
+                stats["priority_dropped_count"] = count
                 stats["priority_dropped_hist"] = histogram
+                stats["priority_dropped_sample"] = sample
+                for entry in sample[:5]:
+                    logger.info("Budget cut p=%s %.40s | %.90s",
+                                entry["p"], entry["d"], entry["t"])
             break
 
         url = item.get("link", "")
