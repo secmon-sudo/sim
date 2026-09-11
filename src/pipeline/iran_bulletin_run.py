@@ -64,7 +64,11 @@ def _save(db_conn, window_start, window_end, status: str,
             {"title": ev.get("title"), "country_iso": ev.get("country_iso"),
              "actor": ev.get("actor"), "target_country": ev.get("target_country"),
              "standing": ev.get("standing"), "outlet_count": ev.get("outlet_count"),
-             "severity": ev.get("severity"), "domain": ev.get("domain")}
+             "severity": ev.get("severity"), "domain": ev.get("domain"),
+             # The heading the bullet was filed under, and how many filings it
+             # stands for. Both were needed to audit the 11 Sep bulletin and
+             # neither was saved, so the audit had to re-derive them.
+             "place": ev.get("place"), "merged_filings": ev.get("merged_filings")}
             for ev in sections.get(key, [])
         ]
         for key in (SECTION_ON_IRAN, SECTION_FROM_IRAN, SECTION_REGIONAL)

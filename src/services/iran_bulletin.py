@@ -277,6 +277,142 @@ def collapse_by_storyline(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return collapsed
 
 
+# Weakest first. A merged filing takes the weakest standing of its members: six
+# rows about one strike arrived on 11 Sep 2026 tagged four "claimed" and two
+# "confirmed", and picking the strongest of those is how a claim becomes a fact.
+_STANDING_STRENGTH = {
+    STANDING_DENIED: 0, STANDING_CLAIMED: 1, STANDING_UNKNOWN: 2,
+    STANDING_CONFIRMED: 3,
+}
+
+_CLUSTER_SYSTEM_PROMPT = (
+    "You group news headlines that report the SAME single incident. "
+    "You answer with JSON only."
+)
+
+
+def _cluster_prompt(events: List[Dict[str, Any]]) -> str:
+    lines = [
+        "Below are headlines from one 24-hour window, all about the same theatre. "
+        "Group the ones that report the SAME single incident — the same attack, the "
+        "same strike, the same seizure. Different incidents stay in their own group, "
+        "even when they are similar in kind or happened in the same country.",
+        "",
+        'Reply with JSON only: {"groups":[[1,4],[2],[3,5,6]]} — every number must '
+        "appear exactly once.",
+        "",
+    ]
+    for i, event in enumerate(events, 1):
+        lines.append(f"{i}. {event.get('title', '')}")
+    return "\n".join(lines)
+
+
+def _parse_groups(content: str, expected: int) -> Optional[List[List[int]]]:
+    """Read the clusterer's reply, or None if it cannot be trusted.
+
+    Every index exactly once is not pedantry: a reply that drops an index would
+    silently delete an event from the report, and one that repeats an index would
+    print it twice. Either way the safe answer is to group nothing.
+    """
+    start, end = content.find("{"), content.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(content[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    groups = parsed.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return None
+    seen: set = set()
+    cleaned: List[List[int]] = []
+    for group in groups:
+        if not isinstance(group, list) or not group:
+            return None
+        members = []
+        for raw in group:
+            try:
+                idx = int(raw) - 1
+            except (TypeError, ValueError):
+                return None
+            if not 0 <= idx < expected or idx in seen:
+                return None
+            seen.add(idx)
+            members.append(idx)
+        cleaned.append(members)
+    if len(seen) != expected:
+        return None
+    return cleaned
+
+
+def merge_same_incident(router: LLMRouter, events: List[Dict[str, Any]],
+                        db_conn=None, call_llm_fn=call_llm) -> List[Dict[str, Any]]:
+    """Collapse filings of one incident that the storyline linker left apart.
+
+    collapse_by_storyline already merges on storyline_id, and on 11 Sep 2026 that
+    took 156 filings down to 51 stories — and still handed the narrator SIX rows
+    for a single Iranian strike on a Jordanian airbase, because the linker had
+    given them six different storyline_ids. The narrator wrote six bullets, four
+    of them tagged "Tek taraflı iddia" and two "Doğrulandı", about one event.
+
+    Neither deterministic tool reaches this. Title similarity does not: "Iran
+    Strike On Jordan Base Damages US Warplanes" and "U.S. A-10 Warthog and F-15
+    Strike Eagles Damaged in Iranian Missile Attack" are the same incident and
+    share almost no wording. Grouping by (section, country) would merge two
+    genuinely different strikes on the same country on the same day.
+
+    So it is asked, once per section — three calls a day against a report that
+    already spends a dozen. Probed 2026-09-11 on the real 18-event section: the
+    six Jordan filings came back as one group, the three Houthi/Saudi filings as
+    another, and the unrelated events stayed single.
+
+    Fails open in every direction: a refusal, an unparseable reply, or an index
+    that appears twice leaves the list exactly as it arrived.
+    """
+    if len(events) < 2:
+        return events
+    try:
+        result = call_llm_fn(router, _cluster_prompt(events),
+                             system_prompt=_CLUSTER_SYSTEM_PROMPT,
+                             max_tokens=40 * len(events) + 256,
+                             purpose="bulletin_cluster")
+    except Exception:
+        logger.exception("Bulletin incident clustering failed; leaving events apart")
+        counters.bump(counters.BULLETIN_CLUSTER_FAILED)
+        return events
+    if db_conn is not None:
+        log_llm_telemetry(db_conn, result, router, success=True,
+                          purpose="bulletin_cluster")
+    groups = _parse_groups(result.get("content", ""), len(events))
+    if groups is None:
+        logger.warning("Bulletin clusterer reply unusable; leaving events apart")
+        counters.bump(counters.BULLETIN_CLUSTER_FAILED)
+        return events
+
+    merged: List[Dict[str, Any]] = []
+    for group in groups:
+        members = [events[i] for i in group]
+        if len(members) == 1:
+            merged.append(members[0])
+            continue
+        # The representative is the most-corroborated member, then the most
+        # severe — the row a reader is most likely to have seen elsewhere.
+        rep = dict(max(members, key=lambda e: (e.get("outlet_count") or 0,
+                                               e.get("severity") or 0)))
+        rep["outlet_count"] = sum(m.get("outlet_count") or 1 for m in members)
+        rep["severity"] = max((m.get("severity") or 0) for m in members)
+        rep["standing"] = min(
+            (m.get("standing") or STANDING_UNKNOWN for m in members),
+            key=lambda st: _STANDING_STRENGTH.get(st, 2))
+        rep["merged_filings"] = len(members)
+        merged.append(rep)
+        counters.bump(counters.BULLETIN_FILINGS_MERGED, len(members) - 1)
+    if len(merged) < len(events):
+        logger.info("Bulletin: %d filings merged into %d incidents",
+                    len(events), len(merged))
+    return merged
+
+
 def _extraction_prompt(events: List[Dict[str, Any]]) -> str:
     lines = [
         "For each numbered headline, name the actor that CARRIED OUT the action and "
@@ -707,7 +843,8 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "- Rapor İKİ DÜZEYLİDİR. Önce bölüm başlığı: verideki bölüm adını TAMAMI "
         "BÜYÜK HARF, tek satır, birebir yaz. Altına o bölümün yer başlıklarını ve "
         "maddelerini koy. Veride dolu olan HER bölüm raporda kendi başlığıyla yer "
-        "almalı; bölüm başlıklarını atlayıp doğrudan yer başlıklarına geçme.",
+        "almalı; bölüm başlıklarını atlayıp doğrudan yer başlıklarına geçme. "
+        "Verisi BOŞ olan bölümü hiç yazma — başlığı da yazma.",
         "- İlk bölüm YÖNETİCİ ÖZETİ olsun: 2-3 paragraf, madde işareti yok.",
         "- Maddeleri verideki 'yer' alanına göre grupla ve her grubun başına o "
         "yeri kısa bir satır olarak yaz (nokta ile bitmesin). Yer başlığını "
@@ -732,7 +869,9 @@ def _narrative_prompt(sections: Dict[str, List[Dict[str, Any]]],
         "- Fail alanı 'belirsiz' olan olaylarda kimseye fail atfetme; olayı "
         "failsiz anlat.",
         "- Veri alanlarını olduğu gibi cümleye kopyalama; hepsi Türkçe "
-        "yazılacak.",
+        "yazılacak. Alan ADLARINI da yazma: 'fail olarak X gösterildi', "
+        "'durum alanı', 'siddet' gibi ifadeler veri şemasıdır, haber değil — "
+        "faili cümlenin öznesi yap.",
         "- Verideki sayıları değiştirme, yuvarlama, TOPLAMA. Sayıları rakamla "
         "yaz (beş değil 5). Veride olmayan bir sayıyı yazma.",
         "- Aynı olay birden çok başlıkta geçebilir; bunlar AYRI olaylar DEĞİL, "
@@ -966,6 +1105,15 @@ def build_bulletin(db_conn, router: LLMRouter, window_start: datetime,
                     len(dropped), len(events),
                     "; ".join((e.get("title") or "")[:60] for e in dropped[:3]))
     events = kept
+    # Clustered per section rather than over the whole day: the question "is this
+    # the same incident" only makes sense inside one direction, and three small
+    # calls keep the reply short enough to parse. See merge_same_incident.
+    sections = group_into_sections(events)
+    clustered: List[Dict[str, Any]] = []
+    for section_key in (SECTION_ON_IRAN, SECTION_FROM_IRAN, SECTION_REGIONAL):
+        clustered.extend(
+            merge_same_incident(router, sections[section_key], db_conn=db_conn))
+    events = clustered
     sections = group_into_sections(events)
     logger.info(
         "Iran bulletin: %d events — on Iran %d, from Iran %d, regional %d",

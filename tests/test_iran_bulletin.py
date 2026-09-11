@@ -75,6 +75,87 @@ class TestGrouping:
         assert [e["severity"] for e in out[ib.SECTION_FROM_IRAN]] == [60, None]
 
 
+class TestIncidentClustering:
+    """Six rows for one Iranian strike on a Jordanian airbase, four tagged
+    "claimed" and two "confirmed", and a narrator that wrote six contradicting
+    bullets. collapse_by_storyline could not reach it — the linker had given them
+    six storyline_ids — and title similarity cannot either, since "Iran Strike On
+    Jordan Base Damages US Warplanes" and "U.S. A-10 Warthog and F-15 Strike
+    Eagles Damaged in Iranian Missile Attack" share almost no wording."""
+
+    EVENTS = [
+        {"title": "Iran strike on Jordan base damages US warplanes",
+         "standing": ib.STANDING_CLAIMED, "outlet_count": 2, "severity": 80},
+        {"title": "A-10 and F-15 damaged in Iranian missile attack",
+         "standing": ib.STANDING_CONFIRMED, "outlet_count": 5, "severity": 90},
+        {"title": "Kurdish activist dies during IRGC siege",
+         "standing": ib.STANDING_CONFIRMED, "outlet_count": 1, "severity": 40},
+    ]
+
+    def _router(self):
+        return object()
+
+    def _reply(self, body):
+        return lambda *_a, **_k: {"content": body}
+
+    def test_a_merged_incident_keeps_the_weakest_standing(self):
+        """The whole point: one claim among the members makes the merged row a
+        claim. Taking the strongest is how a claim becomes a fact."""
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply('{"groups":[[1,2],[3]]}'))
+        assert len(out) == 2
+        assert out[0]["standing"] == ib.STANDING_CLAIMED
+        assert out[0]["merged_filings"] == 2
+
+    def test_the_representative_is_the_most_corroborated_member(self):
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply('{"groups":[[1,2],[3]]}'))
+        assert "A-10" in out[0]["title"]
+        assert out[0]["outlet_count"] == 7
+        assert out[0]["severity"] == 90
+
+    def test_an_unrelated_event_is_left_alone(self):
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply('{"groups":[[1,2],[3]]}'))
+        assert out[1]["title"].startswith("Kurdish activist")
+        assert "merged_filings" not in out[1]
+
+    def test_a_dropped_index_groups_nothing(self):
+        """A reply that forgets an index would delete that event from the report.
+        Refusing the whole reply is the only safe reading."""
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply('{"groups":[[1,2]]}'))
+        assert out == self.EVENTS
+
+    def test_a_repeated_index_groups_nothing(self):
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply('{"groups":[[1,2],[2,3]]}'))
+        assert out == self.EVENTS
+
+    def test_an_unparseable_reply_fails_open(self):
+        out = ib.merge_same_incident(self._router(), self.EVENTS,
+                                     call_llm_fn=self._reply("sorry, no JSON here"))
+        assert out == self.EVENTS
+
+    def test_a_raising_model_fails_open(self):
+        def boom(*_a, **_k):
+            raise RuntimeError("router exhausted")
+
+        assert ib.merge_same_incident(self._router(), self.EVENTS,
+                                      call_llm_fn=boom) == self.EVENTS
+
+    def test_a_single_event_is_not_worth_a_call(self):
+        called = []
+
+        def spy(*_a, **_k):
+            called.append(1)
+            return {"content": '{"groups":[[1]]}'}
+
+        assert ib.merge_same_incident(self._router(), self.EVENTS[:1],
+                                      call_llm_fn=spy) == self.EVENTS[:1]
+        assert not called
+
+
 class TestNonKineticRouting:
     """The nuclear file joined the report on 2026-09-11; the sections are titled
     SALDIRILAR. A Security Council referral belongs in the bulletin — it is what

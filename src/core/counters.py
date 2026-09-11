@@ -85,3 +85,14 @@ BULLETIN_DIRECTION_BATCH_FAILED = "bulletin_direction_batch_failed"
 # section, so the report renders perfectly while saying less and less. This is
 # how 51 of 73 events lost their actor on 5 Sep with nothing in the logs.
 BULLETIN_DIRECTION_SHORT_REPLY = "bulletin_direction_short_reply"
+
+# Filings of one incident that the storyline linker left apart and the incident
+# clusterer merged. On 11 Sep 2026 six separate rows described a single Iranian
+# strike on a Jordanian airbase — four tagged "claimed", two "confirmed" — and the
+# narrator dutifully wrote six bullets that contradicted each other. A zero here
+# for a busy day means the clusterer stopped working, not that the corpus got tidy.
+BULLETIN_FILINGS_MERGED = "bulletin_filings_merged"
+
+# The clusterer refused to answer or its reply could not be used. Fails open: the
+# events go to the narrator ungrouped, exactly as they did before it existed.
+BULLETIN_CLUSTER_FAILED = "bulletin_cluster_failed"
