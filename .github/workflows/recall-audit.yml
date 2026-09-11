@@ -1,0 +1,86 @@
+name: SIM Recall Audit
+
+# Monthly measurement of what SIM never saw.
+#
+# Every other measurement in this repo is taken on SIM's own output: the feedback
+# buttons judge the cards that were sent, the vocabulary audit judges the
+# rejections that were made, the dedup replay judges whether a verdict moved. None
+# of them can see an event that never entered the corpus, because it leaves no
+# trace there.
+#
+# This job compares SIM against an outside record — the UCDP Candidate Events
+# Dataset, researcher-coded and published monthly under CC BY 4.0. The lag that
+# makes it useless as an ingest source (a month behind, against a pipeline that
+# pages in hours) is what makes it a clean benchmark.
+#
+# First measurement, 2026-09-11 on the July release: of 85 country-days carrying a
+# 10+ death event, SIM had nothing at all on 14, and the breakdown said where —
+# Ethiopia 5 of 5 blind, Burkina Faso 3 of 4.
+#
+# Read-only apart from one telemetry row. No Telegram: there is no separate ops
+# channel by design, and a monthly number does not belong in the alerts feed —
+# read it from the log artifact or from system_telemetry.
+on:
+  schedule:
+    # 20th of the month, after UCDP's release has landed and clear of the 05:00
+    # Monday vocabulary audit and the 07:30 SITREP.
+    - cron: '40 5 20 * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Monthly UCDP release (e.g. 26.0.7) — blank finds the newest"
+        required: false
+        default: ""
+      min_deaths:
+        description: "Reference threshold: events with at least this many deaths"
+        required: true
+        default: "10"
+      dry_run:
+        description: "Print only — no telemetry row"
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: recall-audit
+  cancel-in-progress: false
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    # One ~1.4 MB download and under a hundred single-row queries. The ceiling is
+    # here so a hanging download cannot hold a runner for six hours.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run recall audit
+        run: |
+          python -m scripts.recall_audit \
+            ${{ github.event.inputs.version && format('--version {0}', github.event.inputs.version) || '' }} \
+            --min-deaths "${{ github.event.inputs.min_deaths || '10' }}" \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
+            2>&1 | tee recall_audit.log
+
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recall-audit-${{ github.run_number }}
+          path: recall_audit.log
+          retention-days: 90
