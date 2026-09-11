@@ -627,6 +627,9 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # of lookups are recorded apart from the hits. pool=0 means the fetch died
         # (it fails open, silently by design); pool and lookups both >0 with zero
         # hits means the two sides are building the key differently.
+        # What the per-run budget left on the floor. Zero means the run finished
+        # its candidate list; anything else is the size of the remainder.
+        "priority_dropped_count": 0,
         "exact_title_pool": 0,
         "exact_title_lookups": 0,
         # Why the fetch window was drained. The first parallel run cut article_fetch
@@ -895,6 +898,18 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                     dropped_priority_max,
                     max(it.get("_priority", 0) for it in leftover),
                 )
+                # How MUCH the budget left behind, not just how good the best of
+                # it was. events_inserted has read exactly 100 — the cap — in
+                # every run measured, so the cap always binds and the only
+                # unanswerable question was the size of the remainder: five items
+                # or five hundred changes whether max_events_per_run is a
+                # reasonable ceiling or the pipeline's largest silent filter.
+                stats["priority_dropped_count"] = len(leftover)
+                histogram: dict = {}
+                for pending_item in leftover:
+                    key = str(pending_item.get("_priority", 0))
+                    histogram[key] = histogram.get(key, 0) + 1
+                stats["priority_dropped_hist"] = histogram
             break
 
         url = item.get("link", "")
