@@ -144,6 +144,25 @@ class TestIncidentClustering:
         assert ib.merge_same_incident(self._router(), self.EVENTS,
                                       call_llm_fn=boom) == self.EVENTS
 
+    def test_the_arguments_it_passes_fit_the_real_call_llm(self):
+        """The stub in these tests takes **kwargs; call_llm does not. That
+        difference shipped a TypeError to production on 12 Sep 2026 — every
+        section of the bulletin failed to cluster, and because the failure path
+        is fail-open the report went out looking normal. Bind what this function
+        actually passes against the real signature."""
+        import inspect
+
+        from src.core.llm_client import call_llm as real_call_llm
+
+        captured: dict = {}
+
+        def spy(_router, _prompt, **kwargs):
+            captured.update(kwargs)
+            return {"content": '{"groups":[[1],[2],[3]]}'}
+
+        ib.merge_same_incident(self._router(), self.EVENTS, call_llm_fn=spy)
+        inspect.signature(real_call_llm).bind(object(), "prompt", **captured)
+
     def test_a_single_event_is_not_worth_a_call(self):
         called = []
 

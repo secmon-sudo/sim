@@ -372,10 +372,14 @@ def merge_same_incident(router: LLMRouter, events: List[Dict[str, Any]],
     if len(events) < 2:
         return events
     try:
+        # purpose belongs to log_llm_telemetry below, NOT here: call_llm has no
+        # such parameter, and passing it raised a TypeError on every section of
+        # the 12 Sep bulletin. It failed open, as designed, so the report shipped
+        # and only the degradation counter said anything.
         result = call_llm_fn(router, _cluster_prompt(events),
                              system_prompt=_CLUSTER_SYSTEM_PROMPT,
                              max_tokens=40 * len(events) + 256,
-                             purpose="bulletin_cluster")
+                             json_mode=False)
     except Exception:
         logger.exception("Bulletin incident clustering failed; leaving events apart")
         counters.bump(counters.BULLETIN_CLUSTER_FAILED)
