@@ -517,19 +517,39 @@ _BUDGET_CUT_SAMPLE = 10
 
 
 def _budget_cut_telemetry(leftover: list[dict]) -> tuple[int, dict, list[dict]]:
-    """(count, priority histogram, the best few titles) for what the cap dropped."""
+    """(count, priority histogram, the highest-priority few items) for the cut."""
     histogram: dict = {}
     for item in leftover:
         key = str(item.get("_priority", 0))
         histogram[key] = histogram.get(key, 0) + 1
     best = sorted(leftover, key=lambda it: -(it.get("_priority", 0)))
-    sample = [
-        {"p": item.get("_priority", 0),
-         "d": (item.get("domain") or "")[:40],
-         "t": (item.get("title") or "")[:110]}
-        for item in best[:_BUDGET_CUT_SAMPLE]
-    ]
-    return len(leftover), histogram, sample
+    return len(leftover), histogram, best[:_BUDGET_CUT_SAMPLE]
+
+
+def _budget_cut_is_novel(item: dict, recent_events: list, exact_titles: dict) -> bool:
+    """True when nothing like this dropped candidate is already in the corpus.
+
+    The raw cut count reads as loss and is not. The budget check sits at the TOP
+    of the loop, before the duplicate test, so the remainder is full of filings of
+    stories already ingested. Checked by hand on 2026-09-12 against the four
+    highest-priority items the cap dropped overnight: the Mokha port seizure was
+    already in the corpus six times and had paged twice, the Hormuz vessel
+    redirection was there, the Greek air-defence story was there from the
+    previous run — three of four were duplicates the cap discarded harmlessly.
+
+    So the number worth having is not how many were cut but how many were NEW,
+    and both structures needed to answer it are already loaded in this function.
+    The candidate has no article body yet, only its feed description, which makes
+    this an estimate: it can call something new that a fetched body would have
+    matched. It errs toward reporting loss, which is the right direction for a
+    number that decides whether to spend more of the run's budget.
+    """
+    title = item.get("title", "")
+    key = normalize_title(title)
+    if len(key) >= _EXACT_TITLE_MIN_LEN and key in exact_titles:
+        return False
+    canonical = canonicalize_text(item.get("description") or "")
+    return find_content_duplicate(recent_events, title, canonical) is None
 
 
 def _interleave_by_domain(items: list[dict]) -> list[dict]:
@@ -659,6 +679,10 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
         # dropped candidate was a real event, and a capped item leaves no row.
         "priority_dropped_count": 0,
         "priority_dropped_sample": [],
+        # Of the sampled cut items, how many are NOT already in the corpus. The
+        # raw count is not loss: the budget check runs before the duplicate test,
+        # so most of the remainder are filings of stories already ingested.
+        "priority_dropped_novel": 0,
         "exact_title_pool": 0,
         "exact_title_lookups": 0,
         # Why the fetch window was drained. The first parallel run cut article_fetch
@@ -933,13 +957,21 @@ def run_pass_a(db_conn, max_events: int | None = None) -> dict:
                 # unanswerable question was the size of the remainder: five items
                 # or five hundred changes whether max_events_per_run is a
                 # reasonable ceiling or the pipeline's largest silent filter.
-                count, histogram, sample = _budget_cut_telemetry(leftover)
+                count, histogram, best = _budget_cut_telemetry(leftover)
                 stats["priority_dropped_count"] = count
                 stats["priority_dropped_hist"] = histogram
+                sample = []
+                for item in best:
+                    novel = _budget_cut_is_novel(item, recent_events, exact_titles)
+                    sample.append({"p": item.get("_priority", 0),
+                                   "d": (item.get("domain") or "")[:40],
+                                   "t": (item.get("title") or "")[:110],
+                                   "new": novel})
                 stats["priority_dropped_sample"] = sample
+                stats["priority_dropped_novel"] = sum(1 for e in sample if e["new"])
                 for entry in sample[:5]:
-                    logger.info("Budget cut p=%s %.40s | %.90s",
-                                entry["p"], entry["d"], entry["t"])
+                    logger.info("Budget cut p=%s new=%s %.40s | %.90s",
+                                entry["p"], entry["new"], entry["d"], entry["t"])
             break
 
         url = item.get("link", "")

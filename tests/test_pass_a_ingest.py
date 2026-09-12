@@ -269,9 +269,9 @@ class TestBudgetCutTelemetry:
 
     def test_the_sample_leads_with_the_highest_priority(self):
         from src.pipeline.pass_a_ingest import _budget_cut_telemetry
-        _, _, sample = _budget_cut_telemetry(self.ITEMS)
-        assert [s["p"] for s in sample] == [3, 3, 1, 0]
-        assert "Ambush" in sample[0]["t"] or "Airport" in sample[0]["t"]
+        _, _, best = _budget_cut_telemetry(self.ITEMS)
+        assert [i["_priority"] for i in best] == [3, 3, 1, 0]
+        assert "Ambush" in best[0]["title"] or "Airport" in best[0]["title"]
 
     def test_the_sample_is_bounded(self):
         """Ten titles a run is telemetry; a thousand is a second copy of the
@@ -284,9 +284,45 @@ class TestBudgetCutTelemetry:
 
     def test_a_missing_field_does_not_crash_the_run(self):
         from src.pipeline.pass_a_ingest import _budget_cut_telemetry
-        count, hist, sample = _budget_cut_telemetry([{}])
+        count, hist, best = _budget_cut_telemetry([{}])
         assert count == 1 and hist == {"0": 1}
-        assert sample[0] == {"p": 0, "d": "", "t": ""}
+        assert best == [{}]
+
+
+class TestBudgetCutNovelty:
+    """The raw cut count reads as loss and is not: the budget check runs before
+    the duplicate test, so the remainder is full of filings already in the corpus.
+    Checked by hand 2026-09-12 — three of the four highest-priority items the cap
+    dropped overnight were stories SIM had already ingested, one of them six times
+    with two cards sent."""
+
+    def test_an_identical_headline_already_in_the_corpus_is_not_new(self):
+        from src.pipeline.ingest_filters import normalize_title
+        from src.pipeline.pass_a_ingest import _budget_cut_is_novel
+        title = "Houthis capture one of Yemen's key ports of Mokha"
+        index = {normalize_title(title): ("id", "a.com", title, "")}
+        assert not _budget_cut_is_novel({"title": title}, [], index)
+
+    def test_a_reworded_filing_of_a_stored_story_is_not_new(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_is_novel
+        stored = [("Houthis seize key Red Sea port city of Mocha", "", "")]
+        item = {"title": "Houthis seize key Red Sea port city of Mocha - Reuters",
+                "description": ""}
+        assert not _budget_cut_is_novel(item, stored, {})
+
+    def test_an_unseen_story_is_new(self):
+        from src.pipeline.pass_a_ingest import _budget_cut_is_novel
+        stored = [("Houthis seize key Red Sea port city of Mocha", "", "")]
+        item = {"title": "IDF kills Hamas sniper commander in Gaza",
+                "description": ""}
+        assert _budget_cut_is_novel(item, stored, {})
+
+    def test_an_empty_corpus_calls_everything_new(self):
+        """Errs toward reporting loss, which is the right direction for a number
+        that decides whether to spend more of the run's budget."""
+        from src.pipeline.pass_a_ingest import _budget_cut_is_novel
+        assert _budget_cut_is_novel({"title": "Anything at all happened today"},
+                                    [], {})
 
     def test_an_empty_remainder_is_empty(self):
         from src.pipeline.pass_a_ingest import _budget_cut_telemetry
