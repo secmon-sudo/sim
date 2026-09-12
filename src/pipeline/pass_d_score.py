@@ -19,6 +19,7 @@ from src.core.alerts import (
     build_event_suppression_key,
     build_geo_suppression_key,
     build_suppression_key,
+    critical_notnews_is_redundant,
     evaluate_alert_tier_verbose,
     recent_paged_alerts,
     record_suppression,
@@ -793,6 +794,18 @@ def dispatch_alert(db_conn, event: dict, event_id: str, dup_adjudicator=None) ->
         logger.info("Alert suppressed for %s: this event already paged", event_id[:8])
         return "suppressed_rescore"
 
+    # Layer 0.5: CRITICAL's not-news exemption, conditioned on there being news.
+    # A follow-up or roundup pages at CRITICAL because it may be the only carrier of
+    # a major development — an argument that dies once a card for the same storyline
+    # has already gone out. Checked here rather than in evaluate_alert_tier because
+    # it needs the database and only ~10 cards a day can reach it. See
+    # critical_notnews_is_redundant.
+    if critical_notnews_is_redundant(db_conn, event, event.get("alert_tier")):
+        logger.info("Alert suppressed for %s: %s on a storyline already carded",
+                    event_id[:8], (event.get("report_kind")
+                                   or (event.get("llm_parsed") or {}).get("report_kind")))
+        return "suppressed_notnews"
+
     supp_key = build_suppression_key(event)
     # Storyline-independent safety net: mutes same-place duplicates even when the
     # storyline_id fragments across paraphrased sources (None if no location).
@@ -1259,6 +1272,10 @@ def run_pass_d(db_conn) -> dict:
         # falls to zero and stays there means the layer stopped being reached, which is
         # worth noticing — it was five cards a night before it existed.
         "rescore_pages_suppressed": 0,
+        # CRITICAL follow-ups and roundups withheld because their storyline had
+        # already sent a card. Measured 2026-09-12 over 7 days: 49 of the 53 cards
+        # the CRITICAL exemption let through were this. Bkz. CRITICAL_NOTNEWS_KINDS.
+        "notnews_pages_suppressed": 0,
         # Tiers the article-shape gates vetoed, by gate. Without this a veto is
         # indistinguishable from an event that never qualified, so neither gate could be
         # tuned on anything but log-reading.
@@ -1393,6 +1410,8 @@ def run_pass_d(db_conn) -> dict:
                     stats["duplicate_pages_suppressed"] += 1
                 elif result.get("dispatch_result") == "suppressed_rescore":
                     stats["rescore_pages_suppressed"] += 1
+                elif result.get("dispatch_result") == "suppressed_notnews":
+                    stats["notnews_pages_suppressed"] += 1
                 veto = result.get("alert_veto")
                 if veto:
                     stats["alert_vetoes"][veto] = stats["alert_vetoes"].get(veto, 0) + 1

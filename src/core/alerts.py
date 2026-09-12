@@ -212,6 +212,68 @@ REPORT_KIND_NOT_NEWS = frozenset({"followup", "roundup", "commentary"})
 # Narrow on purpose. 19 events over seven days, about 4 cards after suppression.
 CRITICAL_VETOED_REPORT_KINDS = frozenset({"commentary"})
 
+# The two kinds CRITICAL still lets through — and the condition that makes the
+# exemption honest.
+#
+# The exemption's own words: "a roundup is sometimes the only carrier of a
+# genuinely major development, and missing that costs more than the noise it lets
+# through." That argument is about a development we have NOT otherwise heard —
+# and it stops being true the moment a card for the same storyline has already
+# gone out. A follow-up on a story the reader was carded on two hours ago carries
+# no development at all; it is the same development, filed again.
+#
+# Measured 2026-09-12 over seven days: 53 CRITICAL cards carried one of these two
+# kinds, and 49 of them belonged to a storyline that had ALREADY paged. Four were
+# the first card of their story — the case the exemption was written for. So the
+# exemption is kept and made conditional, which removes about seven cards a day
+# and loses nothing the rule was meant to protect.
+CRITICAL_NOTNEWS_KINDS = frozenset({"followup", "roundup"})
+
+# How far back to look for that first card. A day: long enough to cover a strike
+# wave that runs overnight, short enough that a story genuinely returning after a
+# week pages again.
+STORYLINE_PAGED_WINDOW_HOURS = 24
+
+
+def storyline_already_paged(db_conn, storyline_id, event_id,
+                            hours: int = STORYLINE_PAGED_WINDOW_HOURS) -> bool:
+    """Has any OTHER event in this storyline already sent a card recently?
+
+    Fails open — any error answers False, which sends the card. The whole point of
+    this predicate is to withhold something redundant, and withholding on a failed
+    query would silence a real page for the wrong reason.
+    """
+    if not storyline_id:
+        return False
+    try:
+        row = db_conn.execute(
+            """SELECT 1 FROM events
+                WHERE storyline_id = %s
+                  AND id <> %s
+                  AND alert_tier IS NOT NULL AND alert_tier <> 'NONE'
+                  AND ingested_at > NOW() - (%s * INTERVAL '1 hour')
+                LIMIT 1""",
+            (storyline_id, event_id, hours),
+        ).fetchone()
+    except Exception:
+        logger.exception("storyline_already_paged failed; treating as not paged")
+        return False
+    return row is not None
+
+
+def critical_notnews_is_redundant(db_conn, event: dict, tier: str) -> bool:
+    """True when a CRITICAL follow-up or roundup repeats a story already carded."""
+    if tier != "CRITICAL":
+        return False
+    kind = event.get("report_kind")
+    if kind is None:
+        kind = (event.get("llm_parsed") or {}).get("report_kind")
+    if kind not in CRITICAL_NOTNEWS_KINDS:
+        return False
+    return storyline_already_paged(db_conn, event.get("storyline_id"),
+                                   event.get("id") or event.get("event_id"))
+
+
 # Publisher/section suffix: "Headline - Reuters", "Headline | Shafaq News | Latest…".
 # Stripped before the desk-label test so a publisher's tagline cannot trip it.
 _PUBLISHER_SUFFIX_RE = re.compile(r"\s+[-|–—]\s+[^-|–—]*$")
